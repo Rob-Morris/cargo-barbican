@@ -1,0 +1,68 @@
+# Architecture Overview
+
+A portable Rust supply-chain hardening tool. Pure Rust, single versioned
+implementation that every Rust repo in this constellation can install and pin.
+Local use first; public crate later if warranted.
+
+## Why this exists
+
+[undertask](https://github.com/rob-morris/undertask) implements supply-chain
+hardening as Python scripts plus a shell wrapper. The hardening model is sound:
+release-age gating, `--locked` verification, targeted updates, advisory checks,
+and checked-in review records for dependency changes.
+
+The problem is duplication. As soon as multiple Rust repos need the same
+hardening, copy-pasted scripts drift. cargo-barbican exists to replace that
+duplication with one versioned Rust tool that consumer repos can pin and
+re-sync deliberately.
+
+## Goals
+
+1. Single source of truth for this Rust supply-chain hardening workflow.
+2. Pure Rust installation and execution, with no Python prerequisite.
+3. Inherit existing trust decisions from undertask where possible instead of re-reviewing by default.
+4. Match undertask's surface closely enough that existing muscle memory transfers.
+5. Apply the same supply-chain discipline to cargo-barbican itself that it will enforce on consumers.
+
+## Non-goals for v0.1
+
+- Public crates.io release. Local installation via `cargo install --path` or `cargo install --git` is enough.
+- Porting undertask's larger dependency-assessment workflow before the simpler hardening path is working.
+- JavaScript ecosystem support.
+- Multi-workspace orchestration.
+
+## Architectural boundary
+
+The codebase is split into a library crate and a Cargo-subcommand binary from
+the start:
+
+- `crates/barbican/` — pure policy logic, domain types, and HTTP-behind-trait boundaries
+- `crates/cargo-barbican/` — CLI dispatch, subprocess integration, and concrete HTTP implementation
+
+That split keeps the library testable without network access and confines
+shelling out to the binary.
+
+## Dependency model
+
+Every dependency addition or dependency-tool install is documented in
+`docs/dependency-reviews/` before it lands. Most planned dependencies are
+expected to inherit from undertask's existing reviewed set; `ureq` is the main
+planned first-principles review because it defines the HTTP boundary.
+
+## Repo shape
+
+```text
+Cargo.toml              workspace
+rust-toolchain.toml     pinned toolchain
+crates/
+  barbican/             library: types + pure functions, network behind trait
+  cargo-barbican/       binary: CLI dispatch, subprocesses, HTTP impl
+templates/              shipped content copied into consumer repos
+docs/
+  user/                 consumer adoption docs
+  functional/           CLI and behaviour contracts
+  architecture/         goals, boundaries, and design decisions
+  contributor/          implementation plan and repo workflow
+  dependency-reviews/   review records and policy template
+  standards/            adopted documentation standards
+```

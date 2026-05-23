@@ -1,0 +1,20 @@
+[package]
+name = "cargo-barbican"
+version = "0.1.0"
+description = "Cargo subcommand for Rust supply-chain hardening. Invokable as `cargo barbican`."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "cargo-barbican"
+path = "src/main.rs"
+
+[dependencies]
+barbican = { path = "../barbican" }
