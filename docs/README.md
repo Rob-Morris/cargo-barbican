@@ -15,11 +15,14 @@ routes to its artefacts.
 ## Convention-Based Exceptions
 
 - [Contributing](CONTRIBUTING.md) — contributor entry point at the chosen location
+- [Changelog](CHANGELOG.md) — shipped version-history index with per-version files under `changelog/`
 
 ## Shared Standards
 
 - [Standards](standards/README.md) — index of shared standards
 - [Agent-Ready Documentation](standards/agent-ready-documentation.md) — documentation structure standard for agent-effective projects
+- [Changelog](standards/changelog.md) — shipped version-history standard for this repo
+- [Commit Messages](standards/commit-messages.md) — commit-subject and commit-body standard for this repo
 
 The `templates/` directory at the repo root is shipped content copied into
 consumer repos. It is not part of the repo-facing documentation layers.

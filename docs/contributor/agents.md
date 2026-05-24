@@ -3,6 +3,10 @@
 Read [../CONTRIBUTING.md](../CONTRIBUTING.md) first for the repo-level
 documentation structure and maintenance rules.
 
+For commit-time workflow, also read
+[`process.md`](process.md) and
+[`../standards/canary.md`](../standards/canary.md).
+
 Route-map for agents working in this repo. Read
 [`../architecture/overview.md`](../architecture/overview.md) for the
 authoritative design, then
@@ -38,6 +42,12 @@ functional, and contributor docs. This file is a route-map.
   `docs/dependency-reviews/` written **before** the dependency is added.
 - Behaviour matches undertask where the surface overlaps; deviations are
   documented in `docs/functional/cli.md` and `docs/architecture/overview.md`.
+- Shipped repo versions are tracked in `docs/CHANGELOG.md` and
+  `docs/changelog/`, and the two crate manifest versions move together.
+- Commit subjects follow `docs/standards/commit-messages.md`, and versioned
+  commits reuse the canonical changelog `Summary`.
+- The pre-commit canary receipt in `.canary--pre-commit` is transient local
+  state; it must stay unstaged and untracked.
 
 ## Layout
 
@@ -90,6 +100,11 @@ These are the reference. Re-implement faithfully; don't redesign.
 
 1. `cargo build --locked` passes.
 2. `cargo test --locked` passes.
-3. `cargo audit` and `cargo deny check` pass (once deps and `deny.toml`
+3. `cargo audit` and `cargo deny check advisories bans sources` pass (once deps and `deny.toml`
    exist).
 4. Any new dependency has a checked-in review record.
+5. If either crate version changed, `docs/CHANGELOG.md` and the matching
+   `docs/changelog/vX.Y.Z.md` entry changed with it.
+6. `.canaries/pre-commit.md` was followed and `.canary--pre-commit` was
+   written locally, left unstaged, and allowed to be deleted by the hook.
+7. The commit subject matches `docs/standards/commit-messages.md`.

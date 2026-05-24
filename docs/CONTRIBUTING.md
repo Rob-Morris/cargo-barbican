@@ -17,6 +17,11 @@ Start with [README.md](README.md), which routes to the documentation layers:
 - [Contributor](contributor/README.md) — implementation plan and contributor workflow
 - [Standards](standards/README.md) — shared standards adopted by this repo
 
+Convention-based exceptions at the docs root:
+
+- [CHANGELOG.md](CHANGELOG.md) — shipped version-history index
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contributor landing page
+
 When you add, move, remove, or rename docs, update the relevant `README.md`
 indexes so the routing chain stays explicit.
 
@@ -31,6 +36,10 @@ indexes so the routing chain stays explicit.
 | Implementation plan, dependency discipline, or shipped-template boundary changes | `contributor/specification.md` |
 | Repo-specific agent workflow or hard stops | `contributor/agents.md` |
 | Dependency review policy or record format changes | `dependency-reviews/README.md` |
+| Changelog policy or structure changes | `standards/changelog.md`, `standards/README.md`, and `CHANGELOG.md` if the index contract changes |
+| Commit-message policy changes | `standards/commit-messages.md`, `standards/README.md`, and any contributor docs that cite the rule |
+| Canary / hook policy changes | `standards/canary.md`, `standards/README.md`, `contributor/process.md`, and any contributor docs that cite the hook workflow |
+| Shipping a new repo version | crate manifest versions, `CHANGELOG.md`, and `changelog/vX.Y.Z.md` |
 
 ## Dependency Review Discipline
 
@@ -43,9 +52,43 @@ Records may inherit from
 source, version, and trust model match. First-principles reviews are required
 for anything outside that inherited set.
 
+## Version History
+
+Shipped repo history lives in [CHANGELOG.md](CHANGELOG.md) and
+`docs/changelog/`.
+
+For now, the repo version is the shared semver carried by:
+
+- `crates/barbican/Cargo.toml`
+- `crates/cargo-barbican/Cargo.toml`
+
+Those versions should move together. When a shipped version changes, add the
+matching changelog entry in the same change, and use the canonical changelog
+`Summary` as the versioned commit subject per
+[standards/commit-messages.md](standards/commit-messages.md).
+
+## Hook Activation
+
+This repo ships opt-in distributed `pre-commit` and `commit-msg` hooks under
+`tools/git-hooks/`.
+
+Enable them locally with:
+
+```bash
+git config core.hooksPath tools/git-hooks
+```
+
+The hook package is described in:
+
+- [standards/canary.md](standards/canary.md)
+- [contributor/process.md](contributor/process.md)
+
 ## Before Committing
 
 1. `cargo build --locked` passes.
 2. `cargo test --locked` passes.
-3. `cargo audit` and `cargo deny check` pass once the repo has the required tooling and policy files.
+3. `cargo audit` and `cargo deny check advisories bans sources` pass once the repo has the required tooling and policy files.
 4. Any new dependency has a checked-in review record.
+5. If the repo version changed, `CHANGELOG.md` and `docs/changelog/vX.Y.Z.md` were updated together.
+6. Follow [`.canaries/pre-commit.md`](../.canaries/pre-commit.md), write the transient `.canary--pre-commit` receipt, and leave it unstaged.
+7. The commit subject matches [standards/commit-messages.md](standards/commit-messages.md).

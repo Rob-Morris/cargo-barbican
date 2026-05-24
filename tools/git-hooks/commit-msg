@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+MSG_FILE="${1:-}"
+BRANCH="${HOOK_BRANCH_OVERRIDE:-$(git branch --show-current 2>/dev/null || true)}"
+
+sh scripts/check_commit_msg.sh "$MSG_FILE" "$BRANCH"

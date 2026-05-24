@@ -37,10 +37,12 @@ This repo follows the
 
 ## Before Committing
 
-1. `cargo build` and `cargo test` pass.
+1. `cargo build --locked` and `cargo test --locked` pass.
 2. Every dependency added is recorded in `docs/dependency-reviews/`.
-3. `cargo deny check` passes (once `deny.toml` exists).
+3. `cargo deny check advisories bans sources` passes (once `deny.toml` exists).
 4. `cargo audit` passes (once dependencies exist).
+5. Follow `.canaries/pre-commit.md`, write `.canary--pre-commit`, and leave it unstaged.
+6. Commit subjects follow `docs/standards/commit-messages.md`.
 
 ## Local Overrides
 
