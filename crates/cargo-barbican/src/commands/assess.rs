@@ -1,10 +1,12 @@
+use std::fmt::Display;
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, RustAssessmentClassification, RustAssessmentReport, assess_rust_update,
-    parse_cargo_metadata,
+    CratesIoClient, RustAssessmentClassification, RustAssessmentFinding,
+    RustAssessmentFindingCategory, RustAssessmentFindingSeverity, RustAssessmentReport,
+    assess_rust_update, parse_cargo_metadata,
 };
 
 use crate::command_runner::CommandRunner;
@@ -99,7 +101,7 @@ fn render_assessment_report(
     render_assessment_line(
         stdout,
         "new non-crates.io direct specs",
-        report.non_crates_io_direct_dependencies(),
+        &rendered_non_crates_io_direct_dependencies(report),
     )?;
     render_assessment_line(stdout, "age violations", report.age_violations())?;
     render_assessment_line(stdout, "yanked versions", report.yanked_versions())?;
@@ -125,40 +127,121 @@ fn render_assessment_report(
     render_finding_section(
         stdout,
         "Blocking policy findings:",
-        report.blocking_findings(),
+        report,
+        RustAssessmentFindingSeverity::Blocking,
     )?;
-    render_finding_section(stdout, "Elevated-risk signals:", report.elevated_findings())?;
+    render_finding_section(
+        stdout,
+        "Elevated-risk signals:",
+        report,
+        RustAssessmentFindingSeverity::Elevated,
+    )?;
 
-    if report.blocking_findings().is_empty() && report.elevated_findings().is_empty() {
+    if report.findings().is_empty() {
         writeln!(stdout, "No policy findings detected.").map_err(CommandError::Io)?;
     }
 
     Ok(())
 }
-fn render_assessment_line(
+
+fn render_assessment_line<T: Display>(
     stdout: &mut dyn Write,
     label: &str,
-    values: &[String],
+    values: &[T],
 ) -> Result<(), CommandError> {
     if values.is_empty() {
         return Ok(());
     }
 
-    writeln!(stdout, "  - {label}: {}", values.join(", ")).map_err(CommandError::Io)
+    writeln!(stdout, "  - {label}: {}", join_display(values, ", ")).map_err(CommandError::Io)
+}
+
+fn rendered_non_crates_io_direct_dependencies(report: &RustAssessmentReport) -> Vec<String> {
+    report
+        .non_crates_io_direct_dependencies()
+        .iter()
+        .map(|dependency| format!("{dependency} ({})", dependency.source_kind()))
+        .collect()
 }
 
 fn render_finding_section(
     stdout: &mut dyn Write,
     header: &str,
-    findings: &[String],
+    report: &RustAssessmentReport,
+    severity: RustAssessmentFindingSeverity,
 ) -> Result<(), CommandError> {
+    let findings = report
+        .findings()
+        .iter()
+        .copied()
+        .filter(|finding| finding.severity() == severity)
+        .collect::<Vec<_>>();
+
     if findings.is_empty() {
         return Ok(());
     }
 
     writeln!(stdout, "{header}").map_err(CommandError::Io)?;
     for finding in findings {
-        writeln!(stdout, "  - {finding}").map_err(CommandError::Io)?;
+        writeln!(stdout, "  - {}", render_finding_summary(report, finding))
+            .map_err(CommandError::Io)?;
     }
     writeln!(stdout).map_err(CommandError::Io)
+}
+
+fn render_finding_summary(report: &RustAssessmentReport, finding: RustAssessmentFinding) -> String {
+    match finding.category() {
+        RustAssessmentFindingCategory::NewDirectDependencies => format!(
+            "new direct Rust dependencies added: {}",
+            join_display(report.new_direct_dependencies(), ", ")
+        ),
+        RustAssessmentFindingCategory::NonCratesIoDirectDependencies => format!(
+            "new non-crates.io direct Rust dependency specs detected: {}",
+            join_display_with(
+                report.non_crates_io_direct_dependencies(),
+                ", ",
+                |dependency| { format!("{dependency} ({})", dependency.source_kind()) }
+            )
+        ),
+        RustAssessmentFindingCategory::AgeViolations => format!(
+            "newly selected crates.io versions below the minimum age: {}",
+            join_display(report.age_violations(), ", ")
+        ),
+        RustAssessmentFindingCategory::YankedVersions => format!(
+            "newly selected yanked crate versions: {}",
+            join_display(report.yanked_versions(), ", ")
+        ),
+        RustAssessmentFindingCategory::NonCratesIoSourceChanges => format!(
+            "non-crates.io source changes detected: {}",
+            join_display(report.non_crates_io_source_changes(), ", ")
+        ),
+        RustAssessmentFindingCategory::NativeSysCrates => format!(
+            "new native -sys crates introduced: {}",
+            join_display(report.native_sys_crates(), ", ")
+        ),
+        RustAssessmentFindingCategory::BuildRsSurfaces => format!(
+            "new or changed build.rs surface detected: {}",
+            join_display(report.build_rs_surfaces(), ", ")
+        ),
+        RustAssessmentFindingCategory::ProcMacroSurfaces => format!(
+            "new or changed proc-macro surface detected: {}",
+            join_display(report.proc_macro_surfaces(), ", ")
+        ),
+        RustAssessmentFindingCategory::InspectionFailures => format!(
+            "failed to inspect some Rust dependency surfaces: {}",
+            join_display(report.inspection_failures(), "; ")
+        ),
+    }
+}
+
+fn join_display<T: Display>(values: &[T], separator: &str) -> String {
+    join_display_with(values, separator, |value| value.to_string())
+}
+
+fn join_display_with<T>(values: &[T], separator: &str, render: impl Fn(&T) -> String) -> String {
+    values
+        .iter()
+        .map(render)
+        .collect::<Vec<_>>()
+        .join(separator)
 }

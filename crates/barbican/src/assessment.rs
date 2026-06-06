@@ -4,8 +4,8 @@ use std::fmt;
 use time::OffsetDateTime;
 
 use crate::{
-    CargoManifestDependency, CargoMetadata, CratesIoClient, HighScrutinyConfig, Lockfile,
-    ReleaseAgeOutcome, check_release_age_at, package_surfaces,
+    CargoManifestDependency, CargoMetadata, CratesIoClient, ExactCrateSpec, HighScrutinyConfig,
+    Lockfile, ReleaseAgeOutcome, check_release_age_at, package_surfaces,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,28 +25,163 @@ impl fmt::Display for RustAssessmentClassification {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RustAssessmentFindingSeverity {
+    Blocking,
+    Elevated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RustAssessmentFindingCategory {
+    NewDirectDependencies,
+    NonCratesIoDirectDependencies,
+    AgeViolations,
+    YankedVersions,
+    NonCratesIoSourceChanges,
+    NativeSysCrates,
+    BuildRsSurfaces,
+    ProcMacroSurfaces,
+    InspectionFailures,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RustAssessmentFinding {
+    severity: RustAssessmentFindingSeverity,
+    category: RustAssessmentFindingCategory,
+}
+
+impl RustAssessmentFinding {
+    fn blocking(category: RustAssessmentFindingCategory) -> Self {
+        Self {
+            severity: RustAssessmentFindingSeverity::Blocking,
+            category,
+        }
+    }
+
+    fn elevated(category: RustAssessmentFindingCategory) -> Self {
+        Self {
+            severity: RustAssessmentFindingSeverity::Elevated,
+            category,
+        }
+    }
+
+    pub fn severity(&self) -> RustAssessmentFindingSeverity {
+        self.severity
+    }
+
+    pub fn category(&self) -> RustAssessmentFindingCategory {
+        self.category
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReleaseAgeViolation {
+    spec: ExactCrateSpec,
+    age_seconds: i64,
+}
+
+impl ReleaseAgeViolation {
+    fn new(spec: ExactCrateSpec, age_seconds: i64) -> Self {
+        Self { spec, age_seconds }
+    }
+
+    pub fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
+    pub fn age_seconds(&self) -> i64 {
+        self.age_seconds
+    }
+}
+
+impl fmt::Display for ReleaseAgeViolation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} ({} old)",
+            self.spec,
+            crate::format_age(self.age_seconds)
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NonCratesIoSourceChange {
+    spec: ExactCrateSpec,
+    source: String,
+}
+
+impl NonCratesIoSourceChange {
+    fn new(spec: ExactCrateSpec, source: String) -> Self {
+        Self { spec, source }
+    }
+
+    pub fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+}
+
+impl fmt::Display for NonCratesIoSourceChange {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} source={}", self.spec, self.source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct InspectionFailure {
+    spec: ExactCrateSpec,
+    detail: String,
+}
+
+impl InspectionFailure {
+    fn new(spec: ExactCrateSpec, detail: String) -> Self {
+        Self { spec, detail }
+    }
+
+    pub fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
+}
+
+impl fmt::Display for InspectionFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}: {}", self.spec, self.detail)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustAssessmentReport {
     newly_selected_lock_entries: usize,
     newly_introduced_crate_names: usize,
-    new_direct_dependencies: Vec<String>,
-    non_crates_io_direct_dependencies: Vec<String>,
-    age_violations: Vec<String>,
-    yanked_versions: Vec<String>,
-    non_crates_io_source_changes: Vec<String>,
-    native_sys_crates: Vec<String>,
-    build_rs_surfaces: Vec<String>,
-    proc_macro_surfaces: Vec<String>,
-    inspection_failures: Vec<String>,
-    blocking_findings: Vec<String>,
-    elevated_findings: Vec<String>,
+    new_direct_dependencies: Vec<CargoManifestDependency>,
+    non_crates_io_direct_dependencies: Vec<CargoManifestDependency>,
+    age_violations: Vec<ReleaseAgeViolation>,
+    yanked_versions: Vec<ExactCrateSpec>,
+    non_crates_io_source_changes: Vec<NonCratesIoSourceChange>,
+    native_sys_crates: Vec<ExactCrateSpec>,
+    build_rs_surfaces: Vec<ExactCrateSpec>,
+    proc_macro_surfaces: Vec<ExactCrateSpec>,
+    inspection_failures: Vec<InspectionFailure>,
+    findings: Vec<RustAssessmentFinding>,
 }
 
 impl RustAssessmentReport {
     pub fn classification(&self) -> RustAssessmentClassification {
-        if !self.blocking_findings.is_empty() {
+        if self
+            .findings
+            .iter()
+            .any(|finding| finding.severity == RustAssessmentFindingSeverity::Blocking)
+        {
             RustAssessmentClassification::PolicyViolating
-        } else if !self.elevated_findings.is_empty() {
+        } else if !self.findings.is_empty() {
             RustAssessmentClassification::ElevatedRisk
         } else {
             RustAssessmentClassification::RoutineSafe
@@ -61,48 +196,44 @@ impl RustAssessmentReport {
         self.newly_introduced_crate_names
     }
 
-    pub fn new_direct_dependencies(&self) -> &[String] {
+    pub fn new_direct_dependencies(&self) -> &[CargoManifestDependency] {
         &self.new_direct_dependencies
     }
 
-    pub fn non_crates_io_direct_dependencies(&self) -> &[String] {
+    pub fn non_crates_io_direct_dependencies(&self) -> &[CargoManifestDependency] {
         &self.non_crates_io_direct_dependencies
     }
 
-    pub fn age_violations(&self) -> &[String] {
+    pub fn age_violations(&self) -> &[ReleaseAgeViolation] {
         &self.age_violations
     }
 
-    pub fn yanked_versions(&self) -> &[String] {
+    pub fn yanked_versions(&self) -> &[ExactCrateSpec] {
         &self.yanked_versions
     }
 
-    pub fn non_crates_io_source_changes(&self) -> &[String] {
+    pub fn non_crates_io_source_changes(&self) -> &[NonCratesIoSourceChange] {
         &self.non_crates_io_source_changes
     }
 
-    pub fn native_sys_crates(&self) -> &[String] {
+    pub fn native_sys_crates(&self) -> &[ExactCrateSpec] {
         &self.native_sys_crates
     }
 
-    pub fn build_rs_surfaces(&self) -> &[String] {
+    pub fn build_rs_surfaces(&self) -> &[ExactCrateSpec] {
         &self.build_rs_surfaces
     }
 
-    pub fn proc_macro_surfaces(&self) -> &[String] {
+    pub fn proc_macro_surfaces(&self) -> &[ExactCrateSpec] {
         &self.proc_macro_surfaces
     }
 
-    pub fn inspection_failures(&self) -> &[String] {
+    pub fn inspection_failures(&self) -> &[InspectionFailure] {
         &self.inspection_failures
     }
 
-    pub fn blocking_findings(&self) -> &[String] {
-        &self.blocking_findings
-    }
-
-    pub fn elevated_findings(&self) -> &[String] {
-        &self.elevated_findings
+    pub fn findings(&self) -> &[RustAssessmentFinding] {
+        &self.findings
     }
 }
 
@@ -169,12 +300,12 @@ where
         base_direct_dependencies.iter().cloned().collect();
     let mut new_direct_dependencies = current_direct
         .difference(&base_direct)
-        .map(render_manifest_dependency)
+        .cloned()
         .collect::<Vec<_>>();
     let mut non_crates_io_direct_dependencies = current_direct
         .difference(&base_direct)
         .filter(|dependency| dependency.source_kind().is_non_crates_io())
-        .map(render_manifest_dependency_with_source)
+        .cloned()
         .collect::<Vec<_>>();
 
     let mut age_violations = Vec::new();
@@ -189,11 +320,13 @@ where
         let spec = package
             .exact_spec()
             .expect("parse_lockfile guarantees exact locked package specs");
-        let spec_string = spec.to_string();
 
         if !package.is_crates_io() {
             if let Some(source) = package.source.as_deref() {
-                non_crates_io_source_changes.push(format!("{spec_string} source={source}"));
+                non_crates_io_source_changes.push(NonCratesIoSourceChange::new(
+                    spec.clone(),
+                    source.to_owned(),
+                ));
             }
             continue;
         }
@@ -202,15 +335,13 @@ where
             Ok(report) => match report.outcome() {
                 ReleaseAgeOutcome::Allowed => {}
                 ReleaseAgeOutcome::TooFresh => {
-                    age_violations.push(format!(
-                        "{spec_string} ({} old)",
-                        crate::format_age(report.age_seconds())
-                    ));
+                    age_violations
+                        .push(ReleaseAgeViolation::new(spec.clone(), report.age_seconds()));
                 }
-                ReleaseAgeOutcome::Yanked => yanked_versions.push(spec_string.clone()),
+                ReleaseAgeOutcome::Yanked => yanked_versions.push(spec.clone()),
             },
             Err(error) => {
-                inspection_failures.push(format!("{spec_string}: {error}"));
+                inspection_failures.push(InspectionFailure::new(spec.clone(), error.to_string()));
                 continue;
             }
         }
@@ -220,16 +351,18 @@ where
                 if newly_introduced_crate_names.contains(spec.crate_name())
                     && spec.crate_name().ends_with("-sys")
                 {
-                    native_sys_crates.push(spec_string.clone());
+                    native_sys_crates.push(spec.clone());
                 }
                 if surfaces.has_build_rs {
-                    build_rs_surfaces.push(spec_string.clone());
+                    build_rs_surfaces.push(spec.clone());
                 }
                 if surfaces.is_proc_macro {
-                    proc_macro_surfaces.push(spec_string);
+                    proc_macro_surfaces.push(spec.clone());
                 }
             }
-            Err(error) => inspection_failures.push(format!("{spec_string}: {error}")),
+            Err(error) => {
+                inspection_failures.push(InspectionFailure::new(spec, error.to_string()));
+            }
         }
     }
 
@@ -243,63 +376,53 @@ where
     proc_macro_surfaces.sort();
     inspection_failures.sort();
 
-    let mut blocking_findings = Vec::new();
-    let mut elevated_findings = Vec::new();
+    let mut findings = Vec::new();
 
     if !age_violations.is_empty() {
-        blocking_findings.push(format!(
-            "newly selected crates.io versions below the minimum age: {}",
-            age_violations.join(", ")
+        findings.push(RustAssessmentFinding::blocking(
+            RustAssessmentFindingCategory::AgeViolations,
         ));
     }
     if !yanked_versions.is_empty() {
-        blocking_findings.push(format!(
-            "newly selected yanked crate versions: {}",
-            yanked_versions.join(", ")
+        findings.push(RustAssessmentFinding::blocking(
+            RustAssessmentFindingCategory::YankedVersions,
         ));
     }
     if !inspection_failures.is_empty() {
-        blocking_findings.push(format!(
-            "failed to inspect some Rust dependency surfaces: {}",
-            inspection_failures.join("; ")
+        findings.push(RustAssessmentFinding::blocking(
+            RustAssessmentFindingCategory::InspectionFailures,
         ));
     }
     if high_scrutiny.new_direct_dependencies && !new_direct_dependencies.is_empty() {
-        elevated_findings.push(format!(
-            "new direct Rust dependencies added: {}",
-            new_direct_dependencies.join(", ")
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::NewDirectDependencies,
         ));
     }
     if high_scrutiny.non_crates_io_direct_dependencies
         && !non_crates_io_direct_dependencies.is_empty()
     {
-        elevated_findings.push(format!(
-            "new non-crates.io direct Rust dependency specs detected: {}",
-            non_crates_io_direct_dependencies.join(", ")
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::NonCratesIoDirectDependencies,
         ));
     }
     if high_scrutiny.non_crates_io_source_changes && !non_crates_io_source_changes.is_empty() {
-        elevated_findings.push(format!(
-            "non-crates.io source changes detected: {}",
-            non_crates_io_source_changes.join(", ")
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::NonCratesIoSourceChanges,
         ));
     }
     if high_scrutiny.native_sys_crates && !native_sys_crates.is_empty() {
-        elevated_findings.push(format!(
-            "new native -sys crates introduced: {}",
-            native_sys_crates.join(", ")
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::NativeSysCrates,
         ));
     }
     if high_scrutiny.build_rs_changes && !build_rs_surfaces.is_empty() {
-        elevated_findings.push(format!(
-            "new or changed build.rs surface detected: {}",
-            build_rs_surfaces.join(", ")
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::BuildRsSurfaces,
         ));
     }
     if high_scrutiny.proc_macro_changes && !proc_macro_surfaces.is_empty() {
-        elevated_findings.push(format!(
-            "new or changed proc-macro surface detected: {}",
-            proc_macro_surfaces.join(", ")
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::ProcMacroSurfaces,
         ));
     }
 
@@ -315,26 +438,8 @@ where
         build_rs_surfaces,
         proc_macro_surfaces,
         inspection_failures,
-        blocking_findings,
-        elevated_findings,
+        findings,
     }
-}
-
-fn render_manifest_dependency(dependency: &CargoManifestDependency) -> String {
-    format!(
-        "{}:{}:{}",
-        dependency.manifest_path(),
-        dependency.section(),
-        dependency.name()
-    )
-}
-
-fn render_manifest_dependency_with_source(dependency: &CargoManifestDependency) -> String {
-    format!(
-        "{} ({})",
-        render_manifest_dependency(dependency),
-        dependency.source_kind()
-    )
 }
 
 #[cfg(test)]
@@ -347,7 +452,10 @@ mod tests {
         parse_manifest_dependencies,
     };
 
-    use super::{RustAssessmentClassification, assess_rust_update_at};
+    use super::{
+        RustAssessmentClassification, RustAssessmentFinding, RustAssessmentFindingCategory,
+        RustAssessmentFindingSeverity, assess_rust_update_at,
+    };
 
     #[derive(Default)]
     struct FakeCratesIoClient {
@@ -359,7 +467,7 @@ mod tests {
             self.responses.insert(
                 spec.to_owned(),
                 Ok(crate::parse_version_response_body(&format!(
-                    r#"{{"version":{{"created_at":"{published_at}","yanked":{yanked}}}}}"#
+                    r#"{{"version":{{"checksum":"abc123","created_at":"{published_at}","yanked":{yanked}}}}}"#
                 ))
                 .expect("fake response should parse")),
             );
@@ -447,8 +555,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             report.classification(),
             RustAssessmentClassification::RoutineSafe
         );
-        assert!(report.blocking_findings().is_empty());
-        assert!(report.elevated_findings().is_empty());
+        assert!(report.findings().is_empty());
     }
 
     #[test]
@@ -505,29 +612,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             report.classification(),
             RustAssessmentClassification::PolicyViolating
         );
-        assert!(
-            report
-                .blocking_findings()
-                .iter()
-                .any(|finding| finding.contains("below the minimum age"))
-        );
-        assert!(
-            report
-                .elevated_findings()
-                .iter()
-                .any(|finding| finding.contains("new direct Rust dependencies added"))
-        );
-        assert!(
-            report
-                .elevated_findings()
-                .iter()
-                .any(|finding| finding.contains("new native -sys crates introduced"))
-        );
-        assert!(
-            report
-                .elevated_findings()
-                .iter()
-                .any(|finding| finding.contains("new or changed build.rs surface detected"))
+        assert_eq!(
+            report.findings(),
+            &[
+                RustAssessmentFinding {
+                    severity: RustAssessmentFindingSeverity::Blocking,
+                    category: RustAssessmentFindingCategory::AgeViolations,
+                },
+                RustAssessmentFinding {
+                    severity: RustAssessmentFindingSeverity::Elevated,
+                    category: RustAssessmentFindingCategory::NewDirectDependencies,
+                },
+                RustAssessmentFinding {
+                    severity: RustAssessmentFindingSeverity::Elevated,
+                    category: RustAssessmentFindingCategory::NativeSysCrates,
+                },
+                RustAssessmentFinding {
+                    severity: RustAssessmentFindingSeverity::Elevated,
+                    category: RustAssessmentFindingCategory::BuildRsSurfaces,
+                },
+            ]
         );
     }
 }

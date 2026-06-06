@@ -130,6 +130,7 @@ mod tests {
 
     fn release(timestamp: &str, yanked: bool) -> CrateRelease {
         CrateRelease {
+            checksum_sha256_hex: "abc123".to_owned(),
             published_at_raw: timestamp.to_owned(),
             published_at: OffsetDateTime::parse(
                 timestamp,

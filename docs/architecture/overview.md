@@ -27,9 +27,22 @@ re-sync deliberately.
 ## Non-goals for v0.1
 
 - Public crates.io release. Local installation via `cargo install --path` or `cargo install --git` is enough.
-- Porting undertask's larger dependency-assessment workflow before the simpler hardening path is working.
+- Porting undertask's full mixed-ecosystem dependency-assessment workflow.
 - JavaScript ecosystem support.
 - Multi-workspace orchestration.
+
+## Current phase
+
+The simple hardening path is no longer hypothetical. `age`, `age-lock`,
+`resolve`, `assess`, `inspect`, `review`, `audit`, and `verify` already exist
+on `dev`.
+
+The current intake layer is:
+
+- `assess` remains the post-add diff classifier
+- `inspect` is the implemented first Rust-only, crates.io-only deep-review surface
+- `pin-check` is intentionally deferred until review-record and checked-pin
+  enforcement have a machine-stable contract
 
 ## Architectural boundary
 

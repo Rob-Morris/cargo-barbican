@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use barbican::MAXIMUM_RELEASE_AGE_MINIMUM_DAYS;
+use clap::builder::RangedU64ValueParser;
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -13,10 +14,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
     Age {
-        #[arg(
-            long,
-            value_parser = clap::value_parser!(u64).range(0..=MAXIMUM_RELEASE_AGE_MINIMUM_DAYS)
-        )]
+        #[arg(long, value_parser = min_age_days_parser())]
         min_age_days: Option<u64>,
         #[arg(required = true)]
         specs: Vec<String>,
@@ -24,10 +22,7 @@ pub(crate) enum Command {
     AgeLock {
         #[arg(long, default_value = "HEAD")]
         base_ref: String,
-        #[arg(
-            long,
-            value_parser = clap::value_parser!(u64).range(0..=MAXIMUM_RELEASE_AGE_MINIMUM_DAYS)
-        )]
+        #[arg(long, value_parser = min_age_days_parser())]
         min_age_days: Option<u64>,
         #[arg(long, default_value = "Cargo.lock")]
         lockfile: PathBuf,
@@ -39,15 +34,22 @@ pub(crate) enum Command {
     Assess {
         #[arg(long, default_value = "HEAD")]
         base_ref: String,
-        #[arg(
-            long,
-            value_parser = clap::value_parser!(u64).range(0..=MAXIMUM_RELEASE_AGE_MINIMUM_DAYS)
-        )]
+        #[arg(long, value_parser = min_age_days_parser())]
         min_age_days: Option<u64>,
         #[arg(long, default_value = "Cargo.lock")]
         lockfile: PathBuf,
     },
+    Inspect {
+        #[arg(long, value_parser = min_age_days_parser())]
+        min_age_days: Option<u64>,
+        #[arg(required = true)]
+        specs: Vec<String>,
+    },
     Review,
     Audit,
     Verify,
+}
+
+fn min_age_days_parser() -> RangedU64ValueParser<u64> {
+    clap::value_parser!(u64).range(0..=MAXIMUM_RELEASE_AGE_MINIMUM_DAYS)
 }

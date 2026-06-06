@@ -2,6 +2,7 @@ mod age;
 mod age_lock;
 mod assess;
 mod audit;
+mod inspect;
 mod resolve;
 mod review;
 mod verify;
@@ -85,6 +86,10 @@ where
             stdout,
             stderr,
         ),
+        Command::Inspect {
+            min_age_days,
+            specs,
+        } => inspect::run_inspect(min_age_days, specs, current_dir, client, stdout, stderr),
         Command::Review => review::run_review(current_dir, runner, stdout, stderr),
         Command::Audit => audit::run_audit(current_dir, runner, stderr),
         Command::Verify => verify::run_verify(current_dir, runner, stderr),
@@ -149,7 +154,7 @@ where
     Ok(exit_code_from_policy_failures(failed))
 }
 
-fn render_release_age_report(report: &ReleaseAgeReport) -> String {
+pub(super) fn render_release_age_report(report: &ReleaseAgeReport) -> String {
     match report.outcome() {
         ReleaseAgeOutcome::Allowed => format!(
             "OK   {}: published {} ({} old)",

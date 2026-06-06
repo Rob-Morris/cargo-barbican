@@ -57,6 +57,16 @@ impl CargoManifestDependency {
     }
 }
 
+impl fmt::Display for CargoManifestDependency {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{}:{}:{}",
+            self.manifest_path, self.section, self.name
+        )
+    }
+}
+
 pub fn parse_manifest_dependencies(
     manifest_path: &str,
     text: &str,

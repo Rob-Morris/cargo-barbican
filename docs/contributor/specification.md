@@ -105,8 +105,36 @@ The first `assess` slice is fail-closed. If the tool cannot complete a
 required dependency-surface inspection for that slice, it reports a blocking
 finding rather than silently treating the package as safe.
 
+## Slice 3 implemented baseline
+
+The next shaped intake surface was `cargo barbican inspect`, not a broader
+second expansion of `assess`. That first `inspect` slice is now implemented
+with this contract:
+
+- Rust-only and crates.io-only
+- exact `crate@version` input only
+- release-age aware, using the same default and override rules as `age`
+- checksum-oriented: local tarball SHA-256 must match the published crates.io checksum
+- provenance-aware: inspect `.cargo_vcs_info.json` when present
+- high-scrutiny oriented: enumerate `build.rs`, `proc-macro`, and native
+  `-sys` / FFI surfaces, then run a fixed IOC scan over build-time and
+  proc-macro-relevant sources
+- fail-closed for routine intake: checksum mismatches, IOC hits, and required
+  inspection failures are blocking; surfaced high-scrutiny execution surfaces
+  are elevated-risk
+
+What is still explicitly deferred at this stage:
+
+- review-record existence enforcement
+- lockfile-vs-review pin reconciliation
+- any `pin-check` command surface
+
+Do not add broader `high_scrutiny` keys or a `pin-check` CLI surface until the
+review-record and checked-pin contract is shaped explicitly.
+
 ## Open questions
 
 - Whether `cargo_lock` is acceptable instead of hand-rolling over `toml`.
 - Whether the current `time` feature set should stay at `std` + `parsing`, or grow only if implementation proves it necessary.
 - Whether v0.1 should ship the templates immediately or defer them to the first post-tool release.
+- What the machine-readable review-record contract must be before `pin-check` can become a real command rather than a design placeholder.

@@ -84,7 +84,7 @@ where
 
 struct MemoizingCratesIoClient<'a, C: ?Sized> {
     inner: &'a C,
-    cache: RefCell<HashMap<String, Result<CrateRelease, CratesIoClientError>>>,
+    cache: RefCell<HashMap<ExactCrateSpec, Result<CrateRelease, CratesIoClientError>>>,
 }
 
 impl<'a, C: ?Sized> MemoizingCratesIoClient<'a, C> {
@@ -101,14 +101,12 @@ where
     C: CratesIoClient + ?Sized,
 {
     fn fetch_release(&self, spec: &ExactCrateSpec) -> Result<CrateRelease, CratesIoClientError> {
-        if let Some(cached) = self.cache.borrow().get(&spec.to_string()) {
+        if let Some(cached) = self.cache.borrow().get(spec) {
             return cached.clone();
         }
 
         let result = self.inner.fetch_release(spec);
-        self.cache
-            .borrow_mut()
-            .insert(spec.to_string(), result.clone());
+        self.cache.borrow_mut().insert(spec.clone(), result.clone());
         result
     }
 }

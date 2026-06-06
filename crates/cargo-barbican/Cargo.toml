@@ -1,6 +1,6 @@
 [package]
 name = "cargo-barbican"
-version = "0.2.0"
+version = "0.3.0"
 description = "Cargo subcommand for Rust supply-chain hardening. Invokable as `cargo barbican`."
 edition.workspace = true
 license.workspace = true
@@ -20,3 +20,8 @@ path = "src/main.rs"
 barbican = { path = "../barbican" }
 clap = { version = "4", features = ["derive"] }
 ureq = { version = "3.3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+miniz_oxide = { version = "=0.9.1", default-features = false, features = ["with-alloc"] }
+sha2 = { version = "=0.10.9", default-features = false, features = ["force-soft"] }
+tar = { version = "=0.4.46", default-features = false }

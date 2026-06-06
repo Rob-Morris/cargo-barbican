@@ -15,19 +15,34 @@ use barbican::{
 };
 use cargo_barbican::{Cli, CommandRunner, UreqCratesIoClient, run_cli_with_runner};
 use clap::Parser;
+use miniz_oxide::deflate::compress_to_vec;
+use sha2::{Digest, Sha256};
+use tar::{Builder, Header};
 
 #[derive(Default)]
 struct FakeCratesIoClient {
     responses: HashMap<String, Result<CrateRelease, CratesIoClientError>>,
+    tarball_responses: HashMap<String, Result<Vec<u8>, CratesIoClientError>>,
     fetches: RefCell<Vec<String>>,
+    tarball_fetches: RefCell<Vec<String>>,
 }
 
 impl FakeCratesIoClient {
-    fn with_release(mut self, spec: &str, published_at: &str, yanked: bool) -> Self {
+    fn with_release(self, spec: &str, published_at: &str, yanked: bool) -> Self {
+        self.with_release_checksum(spec, published_at, yanked, "abc123")
+    }
+
+    fn with_release_checksum(
+        mut self,
+        spec: &str,
+        published_at: &str,
+        yanked: bool,
+        checksum_sha256_hex: &str,
+    ) -> Self {
         self.responses.insert(
             spec.to_owned(),
             Ok(parse_version_response_body(&format!(
-                r#"{{"version":{{"created_at":"{published_at}","yanked":{yanked}}}}}"#
+                r#"{{"version":{{"checksum":"{checksum_sha256_hex}","created_at":"{published_at}","yanked":{yanked}}}}}"#
             ))
             .expect("fake response should parse")),
         );
@@ -39,8 +54,18 @@ impl FakeCratesIoClient {
         self
     }
 
+    fn with_tarball(mut self, spec: &str, tarball: &[u8]) -> Self {
+        self.tarball_responses
+            .insert(spec.to_owned(), Ok(tarball.to_vec()));
+        self
+    }
+
     fn recorded_fetches(&self) -> Vec<String> {
         self.fetches.borrow().clone()
+    }
+
+    fn recorded_tarball_fetches(&self) -> Vec<String> {
+        self.tarball_fetches.borrow().clone()
     }
 }
 
@@ -53,6 +78,18 @@ impl CratesIoClient for FakeCratesIoClient {
             .unwrap_or_else(|| {
                 Err(CratesIoClientError::Transport {
                     reason: "missing fake response".to_owned(),
+                })
+            })
+    }
+
+    fn fetch_release_tarball(&self, spec: &ExactCrateSpec) -> Result<Vec<u8>, CratesIoClientError> {
+        self.tarball_fetches.borrow_mut().push(spec.to_string());
+        self.tarball_responses
+            .get(&spec.to_string())
+            .cloned()
+            .unwrap_or_else(|| {
+                Err(CratesIoClientError::Transport {
+                    reason: "missing fake tarball response".to_owned(),
                 })
             })
     }
@@ -888,6 +925,153 @@ fn age_reports_client_failures_to_stderr() {
             .expect("stderr should be utf8")
             .contains("FAIL serde@1.0.228: crates.io returned HTTP 404 for version metadata")
     );
+}
+
+#[test]
+fn inspect_reports_routine_safe_for_clean_crate() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+        (
+            ".cargo_vcs_info.json",
+            "{\n  \"git\": {\"sha1\": \"abc123\"},\n  \"path_in_vcs\": \"sample\"\n}\n",
+        ),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "inspect", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2026-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Inspect sample@0.1.0"));
+    assert!(rendered.contains("classification: routine-safe"));
+    assert!(rendered.contains("checksum: ok"));
+    assert!(rendered.contains("provenance: git abc123 (sample)"));
+    assert!(rendered.contains("build.rs surfaces: none"));
+    assert!(rendered.contains("proc-macro surface: no"));
+    assert_eq!(client.recorded_fetches(), vec!["sample@0.1.0".to_owned()]);
+    assert_eq!(
+        client.recorded_tarball_fetches(),
+        vec!["sample@0.1.0".to_owned()]
+    );
+}
+
+#[test]
+fn inspect_reports_elevated_risk_for_build_script_and_native_surface() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"native-sys\"\nversion = \"0.1.0\"\nlinks = \"native\"\n",
+        ),
+        ("build.rs", "fn main() {}\n"),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+        ("vendor/native.c", "int native(void) { return 0; }\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "inspect", "native-sys@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("native-sys@0.1.0", "2026-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("native-sys@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let rendered = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.contains("classification: elevated-risk"));
+    assert!(rendered.contains("build.rs surfaces: build.rs"));
+    assert!(rendered.contains("crate name ends with -sys"));
+    assert!(rendered.contains("package.links=native"));
+    assert!(rendered.contains("native sources: vendor/native.c"));
+}
+
+#[test]
+fn inspect_reports_policy_violation_for_checksum_mismatch() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        (
+            "build.rs",
+            "fn main() { std::process::Command::new(\"curl\"); }\n",
+        ),
+    ]);
+    let cli = Cli::parse_from(["cargo-barbican", "inspect", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2026-05-01T00:00:00Z", false, "deadbeef")
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let rendered = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.contains("classification: policy-violating"));
+    assert!(rendered.contains("checksum: FAIL local sha256"));
+    assert!(rendered.contains("build.rs surfaces: none"));
+    assert!(rendered.contains("IOC hits: none"));
+}
+
+fn build_crate_tarball(files: &[(&str, &str)]) -> Vec<u8> {
+    let mut tarball = Vec::new();
+    {
+        let mut builder = Builder::new(&mut tarball);
+        for (path, contents) in files {
+            let full_path = format!("sample-0.1.0/{path}");
+            let bytes = contents.as_bytes();
+            let mut header = Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, full_path, bytes)
+                .expect("fixture tar append should succeed");
+        }
+        builder.finish().expect("fixture tar should finish");
+    }
+
+    let deflated = compress_to_vec(&tarball, 6);
+    let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+    gzip.extend(deflated);
+    gzip.extend([0, 0, 0, 0]);
+    gzip.extend((tarball.len() as u32).to_le_bytes());
+    gzip
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(digest.len() * 2);
+
+    for byte in digest {
+        output.push(char::from(b"0123456789abcdef"[(byte >> 4) as usize]));
+        output.push(char::from(b"0123456789abcdef"[(byte & 0x0f) as usize]));
+    }
+
+    output
 }
 
 fn write_workspace_layout(temp_dir: &Path) {

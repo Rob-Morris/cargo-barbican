@@ -35,6 +35,15 @@ impl UreqCratesIoClient {
             spec.version()
         )
     }
+
+    fn tarball_url(&self, spec: &ExactCrateSpec) -> String {
+        format!(
+            "{}/api/v1/crates/{}/{}/download",
+            self.base_url.trim_end_matches('/'),
+            spec.crate_name(),
+            spec.version()
+        )
+    }
 }
 
 impl CratesIoClient for UreqCratesIoClient {
@@ -61,5 +70,29 @@ impl CratesIoClient for UreqCratesIoClient {
         })?;
 
         parse_version_response_body(&body)
+    }
+
+    fn fetch_release_tarball(&self, spec: &ExactCrateSpec) -> Result<Vec<u8>, CratesIoClientError> {
+        let mut response = self
+            .agent
+            .get(self.tarball_url(spec))
+            .header("User-Agent", USER_AGENT)
+            .call()
+            .map_err(|error| CratesIoClientError::Transport {
+                reason: error.to_string(),
+            })?;
+
+        if response.status().is_client_error() || response.status().is_server_error() {
+            return Err(CratesIoClientError::TarballHttpStatus {
+                status_code: response.status().as_u16(),
+            });
+        }
+
+        response
+            .body_mut()
+            .read_to_vec()
+            .map_err(|error| CratesIoClientError::Transport {
+                reason: error.to_string(),
+            })
     }
 }

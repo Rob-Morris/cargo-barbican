@@ -76,6 +76,7 @@ current implemented surface on `dev` is:
 - `cargo barbican age-lock`
 - `cargo barbican resolve`
 - `cargo barbican assess`
+- `cargo barbican inspect`
 - `cargo barbican review`
 - `cargo barbican audit`
 - `cargo barbican verify`
@@ -85,10 +86,12 @@ The checked-in `barbican.toml` shape exists with `[release_age]`,
 logic, while the binary owns subprocesses and the concrete `ureq` HTTP
 boundary.
 
-The next implementation step is the deeper intake layer after the first
-post-add `assess` slice: decide how far checksum, IOC, review-record, and
-Undertask-parity work should go next without changing the CLI surface
-silently.
+The current intake layer now includes the first pre-add deep-review slice:
+
+- `cargo barbican inspect` exists as the first Rust-only, crates.io-only
+  pre-add deep-review surface
+- `pin-check` remains explicitly deferred until the review-record and checked-pin
+  contract is machine-shaped rather than prose-only
 
 ## Source material to read before implementing
 
