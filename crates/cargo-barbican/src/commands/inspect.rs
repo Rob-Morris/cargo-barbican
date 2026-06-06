@@ -4,7 +4,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, RustAssessmentClassification, RustInspectReport, inspect_published_crate,
+    CratesIoClient, OffsetDateTime, RustAssessmentClassification, RustInspectReport,
+    inspect_published_crate_at,
 };
 
 use super::{
@@ -17,6 +18,7 @@ pub(super) fn run_inspect<C>(
     raw_specs: Vec<String>,
     current_dir: &Path,
     client: &C,
+    now: OffsetDateTime,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<ExitCode, CommandError>
@@ -44,7 +46,7 @@ where
                 continue;
             }
         };
-        let report = inspect_published_crate(spec, release, &tarball, minimum_days);
+        let report = inspect_published_crate_at(spec, release, &tarball, now, minimum_days);
         let rendered = render_inspect_report(&report);
 
         match report.classification() {

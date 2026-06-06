@@ -4,25 +4,28 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, RustAssessmentClassification, RustAssessmentFinding,
+    CratesIoClient, OffsetDateTime, RustAssessmentClassification, RustAssessmentFinding,
     RustAssessmentFindingCategory, RustAssessmentFindingSeverity, RustAssessmentReport,
-    assess_rust_update, parse_cargo_metadata,
+    parse_cargo_metadata,
 };
 
 use crate::command_runner::CommandRunner;
 
 use super::{
-    CommandError, fail, load_base_manifest_dependencies, load_config,
-    load_current_and_base_lockfiles, load_current_manifest_dependencies,
+    CommandError, DEFAULT_BASE_REF, fail, load_base_manifest_dependencies, load_config,
+    load_current_lockfile, load_current_manifest_dependencies, load_git_base_lockfile,
+    load_lockfile_from_path, load_manifest_dependencies_from_base_dir,
 };
 
 pub(super) fn run_assess<C, R>(
-    base_ref: &str,
+    base_ref: Option<&str>,
+    base_dir: Option<&Path>,
     min_age_days: Option<u64>,
     lockfile: &Path,
     current_dir: &Path,
     client: &C,
     runner: &R,
+    now: OffsetDateTime,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<ExitCode, CommandError>
@@ -32,18 +35,45 @@ where
 {
     let config = load_config(current_dir)?;
     let minimum_days = min_age_days.unwrap_or(config.release_age.minimum_days);
-    let (current_lockfile, base_lockfile) =
-        match load_current_and_base_lockfiles(current_dir, runner, base_ref, lockfile) {
-            Ok(lockfiles) => lockfiles,
+    let base_root = base_dir.map(|base_dir| current_dir.join(base_dir));
+    let current_lockfile = match load_current_lockfile(current_dir, lockfile) {
+        Ok(lockfile) => lockfile,
+        Err(error) => return fail(stderr, error),
+    };
+    let base_lockfile = if let Some(base_root) = &base_root {
+        let base_lockfile_path = base_root.join(lockfile);
+        let display = base_dir
+            .expect("base_root implies base_dir")
+            .join(lockfile)
+            .display()
+            .to_string();
+
+        match load_lockfile_from_path(&base_lockfile_path, &display) {
+            Ok(lockfile) => lockfile,
             Err(error) => return fail(stderr, error),
-        };
+        }
+    } else {
+        let base_ref = base_ref.unwrap_or(DEFAULT_BASE_REF);
+        match load_git_base_lockfile(current_dir, runner, base_ref, lockfile) {
+            Ok(lockfile) => lockfile,
+            Err(error) => return fail(stderr, error),
+        }
+    };
     let current_manifests = match load_current_manifest_dependencies(current_dir) {
         Ok(manifests) => manifests,
         Err(error) => return fail(stderr, error),
     };
-    let base_manifests = match load_base_manifest_dependencies(current_dir, runner, base_ref) {
-        Ok(manifests) => manifests,
-        Err(error) => return fail(stderr, error),
+    let base_manifests = if let Some(base_root) = &base_root {
+        match load_manifest_dependencies_from_base_dir(base_root) {
+            Ok(manifests) => manifests,
+            Err(error) => return fail(stderr, error),
+        }
+    } else {
+        let base_ref = base_ref.unwrap_or(DEFAULT_BASE_REF);
+        match load_base_manifest_dependencies(current_dir, runner, base_ref) {
+            Ok(manifests) => manifests,
+            Err(error) => return fail(stderr, error),
+        }
     };
     let metadata_text = match runner.cargo_metadata(current_dir) {
         Ok(text) => text,
@@ -53,7 +83,7 @@ where
         Ok(metadata) => metadata,
         Err(error) => return fail(stderr, format!("cargo metadata: {error}")),
     };
-    let report = assess_rust_update(
+    let report = barbican::assess_rust_update_at(
         client,
         &current_lockfile,
         &base_lockfile,
@@ -62,6 +92,7 @@ where
         &metadata,
         minimum_days,
         &config.high_scrutiny,
+        now,
     );
 
     render_assessment_report(stdout, &report)?;

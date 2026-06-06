@@ -74,6 +74,24 @@ Repo branch policy is simple:
 The hook package is deliberately light. It does not replace the repo's actual
 verification commands or dependency-review policy.
 
+## Local Invocation Notes
+
+When dogfooding cargo-barbican inside this repo:
+
+- non-mutating commands may be run through Cargo, for example:
+  - `cargo run --locked --bin cargo-barbican -- inspect ...`
+  - `cargo run --locked --bin cargo-barbican -- assess ...`
+- mutating commands that intentionally change the repo `Cargo.lock` should be
+  run through the built binary directly, for example:
+  - `target/debug/cargo-barbican resolve ...`
+
+Reason:
+
+- `cargo run --locked ...` asks Cargo itself to keep the workspace lockfile
+  unchanged while it builds and launches the binary
+- that is the wrong launcher contract for commands such as `resolve` that are
+  supposed to mutate `Cargo.lock`
+
 Normal pre-commit expectations still include:
 
 - `cargo build --locked`

@@ -57,3 +57,4 @@ pub use reviewed_targets::{
 };
 pub use sha256::{Sha256Digest, Sha256DigestError};
 pub use spec::{ExactCrateSpec, ExactCrateSpecError};
+pub use time::OffsetDateTime;

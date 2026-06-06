@@ -22,20 +22,28 @@ pub(crate) enum Command {
         specs: Vec<String>,
     },
     AgeLock {
-        #[arg(long, default_value = "HEAD")]
-        base_ref: String,
+        #[arg(long, conflicts_with = "base_lockfile")]
+        base_ref: Option<String>,
+        #[arg(long, conflicts_with = "base_ref")]
+        base_lockfile: Option<PathBuf>,
         #[arg(long, value_parser = min_age_days_parser())]
         min_age_days: Option<u64>,
         #[arg(long, default_value = "Cargo.lock")]
         lockfile: PathBuf,
     },
     Resolve {
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, value_parser = min_age_days_parser())]
+        min_age_days: Option<u64>,
         #[arg(required = true)]
         specs: Vec<String>,
     },
     Assess {
-        #[arg(long, default_value = "HEAD")]
-        base_ref: String,
+        #[arg(long, conflicts_with = "base_dir")]
+        base_ref: Option<String>,
+        #[arg(long, conflicts_with = "base_ref")]
+        base_dir: Option<PathBuf>,
         #[arg(long, value_parser = min_age_days_parser())]
         min_age_days: Option<u64>,
         #[arg(long, default_value = "Cargo.lock")]
@@ -51,7 +59,10 @@ pub(crate) enum Command {
         #[arg(long, default_value = REVIEWED_TARGETS_CONFIG_FILE)]
         config: PathBuf,
     },
-    Review,
+    Review {
+        #[arg(long)]
+        base_dir: Option<PathBuf>,
+    },
     Audit,
     Verify,
 }

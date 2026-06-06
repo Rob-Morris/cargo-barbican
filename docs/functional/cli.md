@@ -13,23 +13,38 @@ cargo barbican age [--min-age-days N] <crate@version>...
     absent. `--min-age-days` overrides the config for the current command.
     Pure HTTP GET to the crates.io API.
 
-cargo barbican age-lock [--base-ref HEAD] [--lockfile Cargo.lock] [--min-age-days N]
-    Diff Cargo.lock against a git ref. For every newly selected crates.io
-    version, verify release age. Catches too-fresh transitive selections.
+cargo barbican age-lock [--base-ref REF | --base-lockfile PATH] [--lockfile Cargo.lock] [--min-age-days N]
+    Diff Cargo.lock against a baseline lockfile. By default the baseline is
+    `HEAD:<lockfile>`. `--base-lockfile` provides an explicit non-git baseline
+    file instead. For every newly selected crates.io version, verify release
+    age. Catches too-fresh transitive selections.
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
 
-cargo barbican resolve <crate@version>...
+cargo barbican resolve [--dry-run] [--min-age-days N] <crate@version>...
     1. Run `age` on each spec.
     2. Use `cargo metadata` to disambiguate package IDs when a crate name
        appears at multiple versions in the lockfile.
     3. Run `cargo update --workspace -p <package-id> --precise <version>`
        for each spec.
-    4. Run `age-lock` on the resulting diff.
+    4. Recheck newly selected crates.io versions against the pre-update
+       `Cargo.lock` snapshot.
+    With `--dry-run`, perform the update in an internal temp workspace and
+    print a summary/diff preview of the would-be `Cargo.lock` change instead
+    of mutating the repo.
+    Dry-run preview honours Cargo configuration at or below the copied
+    workspace root and in `$CARGO_HOME`. Ancestor `.cargo/config.toml` files
+    between the workspace root and `$HOME` are not copied into the preview
+    workspace, so they can make dry-run resolution differ from an in-place run.
+    When `--min-age-days` is absent, the command uses the same
+    `barbican.toml` release-age default as `age`.
 
-cargo barbican assess [--base-ref HEAD] [--lockfile Cargo.lock] [--min-age-days N]
-    Diff the current Rust dependency state against a git ref and classify the
-    change as `routine-safe`, `elevated-risk`, or `policy-violating`.
+cargo barbican assess [--base-ref REF | --base-dir PATH] [--lockfile Cargo.lock] [--min-age-days N]
+    Diff the current Rust dependency state against a baseline dependency
+    state and classify the change as `routine-safe`, `elevated-risk`, or
+    `policy-violating`. By default the baseline is the current workspace
+    state at `HEAD`. `--base-dir` provides an explicit non-git baseline
+    directory containing the comparison `Cargo.lock` and workspace manifests.
     The first slice is post-add Rust assessment only. It checks:
     - new direct dependencies across workspace Cargo.toml files
     - new non-crates.io direct dependency specs
@@ -88,8 +103,11 @@ cargo barbican pin-check [--config reviewed-targets.toml]
     - stronger installed-tree or broader non-crates.io artefact parity remains
       out of scope for this slice
 
-cargo barbican review
-    Print a `git diff` of policy-relevant files with a checklist printed above.
+cargo barbican review [--base-dir PATH]
+    Print a diff of policy-relevant files with a checklist printed above.
+    By default the command uses the existing git-backed path.
+    `--base-dir` switches to an explicit non-git baseline directory and
+    renders the same review file set without relying on `git`.
     This includes:
     - repo-root `Cargo.toml`, `Cargo.lock`, `barbican.toml`, `deny.toml`,
       and `reviewed-targets.toml` when present

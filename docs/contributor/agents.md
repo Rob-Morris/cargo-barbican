@@ -87,6 +87,19 @@ The checked-in `barbican.toml` shape exists with `[release_age]`,
 logic, while the binary owns subprocesses and the concrete `ureq` HTTP
 boundary.
 
+The current comparative baseline behaviour is:
+
+- `age-lock` defaults to `HEAD` but can compare against an explicit baseline
+  lockfile with `--base-lockfile`
+- `assess` defaults to `HEAD` but can compare against an explicit baseline
+  directory with `--base-dir`
+- `review` keeps the git-backed default path but can compare against an
+  explicit baseline directory with `--base-dir`
+- `resolve` rechecks against an internal pre-update `Cargo.lock` snapshot
+  rather than a git ref
+- `resolve --dry-run` now previews the would-be `Cargo.lock` diff without
+  mutating the working tree
+
 The current intake layer now includes the first pre-add deep-review slice:
 
 - `cargo barbican inspect` exists as the first Rust-only, crates.io-only

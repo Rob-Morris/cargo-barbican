@@ -53,6 +53,14 @@ The current intake layer is:
 - the current reviewed-target gate now supports crates.io reviewed-artefact
   reconciliation: record the reviewed tarball digest in `reviewed-targets.toml`
   and verify it against the resolved `Cargo.lock` checksum chain
+- comparative command baselines and review ergonomics are now partially
+  decoupled from `git`:
+  `age-lock` can compare against an explicit baseline lockfile,
+  `assess` and `review` can compare against an explicit baseline directory,
+  and `resolve` rechecks against an internal pre-update `Cargo.lock` snapshot
+  instead of relying on `HEAD`
+- `resolve` also supports a non-mutating `--dry-run` preview that shows the
+  would-be `Cargo.lock` diff without changing the working tree
 
 ## Architectural boundary
 
@@ -69,8 +77,9 @@ shelling out to the binary.
 
 Every dependency addition or dependency-tool install is documented in
 `docs/dependency-reviews/` before it lands. Most direct dependencies inherit
-from Undertask's reviewed set; `ureq` is the main first-principles review
-because it defines the HTTP boundary.
+from Undertask's reviewed set; local first-principles reviews cover direct
+dependencies that define cargo-barbican-specific boundaries such as HTTP,
+time parsing, archive inspection, checksum computation, and diff rendering.
 
 ## Repo shape
 

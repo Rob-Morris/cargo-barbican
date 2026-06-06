@@ -2,6 +2,7 @@ mod age;
 mod age_lock;
 mod assess;
 mod audit;
+mod diff_render;
 mod inspect;
 mod pin_check;
 mod resolve;
@@ -17,10 +18,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use barbican::{
-    BarbicanConfig, ConfigLoadError, CratesIoClient, ExactCrateSpec, ReleaseAgeOutcome,
-    ReleaseAgeReport, ReviewedTargets, ReviewedTargetsError, check_release_age, format_age,
-    parse_lockfile, parse_manifest_dependencies, parse_manifest_direct_requirements,
-    parse_reviewed_targets_toml,
+    BarbicanConfig, ConfigLoadError, CratesIoClient, ExactCrateSpec, OffsetDateTime,
+    ReleaseAgeOutcome, ReleaseAgeReport, ReviewedTargets, ReviewedTargetsError,
+    check_release_age_at, format_age, parse_lockfile, parse_manifest_dependencies,
+    parse_manifest_direct_requirements, parse_reviewed_targets_toml,
 };
 use clap::Parser;
 
@@ -31,6 +32,14 @@ use crate::crates_io_http::{
 };
 
 const CONFIG_FILE_NAME: &str = "barbican.toml";
+pub(super) const DEFAULT_BASE_REF: &str = "HEAD";
+pub(super) const REVIEW_ROOT_FILE_PATHS: [&str; 4] = [
+    "Cargo.lock",
+    "barbican.toml",
+    "deny.toml",
+    "reviewed-targets.toml",
+];
+pub(super) const REVIEW_RECORDS_DIR: &str = "docs/dependency-reviews";
 
 pub fn run(stdout: &mut dyn Write, stderr: &mut dyn Write) -> Result<ExitCode, CommandError> {
     let cli = Cli::parse();
@@ -53,48 +62,108 @@ where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
+    run_cli_with_runner_at(
+        cli,
+        current_dir,
+        client,
+        runner,
+        OffsetDateTime::now_utc(),
+        stdout,
+        stderr,
+    )
+}
+
+pub fn run_cli_with_runner_at<C, R>(
+    cli: Cli,
+    current_dir: &Path,
+    client: &C,
+    runner: &R,
+    now: OffsetDateTime,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError>
+where
+    C: CratesIoClient + ?Sized,
+    R: CommandRunner + ?Sized,
+{
     match cli.command {
         Command::Age {
             min_age_days,
             specs,
-        } => age::run_age(min_age_days, specs, current_dir, client, stdout, stderr),
-        Command::AgeLock {
-            base_ref,
+        } => age::run_age(
             min_age_days,
-            lockfile,
-        } => age_lock::run_age_lock(
-            &base_ref,
-            min_age_days,
-            &lockfile,
+            specs,
             current_dir,
             client,
-            runner,
+            now,
             stdout,
             stderr,
         ),
-        Command::Resolve { specs } => {
-            resolve::run_resolve(specs, current_dir, client, runner, stdout, stderr)
-        }
-        Command::Assess {
+        Command::AgeLock {
             base_ref,
+            base_lockfile,
             min_age_days,
             lockfile,
-        } => assess::run_assess(
-            &base_ref,
+        } => age_lock::run_age_lock(
+            base_ref.as_deref(),
+            base_lockfile.as_deref(),
             min_age_days,
             &lockfile,
             current_dir,
             client,
             runner,
+            now,
+            stdout,
+            stderr,
+        ),
+        Command::Resolve {
+            dry_run,
+            min_age_days,
+            specs,
+        } => resolve::run_resolve(
+            dry_run,
+            min_age_days,
+            specs,
+            current_dir,
+            client,
+            runner,
+            now,
+            stdout,
+            stderr,
+        ),
+        Command::Assess {
+            base_ref,
+            base_dir,
+            min_age_days,
+            lockfile,
+        } => assess::run_assess(
+            base_ref.as_deref(),
+            base_dir.as_deref(),
+            min_age_days,
+            &lockfile,
+            current_dir,
+            client,
+            runner,
+            now,
             stdout,
             stderr,
         ),
         Command::Inspect {
             min_age_days,
             specs,
-        } => inspect::run_inspect(min_age_days, specs, current_dir, client, stdout, stderr),
+        } => inspect::run_inspect(
+            min_age_days,
+            specs,
+            current_dir,
+            client,
+            now,
+            stdout,
+            stderr,
+        ),
         Command::PinCheck { config } => pin_check::run_pin_check(&config, current_dir, stdout),
-        Command::Review => review::run_review(current_dir, runner, stdout, stderr),
+        Command::Review { base_dir } => {
+            review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)
+        }
         Command::Audit => audit::run_audit(current_dir, runner, stderr),
         Command::Verify => verify::run_verify(current_dir, runner, stdout, stderr),
     }
@@ -129,6 +198,7 @@ pub(super) fn finish_release_age_checks<C>(
     specs: &[ExactCrateSpec],
     minimum_days: u64,
     client: &C,
+    now: OffsetDateTime,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<ExitCode, CommandError>
@@ -138,7 +208,7 @@ where
     let mut failed = false;
 
     for spec in specs {
-        match check_release_age(client, spec, minimum_days) {
+        match check_release_age_at(client, spec, now, minimum_days) {
             Ok(report) if report.is_success() => {
                 writeln!(stdout, "{}", render_release_age_report(&report))
                     .map_err(CommandError::Io)?;
@@ -202,31 +272,61 @@ pub(super) fn crates_io_base_url() -> Result<String, CommandError> {
     }
 }
 
-pub(super) fn load_current_and_base_lockfiles<R>(
+pub(super) fn load_current_lockfile(
+    current_dir: &Path,
+    lockfile: &Path,
+) -> Result<barbican::Lockfile, CommandError> {
+    let display = lockfile.display().to_string();
+    load_lockfile_from_path(&current_dir.join(lockfile), &display)
+}
+
+pub(super) fn load_current_lockfile_text(
+    current_dir: &Path,
+    lockfile: &Path,
+) -> Result<String, CommandError> {
+    let display = lockfile.display().to_string();
+    load_lockfile_text_from_path(&current_dir.join(lockfile), &display)
+}
+
+pub(super) fn load_lockfile_text_from_path(
+    path: &Path,
+    display: &str,
+) -> Result<String, CommandError> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Err(CommandError::LockfileMissing {
+                path: display.to_owned(),
+            })
+        }
+        Err(source) => Err(CommandError::LockfileRead {
+            path: display.to_owned(),
+            source,
+        }),
+    }
+}
+
+pub(super) fn load_lockfile_from_path(
+    path: &Path,
+    display: &str,
+) -> Result<barbican::Lockfile, CommandError> {
+    let text = load_lockfile_text_from_path(path, display)?;
+
+    parse_lockfile(&text).map_err(|source| CommandError::LockfileParse {
+        path: display.to_owned(),
+        source,
+    })
+}
+
+pub(super) fn load_git_base_lockfile<R>(
     current_dir: &Path,
     runner: &R,
     base_ref: &str,
     lockfile: &Path,
-) -> Result<(barbican::Lockfile, barbican::Lockfile), CommandError>
+) -> Result<barbican::Lockfile, CommandError>
 where
     R: CommandRunner + ?Sized,
 {
-    let lockfile_display = lockfile.display().to_string();
-    let current_lockfile_path = current_dir.join(lockfile);
-    let current_lockfile_text = match fs::read_to_string(&current_lockfile_path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Err(CommandError::LockfileMissing {
-                path: lockfile_display,
-            });
-        }
-        Err(source) => {
-            return Err(CommandError::LockfileRead {
-                path: lockfile.display().to_string(),
-                source,
-            });
-        }
-    };
     let base_object = format!("{base_ref}:{}", lockfile.display());
     let base_lockfile_text = runner
         .git_show(current_dir, &base_object)
@@ -234,29 +334,22 @@ where
             object: base_object,
             source,
         })?;
-    let current_lockfile =
-        parse_lockfile(&current_lockfile_text).map_err(|source| CommandError::LockfileParse {
-            path: lockfile.display().to_string(),
-            source,
-        })?;
-    let base_lockfile =
-        parse_lockfile(&base_lockfile_text).map_err(|source| CommandError::LockfileParse {
-            path: format!("{base_ref}:{}", lockfile.display()),
-            source,
-        })?;
 
-    Ok((current_lockfile, base_lockfile))
+    parse_lockfile(&base_lockfile_text).map_err(|source| CommandError::LockfileParse {
+        path: format!("{base_ref}:{}", lockfile.display()),
+        source,
+    })
 }
 
-pub(super) fn load_current_manifest_dependencies(
-    current_dir: &Path,
+pub(super) fn load_manifest_dependencies_from_root(
+    root_dir: &Path,
 ) -> Result<Vec<barbican::CargoManifestDependency>, CommandError> {
-    let manifest_paths = workspace_manifest_paths(current_dir).map_err(CommandError::Io)?;
+    let manifest_paths = workspace_manifest_paths(root_dir).map_err(CommandError::Io)?;
     let mut dependencies = Vec::new();
 
     for manifest_path in manifest_paths {
         let relative_display = manifest_path.display().to_string();
-        let text = fs::read_to_string(current_dir.join(&manifest_path)).map_err(|source| {
+        let text = fs::read_to_string(root_dir.join(&manifest_path)).map_err(|source| {
             CommandError::ManifestRead {
                 path: relative_display.clone(),
                 source,
@@ -266,6 +359,12 @@ pub(super) fn load_current_manifest_dependencies(
     }
 
     Ok(dependencies)
+}
+
+pub(super) fn load_current_manifest_dependencies(
+    current_dir: &Path,
+) -> Result<Vec<barbican::CargoManifestDependency>, CommandError> {
+    load_manifest_dependencies_from_root(current_dir)
 }
 
 pub(super) fn load_current_manifest_direct_requirements(
@@ -289,6 +388,12 @@ pub(super) fn load_current_manifest_direct_requirements(
     }
 
     Ok(dependencies)
+}
+
+pub(super) fn load_manifest_dependencies_from_base_dir(
+    base_dir: &Path,
+) -> Result<Vec<barbican::CargoManifestDependency>, CommandError> {
+    load_manifest_dependencies_from_root(base_dir)
 }
 
 pub(super) fn load_base_manifest_dependencies<R>(
@@ -392,7 +497,9 @@ pub(super) fn workspace_manifest_paths(current_dir: &Path) -> io::Result<Vec<Pat
     let crates_dir = current_dir.join("crates");
 
     if crates_dir.is_dir() {
-        collect_cargo_manifests(&crates_dir, current_dir, &mut paths)?;
+        collect_relative_files_matching(&crates_dir, current_dir, &mut paths, &mut |path| {
+            path.file_name().is_some_and(|name| name == "Cargo.toml")
+        })?;
     }
 
     Ok(paths.into_iter().collect())
@@ -402,30 +509,39 @@ pub(super) fn review_paths(current_dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut paths = workspace_manifest_paths(current_dir)?
         .into_iter()
         .collect::<BTreeSet<_>>();
-    paths.insert(PathBuf::from("Cargo.lock"));
-    paths.insert(PathBuf::from("barbican.toml"));
-    paths.insert(PathBuf::from("deny.toml"));
-    paths.insert(PathBuf::from("reviewed-targets.toml"));
-    paths.insert(PathBuf::from("docs/dependency-reviews"));
+    insert_review_root_paths(&mut paths);
+    paths.insert(PathBuf::from(REVIEW_RECORDS_DIR));
 
     Ok(paths.into_iter().collect())
 }
 
-fn collect_cargo_manifests(
+pub(super) fn insert_review_root_paths(paths: &mut BTreeSet<PathBuf>) {
+    paths.extend(REVIEW_ROOT_FILE_PATHS.into_iter().map(PathBuf::from));
+}
+
+pub(super) fn collect_relative_files_matching<F>(
     directory: &Path,
     repo_root: &Path,
     paths: &mut BTreeSet<PathBuf>,
-) -> io::Result<()> {
+    include_file: &mut F,
+) -> io::Result<()>
+where
+    F: FnMut(&Path) -> bool,
+{
+    if !directory.is_dir() {
+        return Ok(());
+    }
+
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let path = entry.path();
 
         if entry.file_type()?.is_dir() {
-            collect_cargo_manifests(&path, repo_root, paths)?;
+            collect_relative_files_matching(&path, repo_root, paths, include_file)?;
             continue;
         }
 
-        if entry.file_name() == "Cargo.toml" {
+        if (*include_file)(&path) {
             let relative = path
                 .strip_prefix(repo_root)
                 .map_err(io::Error::other)?

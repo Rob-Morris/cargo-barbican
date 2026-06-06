@@ -12,9 +12,12 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use barbican::{
-    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, parse_version_response_body,
+    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, OffsetDateTime,
+    parse_version_response_body,
 };
-use cargo_barbican::{Cli, CommandRunner, UreqCratesIoClient, run_cli_with_runner};
+use cargo_barbican::{
+    Cli, CommandRunner, UreqCratesIoClient, run_cli_with_runner, run_cli_with_runner_at,
+};
 use clap::Parser;
 use miniz_oxide::deflate::compress_to_vec;
 use sha2::{Digest, Sha256};
@@ -250,18 +253,26 @@ impl CommandRunner for FakeCommandRunner {
 fn age_reports_success_for_old_enough_versions() {
     let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
     let client =
-        FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-01T00:00:00Z", false);
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-01T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
-    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-        .expect("command should run");
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
-    assert!(rendered.contains("OK   serde@1.0.228: published 2026-05-01T00:00:00Z ("));
+    assert!(rendered.contains("OK   serde@1.0.228: published 2020-05-01T00:00:00Z ("));
     assert!(rendered.contains(" old)\n"));
     assert!(stderr.is_empty());
 }
@@ -270,7 +281,7 @@ fn age_reports_success_for_old_enough_versions() {
 fn age_uses_barbican_config_minimum_days() {
     let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
     let client =
-        FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-20T00:00:00Z", false);
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-22T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
     let mut stdout = Vec::new();
@@ -282,8 +293,16 @@ fn age_uses_barbican_config_minimum_days() {
     )
     .expect("config should write");
 
-    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-        .expect("command should run");
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stdout.is_empty());
@@ -344,7 +363,39 @@ fn cli_rejects_excessive_min_age_days() {
         Cli::try_parse_from(["cargo-barbican", "age-lock", "--min-age-days", "365001",]).is_err()
     );
     assert!(
+        Cli::try_parse_from([
+            "cargo-barbican",
+            "resolve",
+            "--min-age-days",
+            "365001",
+            "serde@1.0.228",
+        ])
+        .is_err()
+    );
+    assert!(
         Cli::try_parse_from(["cargo-barbican", "assess", "--min-age-days", "365001",]).is_err()
+    );
+    assert!(
+        Cli::try_parse_from([
+            "cargo-barbican",
+            "age-lock",
+            "--base-ref",
+            "HEAD",
+            "--base-lockfile",
+            "baseline/Cargo.lock",
+        ])
+        .is_err()
+    );
+    assert!(
+        Cli::try_parse_from([
+            "cargo-barbican",
+            "assess",
+            "--base-ref",
+            "HEAD",
+            "--base-dir",
+            "baseline",
+        ])
+        .is_err()
     );
 }
 
@@ -408,9 +459,13 @@ fn age_lock_reports_when_no_new_registry_packages_were_selected() {
 
 #[test]
 fn age_lock_checks_added_registry_packages_against_release_age() {
+    // Publish date sits 6 days before `fixed_now()` (2020-06-01), so the added
+    // package is too fresh against the injected clock. This also guards the
+    // age-lock call site's clock wiring: a regression that ignored the threaded
+    // `now` and read the wall clock would see a years-old release and pass.
     let cli = Cli::parse_from(["cargo-barbican", "age-lock"]);
     let client =
-        FakeCratesIoClient::default().with_release("serde@1.0.228", "2999-01-01T00:00:00Z", false);
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
     let runner = FakeCommandRunner::default().with_git_show(
         "HEAD:Cargo.lock",
         &lockfile_with_packages(&[("serde", "1.0.227", true)]),
@@ -425,6 +480,54 @@ fn age_lock_checks_added_registry_packages_against_release_age() {
     )
     .expect("current lockfile should write");
 
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL serde@1.0.228: published 2020-05-26T00:00:00Z")
+    );
+}
+
+#[test]
+fn age_lock_checks_added_registry_packages_against_non_git_base_lockfile() {
+    let cli = Cli::parse_from([
+        "cargo-barbican",
+        "age-lock",
+        "--base-lockfile",
+        "baseline/Cargo.lock",
+    ]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2999-01-01T00:00:00Z", false);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let baseline_dir = temp_dir.join("baseline");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::create_dir_all(&baseline_dir).expect("baseline directory should be creatable");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("current lockfile should write");
+    fs::write(
+        baseline_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
+    )
+    .expect("baseline lockfile should write");
+
     let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
         .expect("command should run");
 
@@ -438,15 +541,43 @@ fn age_lock_checks_added_registry_packages_against_release_age() {
 }
 
 #[test]
+fn age_lock_reports_missing_non_git_base_lockfile() {
+    let cli = Cli::parse_from([
+        "cargo-barbican",
+        "age-lock",
+        "--base-lockfile",
+        "missing/Cargo.lock",
+    ]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
+    )
+    .expect("current lockfile should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL missing/Cargo.lock: lockfile not found")
+    );
+}
+
+#[test]
 fn resolve_updates_selected_package_and_rechecks_the_lockfile_diff() {
     let cli = Cli::parse_from(["cargo-barbican", "resolve", "serde@1.0.228"]);
     let client =
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-01T00:00:00Z", false);
     let runner = FakeCommandRunner::default()
-        .with_git_show(
-            "HEAD:Cargo.lock",
-            &lockfile_with_packages(&[("serde", "1.0.227", true)]),
-        )
         .with_updated_lockfile(&lockfile_with_packages(&[("serde", "1.0.228", true)]))
         .with_cargo_metadata(&metadata_with_packages(&[(
             "serde",
@@ -459,7 +590,7 @@ fn resolve_updates_selected_package_and_rechecks_the_lockfile_diff() {
 
     fs::write(
         temp_dir.join("Cargo.lock"),
-        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
     )
     .expect("current lockfile should write");
 
@@ -486,6 +617,274 @@ fn resolve_updates_selected_package_and_rechecks_the_lockfile_diff() {
             .matches("OK   serde@1.0.228")
             .count(),
         2
+    );
+}
+
+#[test]
+fn resolve_honours_min_age_override_for_both_age_checks() {
+    let cli = Cli::parse_from([
+        "cargo-barbican",
+        "resolve",
+        "--min-age-days",
+        "3",
+        "serde@1.0.228",
+    ]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-20T00:00:00Z", false);
+    let runner = FakeCommandRunner::default()
+        .with_updated_lockfile(&lockfile_with_packages(&[("serde", "1.0.228", true)]))
+        .with_cargo_metadata(&metadata_with_packages(&[(
+            "serde",
+            "1.0.228",
+            "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        )]));
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        "[release_age]\nminimum_days = 30\n\n[high_scrutiny]\n\n[delegates]\n",
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
+    )
+    .expect("current lockfile should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("Cargo.lock")).expect("updated lockfile should read"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)])
+    );
+    assert_eq!(client.recorded_fetches(), vec!["serde@1.0.228".to_owned()]);
+    assert_eq!(
+        String::from_utf8(stdout)
+            .expect("stdout should be utf8")
+            .matches("OK   serde@1.0.228")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn resolve_recheck_flags_too_fresh_transitive_selection_under_injected_clock() {
+    // The explicit spec is old enough against `fixed_now()` (2020-06-01), but the
+    // update pulls in a transitive crate published only 6 days earlier. Only the
+    // post-update recheck can catch that, so this guards the resolve recheck call
+    // site's clock wiring: a regression reading the wall clock would see a
+    // years-old release and let it through.
+    let cli = Cli::parse_from(["cargo-barbican", "resolve", "serde@1.0.228"]);
+    let client = FakeCratesIoClient::default()
+        .with_release("serde@1.0.228", "2020-05-01T00:00:00Z", false)
+        .with_release("freshdep@1.0.0", "2020-05-26T00:00:00Z", false);
+    let runner = FakeCommandRunner::default()
+        .with_updated_lockfile(&lockfile_with_packages(&[
+            ("freshdep", "1.0.0", true),
+            ("serde", "1.0.228", true),
+        ]))
+        .with_cargo_metadata(&metadata_with_packages(&[(
+            "serde",
+            "1.0.228",
+            "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        )]));
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
+    )
+    .expect("current lockfile should write");
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL freshdep@1.0.0: published 2020-05-26T00:00:00Z")
+    );
+}
+
+#[test]
+fn resolve_dry_run_previews_lockfile_diff_without_mutating_repo() {
+    let cli = Cli::parse_from(["cargo-barbican", "resolve", "--dry-run", "serde@1.0.228"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-01T00:00:00Z", false);
+    let runner = FakeCommandRunner::default()
+        .with_updated_lockfile(&lockfile_with_packages(&[("serde", "1.0.228", true)]))
+        .with_cargo_metadata(&metadata_with_packages(&[(
+            "serde",
+            "1.0.228",
+            "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        )]));
+    let temp_dir = fresh_temp_dir();
+    let original_lockfile = lockfile_with_packages(&[("serde", "1.0.227", true)]);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(temp_dir.join("Cargo.lock"), &original_lockfile)
+        .expect("current lockfile should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("Cargo.lock")).expect("original lockfile should read"),
+        original_lockfile
+    );
+    assert_eq!(
+        runner.recorded_updates(),
+        vec![(
+            "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228".to_owned(),
+            "1.0.228".to_owned(),
+        )]
+    );
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert_eq!(rendered.matches("OK   serde@1.0.228").count(), 2);
+    assert!(rendered.contains("Dry run preview:"));
+    assert!(rendered.contains("diff --git a/Cargo.lock b/Cargo.lock"));
+    assert!(rendered.contains("--- a/Cargo.lock"));
+    assert!(rendered.contains("+++ b/Cargo.lock"));
+}
+
+#[test]
+fn resolve_dry_run_reports_when_no_lockfile_change_would_be_made() {
+    let cli = Cli::parse_from(["cargo-barbican", "resolve", "--dry-run", "serde@1.0.228"]);
+    let lockfile = lockfile_with_packages(&[("serde", "1.0.228", true)]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-01T00:00:00Z", false);
+    let runner = FakeCommandRunner::default()
+        .with_updated_lockfile(&lockfile)
+        .with_cargo_metadata(&metadata_with_packages(&[(
+            "serde",
+            "1.0.228",
+            "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        )]));
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(temp_dir.join("Cargo.lock"), &lockfile).expect("current lockfile should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("Cargo.lock")).expect("original lockfile should read"),
+        lockfile
+    );
+    assert!(
+        String::from_utf8(stdout)
+            .expect("stdout should be utf8")
+            .contains("Dry run: no Cargo.lock changes would be made.")
+    );
+}
+
+#[test]
+fn assess_reports_policy_violating_against_non_git_base_directory() {
+    let cli = Cli::parse_from(["cargo-barbican", "assess", "--base-dir", "baseline"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
+    let runner = FakeCommandRunner::default().with_cargo_metadata(&metadata_with_packages(&[(
+        "serde",
+        "1.0.228",
+        "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+    )]));
+    let temp_dir = fresh_temp_dir();
+    let baseline_dir = temp_dir.join("baseline");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::create_dir_all(&baseline_dir).expect("baseline directory should be creatable");
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("current manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("current lockfile should write");
+    fs::write(
+        baseline_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("baseline manifest should write");
+    fs::write(
+        baseline_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
+    )
+    .expect("baseline lockfile should write");
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Suggested classification: policy-violating"));
+    assert!(rendered.contains("age violations: serde@1.0.228 ("));
+}
+
+#[test]
+fn assess_reports_missing_non_git_base_directory_lockfile() {
+    let cli = Cli::parse_from(["cargo-barbican", "assess", "--base-dir", "missing"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("current manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
+    )
+    .expect("current lockfile should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL missing/Cargo.lock: lockfile not found")
     );
 }
 
@@ -616,7 +1015,7 @@ forked = { git = "https://example.com/forked.git" }
 fn assess_reports_policy_violating_when_new_selection_is_too_fresh() {
     let cli = Cli::parse_from(["cargo-barbican", "assess"]);
     let client =
-        FakeCratesIoClient::default().with_release("serde@1.0.228", "2999-01-01T00:00:00Z", false);
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
     let runner = FakeCommandRunner::default()
         .with_git_show(
             "HEAD:Cargo.lock",
@@ -643,8 +1042,16 @@ fn assess_reports_policy_violating_when_new_selection_is_too_fresh() {
     )
     .expect("current lockfile should write");
 
-    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-        .expect("command should run");
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stderr.is_empty());
@@ -782,6 +1189,73 @@ fn review_prints_checklist_and_diff_for_policy_files() {
     assert!(recorded_paths.contains(&PathBuf::from("docs/dependency-reviews")));
     assert!(recorded_paths.contains(&PathBuf::from("crates/barbican/Cargo.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("crates/cargo-barbican/Cargo.toml")));
+}
+
+#[test]
+fn review_supports_non_git_base_directories() {
+    let cli = Cli::parse_from(["cargo-barbican", "review", "--base-dir", "baseline"]);
+    let client = FakeCratesIoClient::default();
+    let runner =
+        FakeCommandRunner::default().with_git_diff("diff --git a/Cargo.lock b/Cargo.lock\n");
+    let temp_dir = fresh_temp_dir();
+    let base_dir = temp_dir.join("baseline");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    write_workspace_layout(&temp_dir);
+    write_workspace_layout(&base_dir);
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[workspace]\nmembers = []\n\n[workspace.dependencies]\nsimilar = \"=3.1.1\"\n",
+    )
+    .expect("current manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        "version = 4\n\n[[package]]\nname = \"similar\"\nversion = \"3.1.1\"\n",
+    )
+    .expect("current lockfile should write");
+    write_review_record(
+        &temp_dir,
+        "docs/dependency-reviews/2026-05-30-similar-3.1.1.md",
+    );
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Review checklist:"));
+    assert!(rendered.contains("diff --git a/Cargo.toml b/Cargo.toml"));
+    assert!(rendered.contains("+++ b/Cargo.toml"));
+    assert!(rendered.contains("similar = \"=3.1.1\""));
+    assert!(rendered.contains(
+        "diff --git a/docs/dependency-reviews/2026-05-30-similar-3.1.1.md b/docs/dependency-reviews/2026-05-30-similar-3.1.1.md"
+    ));
+    assert!(runner.recorded_diff_paths().is_empty());
+}
+
+#[test]
+fn review_reports_missing_non_git_base_directory() {
+    let cli = Cli::parse_from(["cargo-barbican", "review", "--base-dir", "baseline"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    write_workspace_layout(&temp_dir);
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(stderr).expect("stderr should be utf8"),
+        "FAIL baseline: review baseline directory not found\n"
+    );
 }
 
 #[test]
@@ -1088,6 +1562,51 @@ fn inspect_reports_routine_safe_for_clean_crate() {
         client.recorded_tarball_fetches(),
         vec!["sample@0.1.0".to_owned()]
     );
+}
+
+#[test]
+fn inspect_honours_injected_clock_for_release_age() {
+    // An otherwise-clean crate published 6 days before `fixed_now()` (2020-06-01)
+    // is too fresh and must classify policy-violating. Age is the sole driver
+    // here, so this guards the inspect call site's clock wiring: under the wall
+    // clock the release would read as years old and wrongly pass routine-safe.
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+        (
+            ".cargo_vcs_info.json",
+            "{\n  \"git\": {\"sha1\": \"abc123\"},\n  \"path_in_vcs\": \"sample\"\n}\n",
+        ),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "inspect", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-26T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let rendered = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.contains("classification: policy-violating"));
+    assert!(rendered.contains("below the 7-day minimum"));
 }
 
 #[test]
@@ -1677,6 +2196,10 @@ fn fresh_temp_dir() -> PathBuf {
     let path = base.join(unique);
     fs::create_dir_all(&path).expect("temp dir should be creatable");
     path
+}
+
+fn fixed_now() -> OffsetDateTime {
+    OffsetDateTime::from_unix_timestamp(1_590_969_600).expect("fixed timestamp should parse")
 }
 
 fn runner_exit(detail: String) -> cargo_barbican::RunnerError {
