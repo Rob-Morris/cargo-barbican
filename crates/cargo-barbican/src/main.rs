@@ -1,11 +1,15 @@
-//! `cargo barbican` — supply-chain hardening subcommand.
-//!
-//! Cargo invokes this binary as a subcommand. The first argument is the
-//! subcommand name (`barbican`), followed by user arguments.
-//!
-//! See `docs/functional/cli.md` for the planned subcommand surface.
+use std::io;
+use std::process::ExitCode;
 
-fn main() {
-    eprintln!("cargo-barbican: not yet implemented. See docs/functional/cli.md.");
-    std::process::exit(2);
+fn main() -> ExitCode {
+    let mut stdout = io::stdout();
+    let mut stderr = io::stderr();
+
+    match cargo_barbican::run(&mut stdout, &mut stderr) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("cargo-barbican: {error}");
+            ExitCode::from(1)
+        }
+    }
 }

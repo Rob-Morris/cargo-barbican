@@ -1,0 +1,12 @@
+[release_age]
+minimum_days = 7
+
+[high_scrutiny]
+new_direct_dependencies = true
+non_crates_io_direct_dependencies = true
+non_crates_io_source_changes = true
+build_rs_changes = true
+proc_macro_changes = true
+native_sys_crates = true
+
+[delegates]

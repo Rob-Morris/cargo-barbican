@@ -69,11 +69,26 @@ docs/
 
 ## Current state
 
-Layer 0 implementation scaffolding only. The documentation structure now
-follows the agent-ready standard, but the code remains at the empty-crate /
-placeholder-binary stage.
+The repo has now moved beyond scaffolding and the dependency baseline. The
+current implemented surface on `dev` is:
 
-Next steps are in `specification.md` under `Implementation bootstrap sequence`.
+- `cargo barbican age`
+- `cargo barbican age-lock`
+- `cargo barbican resolve`
+- `cargo barbican assess`
+- `cargo barbican review`
+- `cargo barbican audit`
+- `cargo barbican verify`
+
+The checked-in `barbican.toml` shape exists with `[release_age]`,
+`[high_scrutiny]`, and `[delegates]`. The library owns pure policy and parsing
+logic, while the binary owns subprocesses and the concrete `ureq` HTTP
+boundary.
+
+The next implementation step is the deeper intake layer after the first
+post-add `assess` slice: decide how far checksum, IOC, review-record, and
+Undertask-parity work should go next without changing the CLI surface
+silently.
 
 ## Source material to read before implementing
 
@@ -82,6 +97,7 @@ In undertask:
 - `scripts/check-crate-release-age.py`
 - `scripts/check-cargo-lock-release-age.py`
 - `scripts/select-cargo-package-id.py`
+- `scripts/assess-dependency-update.py`
 - `scripts/deps-rust-routine-update.sh`
 - `docs/dependency-management.md`
 - `deny.toml`
@@ -100,8 +116,7 @@ These are the reference. Re-implement faithfully; don't redesign.
 
 1. `cargo build --locked` passes.
 2. `cargo test --locked` passes.
-3. `cargo audit` and `cargo deny check advisories bans sources` pass (once deps and `deny.toml`
-   exist).
+3. `cargo audit` and `cargo deny check advisories bans sources` pass.
 4. Any new dependency has a checked-in review record.
 5. If either crate version changed, `docs/CHANGELOG.md` and the matching
    `docs/changelog/vX.Y.Z.md` entry changed with it.

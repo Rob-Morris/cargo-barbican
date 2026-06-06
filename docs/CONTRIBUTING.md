@@ -67,6 +67,18 @@ matching changelog entry in the same change, and use the canonical changelog
 `Summary` as the versioned commit subject per
 [standards/commit-messages.md](standards/commit-messages.md).
 
+## Branch Flow
+
+This repo uses a simple two-branch flow:
+
+- `main` is the stable branch
+- `dev` is the default ongoing development branch
+
+The hook and commit-message rules treat `main` as stricter: `WIP:` commits do
+not belong there, and versioned amend exceptions are not allowed there. Do
+day-to-day implementation work on `dev`, then merge or promote coherent
+versioned slices when ready.
+
 ## Hook Activation
 
 This repo ships opt-in distributed `pre-commit` and `commit-msg` hooks under
@@ -87,7 +99,7 @@ The hook package is described in:
 
 1. `cargo build --locked` passes.
 2. `cargo test --locked` passes.
-3. `cargo audit` and `cargo deny check advisories bans sources` pass once the repo has the required tooling and policy files.
+3. `cargo audit` and `cargo deny check advisories bans sources` pass.
 4. Any new dependency has a checked-in review record.
 5. If the repo version changed, `CHANGELOG.md` and `docs/changelog/vX.Y.Z.md` were updated together.
 6. Follow [`.canaries/pre-commit.md`](../.canaries/pre-commit.md), write the transient `.canary--pre-commit` receipt, and leave it unstaged.

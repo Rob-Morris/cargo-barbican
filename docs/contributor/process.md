@@ -64,6 +64,11 @@ The `commit-msg` hook enforces:
   - `docs/changelog/vX.Y.Z.md`
   - the matching `docs/CHANGELOG.md` row
 
+Repo branch policy is simple:
+
+- `main` is stable and keeps the stricter rules above
+- `dev` is the default working branch for ongoing implementation
+
 ## Verification Expectations
 
 The hook package is deliberately light. It does not replace the repo's actual

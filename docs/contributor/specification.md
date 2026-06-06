@@ -76,6 +76,35 @@ blocking I/O is acceptable at the CLI boundary.
 - The binary is the subprocess boundary for `git` and `cargo`.
 - Templates are shipped content for consumer repos, not repo-facing documentation.
 
+## Current slice note
+
+Slice 2 wires the first minimal `barbican.toml` shape into the repo. The
+checked-in root file carries the phase-1 sections:
+
+- `[release_age]`
+- `[high_scrutiny]`
+- `[delegates]`
+
+`[release_age].minimum_days` is active for `age`, `age-lock`, `resolve`, and
+the first `assess` slice.
+
+The first active `high_scrutiny` keys are:
+
+- `new_direct_dependencies`
+- `non_crates_io_direct_dependencies`
+- `non_crates_io_source_changes`
+- `build_rs_changes`
+- `proc_macro_changes`
+- `native_sys_crates`
+
+Those keys drive the first post-add Rust-only `cargo barbican assess`
+implementation. Do not add broader `high_scrutiny` keys until a later slice
+proves a concrete need.
+
+The first `assess` slice is fail-closed. If the tool cannot complete a
+required dependency-surface inspection for that slice, it reports a blocking
+finding rather than silently treating the package as safe.
+
 ## Open questions
 
 - Whether `cargo_lock` is acceptable instead of hand-rolling over `toml`.

@@ -124,6 +124,10 @@ together would be convenient.
 **`WIP:` is for branch work only.** It is the escape hatch for non-versioned,
 non-support commits before they are ready to ship.
 
+**In this repo, that normally means `dev`.** `main` is the stable branch;
+ongoing implementation work belongs on `dev` unless there is a deliberate
+reason to do otherwise.
+
 ## Local Enforcement
 
 When distributed hooks are enabled with `git config core.hooksPath
