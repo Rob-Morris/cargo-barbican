@@ -10,16 +10,16 @@ For commit-time workflow, also read
 Route-map for agents working in this repo. Read
 [`../architecture/overview.md`](../architecture/overview.md) for the
 authoritative design, then
-[`specification.md`](specification.md) for the implementation plan and
-contributor-facing constraints.
+[`specification.md`](specification.md) for the current contributor-facing
+constraints.
 
 ## What you are building
 
 A Cargo subcommand for Rust supply-chain hardening. Pure Rust. Replaces the
 Python scripts currently in [`undertask`](https://github.com/rob-morris/undertask).
 
-The full design, bootstrap sequence, and constraints are in the architecture,
-functional, and contributor docs. This file is a route-map.
+The full current design, behaviour, and contributor constraints are in the
+architecture, functional, and contributor docs. This file is a route-map.
 
 ## Hard stops — request user input before any of these
 
@@ -77,6 +77,7 @@ current implemented surface on `dev` is:
 - `cargo barbican resolve`
 - `cargo barbican assess`
 - `cargo barbican inspect`
+- `cargo barbican pin-check`
 - `cargo barbican review`
 - `cargo barbican audit`
 - `cargo barbican verify`
@@ -90,8 +91,16 @@ The current intake layer now includes the first pre-add deep-review slice:
 
 - `cargo barbican inspect` exists as the first Rust-only, crates.io-only
   pre-add deep-review surface
-- `pin-check` remains explicitly deferred until the review-record and checked-pin
-  contract is machine-shaped rather than prose-only
+- `cargo barbican pin-check` now exists as the first reviewed-target
+  enforcement surface over repo-root `reviewed-targets.toml`
+- `pin-check` now validates that every active reviewed family points at a real
+  checked-in review record path before it trusts that reviewed-target entry
+- the first gate trusts exact `Cargo.lock` parity plus optional exact direct
+  manifest requirements; stronger build-input parity remains deferred
+- for structured crates.io `resolved` entries, `pin-check` also reconciles the
+  reviewed `checksum_sha256` against the resolved `Cargo.lock` checksum chain
+- `cargo barbican verify` now reuses the default `pin-check` gate before
+  running locked build/test verification
 
 ## Source material to read before implementing
 

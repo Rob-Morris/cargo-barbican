@@ -12,9 +12,9 @@ This repo follows the
 Start with [README.md](README.md), which routes to the documentation layers:
 
 - [User](user/README.md) — consumer adoption and integration guidance
-- [Functional](functional/README.md) — planned CLI and behaviour contracts
+- [Functional](functional/README.md) — CLI and behaviour contracts
 - [Architecture](architecture/README.md) — goals, boundaries, and decision routing
-- [Contributor](contributor/README.md) — implementation plan and contributor workflow
+- [Contributor](contributor/README.md) — contributor constraints and workflow
 - [Standards](standards/README.md) — shared standards adopted by this repo
 
 Convention-based exceptions at the docs root:
@@ -30,10 +30,10 @@ indexes so the routing chain stays explicit.
 | Change type | Update |
 |---|---|
 | Consumer adoption or re-sync flow changes | `user/integration.md` |
-| Planned subcommand surface, exit codes, or behavioural contract changes | `functional/cli.md` |
+| Subcommand surface, exit codes, or behavioural contract changes | `functional/cli.md` |
 | System goals, boundaries, library/binary split, or architectural rationale changes | `architecture/overview.md` |
 | Non-obvious architectural decisions that should be preserved historically | add a DD under `architecture/decisions/` and update its index |
-| Implementation plan, dependency discipline, or shipped-template boundary changes | `contributor/specification.md` |
+| Contributor constraints, dependency discipline, or shipped-template boundary changes | `contributor/specification.md` |
 | Repo-specific agent workflow or hard stops | `contributor/agents.md` |
 | Dependency review policy or record format changes | `dependency-reviews/README.md` |
 | Changelog policy or structure changes | `standards/changelog.md`, `standards/README.md`, and `CHANGELOG.md` if the index contract changes |

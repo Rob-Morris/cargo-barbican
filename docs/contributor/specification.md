@@ -1,7 +1,7 @@
 # Contributor Specification
 
-Contributor-facing specification for implementing cargo-barbican. This document
-captures the current build plan, dependency discipline, and shipped-template
+Contributor-facing specification for cargo-barbican. This document captures the
+current contributor constraints, dependency discipline, and shipped-template
 boundary.
 
 ## Scope
@@ -29,9 +29,10 @@ deviations should be documented explicitly.
 ## Dependency discipline
 
 Every entry must have a corresponding record in `docs/dependency-reviews/`
-before it is added to `Cargo.toml`. Most planned crates inherit from
-Undertask. `ureq` and `time` are first-principles reviews in cargo-barbican
-itself because they define the HTTP and time/parsing boundaries directly.
+before it is added to `Cargo.toml`. Most listed crates inherit from
+Undertask's reviewed set. `ureq` and `time` are first-principles reviews in
+cargo-barbican itself because they define the HTTP and time/parsing boundaries
+directly.
 
 | Crate | Version | Source | Notes |
 |---|---|---|---|
@@ -46,28 +47,6 @@ itself because they define the HTTP and time/parsing boundaries directly.
 `ureq` is preferred over a heavier HTTP stack because the surface is small and
 blocking I/O is acceptable at the CLI boundary.
 
-## Implementation bootstrap sequence
-
-1. Layer 0 scaffolding already exists. Do not recreate the workspace.
-2. Establish self-policy first:
-   - copy undertask's `deny.toml` into this repo root
-   - install `cargo-audit` and `cargo-deny`
-   - write the tool-install review records under `docs/dependency-reviews/`
-   - run `cargo audit` and `cargo deny check advisories bans sources` against the empty workspace as a smoke test
-3. Write inherited review records for the planned crates that already exist in undertask's trust set.
-4. Choose and review a `ureq` version that satisfies the minimum release-age policy.
-5. Add reviewed dependencies to `crates/barbican/Cargo.toml`, then run `cargo audit` and `cargo deny check advisories bans sources`.
-6. Implement the library crate in dependency order:
-   - lockfile parsing
-   - `cargo metadata` parsing
-   - crates.io API client behind a trait
-   - RFC 3339 publish-time parsing and release-age computation
-   - lockfile-diff support
-7. Implement the binary crate as a thin CLI shim over the library.
-8. Self-host with `cargo barbican audit` and `cargo barbican verify`.
-9. Populate `templates/` with the consumer-facing policy files and templates.
-10. Keep the user adoption guide in `docs/user/integration.md` in step with the shipped consumer flow.
-
 ## Constraints
 
 - No new dependencies without a review record.
@@ -75,18 +54,19 @@ blocking I/O is acceptable at the CLI boundary.
 - The library must remain testable without network access.
 - The binary is the subprocess boundary for `git` and `cargo`.
 - Templates are shipped content for consumer repos, not repo-facing documentation.
+- Future planning, slice sequencing, and deferred design work live in Brain,
+  not in the canonical repo docs.
 
-## Current slice note
+## Current implemented policy surface
 
-Slice 2 wires the first minimal `barbican.toml` shape into the repo. The
-checked-in root file carries the phase-1 sections:
+The checked-in root `barbican.toml` carries these sections:
 
 - `[release_age]`
 - `[high_scrutiny]`
 - `[delegates]`
 
-`[release_age].minimum_days` is active for `age`, `age-lock`, `resolve`, and
-the first `assess` slice.
+`[release_age].minimum_days` is active for `age`, `age-lock`, `resolve`,
+`assess`, and `inspect`.
 
 The first active `high_scrutiny` keys are:
 
@@ -97,24 +77,17 @@ The first active `high_scrutiny` keys are:
 - `proc_macro_changes`
 - `native_sys_crates`
 
-Those keys drive the first post-add Rust-only `cargo barbican assess`
-implementation. Do not add broader `high_scrutiny` keys until a later slice
-proves a concrete need.
+`cargo barbican assess` is fail-closed. If the tool cannot complete a required
+dependency-surface inspection for the current implemented surface, it reports a
+blocking finding rather than silently treating the package as safe.
 
-The first `assess` slice is fail-closed. If the tool cannot complete a
-required dependency-surface inspection for that slice, it reports a blocking
-finding rather than silently treating the package as safe.
-
-## Slice 3 implemented baseline
-
-The next shaped intake surface was `cargo barbican inspect`, not a broader
-second expansion of `assess`. That first `inspect` slice is now implemented
-with this contract:
+`cargo barbican inspect` is currently:
 
 - Rust-only and crates.io-only
 - exact `crate@version` input only
 - release-age aware, using the same default and override rules as `age`
-- checksum-oriented: local tarball SHA-256 must match the published crates.io checksum
+- checksum-oriented: local tarball SHA-256 must match the published crates.io
+  checksum
 - provenance-aware: inspect `.cargo_vcs_info.json` when present
 - high-scrutiny oriented: enumerate `build.rs`, `proc-macro`, and native
   `-sys` / FFI surfaces, then run a fixed IOC scan over build-time and
@@ -123,18 +96,40 @@ with this contract:
   inspection failures are blocking; surfaced high-scrutiny execution surfaces
   are elevated-risk
 
-What is still explicitly deferred at this stage:
+The reviewed-target enforcement baseline is:
 
-- review-record existence enforcement
-- lockfile-vs-review pin reconciliation
-- any `pin-check` command surface
+- repo-root `reviewed-targets.toml` is the machine-enforced source of truth
+- checked-in Markdown review records remain the human explanation and evidence
+  surface
+- each active `[[rust.families]]` entry carries:
+  - `name`
+  - `review_record`
+  - optional `direct` exact manifest requirements, including the leading `=`
+  - `resolved` exact `Cargo.lock` versions
+- `pin-check` validates that every active `review_record` path actually exists
+  before the family declaration is trusted
+- `pin-check` checks exact resolved `Cargo.lock` parity plus any configured
+  exact direct manifest requirements
+- `verify` reuses that same default reviewed-target gate before executing
+  `cargo build --locked` and `cargo test --locked`
 
-Do not add broader `high_scrutiny` keys or a `pin-check` CLI surface until the
-review-record and checked-pin contract is shaped explicitly.
+For crates.io reviewed families, `resolved` can use a structured artefact form:
 
-## Open questions
+```toml
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "..." }
+serde_derive = { version = "1.0.228", checksum_sha256 = "..." }
+```
 
-- Whether `cargo_lock` is acceptable instead of hand-rolling over `toml`.
-- Whether the current `time` feature set should stay at `std` + `parsing`, or grow only if implementation proves it necessary.
-- Whether v0.1 should ship the templates immediately or defer them to the first post-tool release.
-- What the machine-readable review-record contract must be before `pin-check` can become a real command rather than a design placeholder.
+Contract notes:
+
+- the existing exact-string form remains acceptable for compatibility
+- the structured form is the intended path for crates.io reviewed families
+- `checksum_sha256` is the reviewed `.crate` tarball digest, expected to match
+  both crates.io metadata and the resolved `Cargo.lock` checksum chain
+- `pin-check` remains read-only and local-only; it does not fetch from the
+  network during enforcement
+- when a structured `checksum_sha256` is present, `pin-check` fails closed on
+  checksum drift even if the resolved version still matches
+- the current implementation does not claim stronger installed-tree or broader
+  non-crates.io artefact parity beyond this gate

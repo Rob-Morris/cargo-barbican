@@ -1,9 +1,9 @@
 # CLI Contract
 
-Planned `cargo barbican` surface for v0.1. The current implementation scaffold
-may lag this contract; this document describes the intended behaviour.
+Current `cargo barbican` surface for v0.1. This document describes the
+intended behaviour of the implemented command set on `dev`.
 
-## Planned subcommands
+## Subcommands
 
 ```text
 cargo barbican age [--min-age-days N] <crate@version>...
@@ -67,16 +67,47 @@ cargo barbican inspect [--min-age-days N] <crate@version>...
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
 
+cargo barbican pin-check [--config reviewed-targets.toml]
+    Check active reviewed Rust families against the current workspace manifests
+    and `Cargo.lock`.
+    The first slice is local-only and read-only. It:
+    - reads the repo-root `reviewed-targets.toml` manifest by default
+    - skips successfully when that file is absent
+    - skips successfully when no active Rust families are configured
+    - checks that each active `review_record` path exists in the repo
+    - checks optional exact direct manifest requirements, including the leading `=`
+    - checks exact resolved `Cargo.lock` versions for every active reviewed family
+    - for structured crates.io `resolved` entries, also checks the reviewed
+      `checksum_sha256` against the resolved `Cargo.lock` checksum chain
+    The first slice treats exact `Cargo.lock` parity as the load-bearing
+    execution gate. It does not yet verify installed-tree or stronger
+    build-input parity.
+    Structured crates.io reviewed-artefact form:
+    - `serde = { version = "1.0.228", checksum_sha256 = "..." }`
+    - legacy string entries such as `serde = "1.0.228"` remain accepted
+    - stronger installed-tree or broader non-crates.io artefact parity remains
+      out of scope for this slice
+
 cargo barbican review
-    Print a `git diff` of policy-relevant files (Cargo.toml, Cargo.lock,
-    deny.toml, member Cargo.toml files) with a checklist printed above.
+    Print a `git diff` of policy-relevant files with a checklist printed above.
+    This includes:
+    - repo-root `Cargo.toml`, `Cargo.lock`, `barbican.toml`, `deny.toml`,
+      and `reviewed-targets.toml` when present
+    - workspace member `Cargo.toml` files
+    - checked-in dependency review records under `docs/dependency-reviews/`
 
 cargo barbican audit
     Run `cargo audit` and `cargo deny check advisories bans sources`.
     Fail if either fails.
 
 cargo barbican verify
-    Run `cargo build --locked` and `cargo test --locked`.
+    Run the local execution gates in order:
+    1. `pin-check` with the default repo-root `reviewed-targets.toml`
+    2. `cargo build --locked`
+    3. `cargo test --locked`
+    If no reviewed-target manifest is present, or no active Rust families are
+    configured, the pin-check step skips successfully and verification
+    continues.
 ```
 
 ## Exit codes
@@ -91,4 +122,10 @@ cargo barbican verify
 - `crates/cargo-barbican/` owns CLI parsing, subprocess calls, and the concrete HTTP implementation.
 - Behaviour should match undertask where the surface overlaps unless the docs explicitly say otherwise.
 - The deeper intake path is now shaped as a separate `inspect` command rather than additional scope hidden inside `assess`.
-- Review-record reconciliation and lockfile pin enforcement remain a later surface. `pin-check` is the current intended follow-on name, but it is not yet part of the CLI contract.
+- Reviewed-target enforcement has a dedicated `pin-check` surface, and `verify`
+  now reuses that same gate before code-executing build/test steps. The
+  foundation for that work is checked-in review records plus a repo-root
+  `reviewed-targets.toml` manifest for active Rust families.
+- The current reviewed-target hardening step includes crates.io
+  artefact-digest reconciliation in `reviewed-targets.toml`, not a direct port
+  of the JS installed-tree gate.

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{ExactCrateSpec, ExactCrateSpecError};
+use crate::{ExactCrateSpec, ExactCrateSpecError, Sha256Digest};
 
 pub const CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
@@ -23,6 +23,7 @@ pub struct LockedPackage {
     pub name: String,
     pub version: String,
     pub source: Option<String>,
+    pub checksum: Option<Sha256Digest>,
 }
 
 impl LockedPackage {
@@ -54,10 +55,24 @@ pub fn parse_lockfile(text: &str) -> Result<Lockfile, LockfileError> {
             }
         })?;
 
+        let checksum = package
+            .checksum
+            .map(|checksum| {
+                Sha256Digest::try_from(checksum.as_str()).map_err(|_| {
+                    LockfileError::InvalidChecksum {
+                        name: package.name.clone(),
+                        version: package.version.clone(),
+                        checksum,
+                    }
+                })
+            })
+            .transpose()?;
+
         packages.push(LockedPackage {
             name: package.name,
             version: package.version,
             source: package.source,
+            checksum,
         });
     }
 
@@ -103,6 +118,12 @@ pub enum LockfileError {
         #[source]
         source: ExactCrateSpecError,
     },
+    #[error("invalid Cargo.lock checksum for {name}@{version}: {checksum}")]
+    InvalidChecksum {
+        name: String,
+        version: String,
+        checksum: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,11 +137,14 @@ struct RawLockedPackage {
     name: String,
     version: String,
     source: Option<String>,
+    checksum: Option<String>,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{CRATES_IO_SOURCE, ExactCrateSpec, added_crates_io_specs, parse_lockfile};
+    use crate::{
+        CRATES_IO_SOURCE, ExactCrateSpec, Sha256Digest, added_crates_io_specs, parse_lockfile,
+    };
 
     #[test]
     fn parses_lockfile_packages() {
@@ -132,6 +156,7 @@ version = 4
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [[package]]
 name = "local-crate"
@@ -145,6 +170,13 @@ version = "0.1.0"
         assert_eq!(
             lockfile.packages()[0].source.as_deref(),
             Some(CRATES_IO_SOURCE)
+        );
+        assert_eq!(
+            lockfile.packages()[0]
+                .checksum
+                .as_ref()
+                .map(Sha256Digest::as_str),
+            Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
         );
         assert_eq!(lockfile.packages()[1].source, None);
     }
@@ -215,6 +247,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         assert!(matches!(
             error,
             crate::LockfileError::InvalidPackageSpec { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_lockfile_checksums() {
+        let error = parse_lockfile(
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "not-a-sha256"
+"#,
+        )
+        .expect_err("invalid lockfile checksum should fail");
+
+        assert!(matches!(
+            error,
+            crate::LockfileError::InvalidChecksum { .. }
         ));
     }
 }

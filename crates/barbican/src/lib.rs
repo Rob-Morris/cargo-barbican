@@ -11,7 +11,10 @@ pub mod inspect;
 pub mod lockfile;
 pub mod manifest;
 pub mod metadata;
+pub mod pin_check;
 pub mod release_age;
+pub mod reviewed_targets;
+pub mod sha256;
 pub mod spec;
 
 pub use assessment::{
@@ -33,15 +36,24 @@ pub use lockfile::{
     CRATES_IO_SOURCE, LockedPackage, Lockfile, LockfileError, added_crates_io_specs, parse_lockfile,
 };
 pub use manifest::{
-    CargoDependencySourceKind, CargoManifestDependency, CargoManifestError,
-    parse_manifest_dependencies,
+    CargoDependencySourceKind, CargoManifestDependency, CargoManifestDirectRequirement,
+    CargoManifestError, parse_manifest_dependencies, parse_manifest_direct_requirements,
 };
 pub use metadata::{
     CargoMetadata, CargoMetadataError, MetadataPackageSurfaces, package_surfaces,
     parse_cargo_metadata, select_package_id,
 };
+pub use pin_check::{
+    ObservedDirectDependency, ReviewedDirectDependencyCheck, ReviewedResolvedDependencyCheck,
+    RustReviewedFamilyReport, RustReviewedTargetsReport, check_reviewed_rust_targets,
+};
 pub use release_age::{
     ReleaseAgeOutcome, ReleaseAgeReport, check_release_age, check_release_age_at,
     evaluate_release_age, format_age,
 };
+pub use reviewed_targets::{
+    ReviewedResolvedTarget, ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError,
+    parse_reviewed_targets_toml,
+};
+pub use sha256::{Sha256Digest, Sha256DigestError};
 pub use spec::{ExactCrateSpec, ExactCrateSpecError};

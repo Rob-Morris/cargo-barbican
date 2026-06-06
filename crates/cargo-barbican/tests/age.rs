@@ -6,6 +6,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -745,7 +746,7 @@ fn review_prints_no_changes_message_for_empty_diff() {
     assert!(stderr.is_empty());
     assert_eq!(
         String::from_utf8(stdout).expect("stdout should be utf8"),
-        "No Rust dependency manifest or lockfile changes detected.\n"
+        "No Rust dependency policy changes detected.\n"
     );
 }
 
@@ -769,11 +770,16 @@ fn review_prints_checklist_and_diff_for_policy_files() {
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("Review checklist:"));
     assert!(rendered.contains("diff --git a/Cargo.lock b/Cargo.lock"));
+    assert!(rendered.contains("reviewed-targets.toml"));
+    assert!(rendered.contains("checked-in review record"));
 
     let recorded_paths = runner.recorded_diff_paths();
     assert!(recorded_paths.contains(&PathBuf::from("Cargo.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("Cargo.lock")));
+    assert!(recorded_paths.contains(&PathBuf::from("barbican.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("deny.toml")));
+    assert!(recorded_paths.contains(&PathBuf::from("reviewed-targets.toml")));
+    assert!(recorded_paths.contains(&PathBuf::from("docs/dependency-reviews")));
     assert!(recorded_paths.contains(&PathBuf::from("crates/barbican/Cargo.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("crates/cargo-barbican/Cargo.toml")));
 }
@@ -830,8 +836,123 @@ fn verify_runs_locked_build_and_test() {
         .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert_eq!(
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        "Pin check: no reviewed-targets.toml present; skipping.\n"
+    );
+    assert!(stderr.is_empty());
     assert_eq!(*runner.build_calls.borrow(), 1);
     assert_eq!(*runner.test_calls.borrow(), 1);
+}
+
+#[test]
+fn verify_runs_pin_check_before_build_and_test() {
+    let cli = Cli::parse_from(["cargo-barbican", "verify"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[
+            (
+                "serde",
+                "1.0.228",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            ),
+            (
+                "serde_derive",
+                "1.0.228",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                None,
+            ),
+        ]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+serde_derive = "1.0.228"
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pin check: PASS"));
+    assert_eq!(*runner.build_calls.borrow(), 1);
+    assert_eq!(*runner.test_calls.borrow(), 1);
+}
+
+#[test]
+fn verify_stops_before_build_on_reviewed_target_drift() {
+    let cli = Cli::parse_from(["cargo-barbican", "verify"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = "1.0.228"
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pin check: FAIL"));
+    assert_eq!(*runner.build_calls.borrow(), 0);
+    assert_eq!(*runner.test_calls.borrow(), 0);
 }
 
 #[test]
@@ -839,7 +960,7 @@ fn age_smoke_tests_the_ureq_client_against_a_local_http_server() {
     let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
     let Some((base_url, requests, handle)) = spawn_http_stub(
         "HTTP/1.1 200 OK",
-        r#"{"version":{"created_at":"2026-05-01T00:00:00Z","yanked":false}}"#,
+        r#"{"version":{"checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"2026-05-01T00:00:00Z","yanked":false}}"#,
     ) else {
         return;
     };
@@ -1036,6 +1157,369 @@ fn inspect_reports_policy_violation_for_checksum_mismatch() {
     assert!(rendered.contains("IOC hits: none"));
 }
 
+#[test]
+fn pin_check_skips_when_reviewed_targets_manifest_is_absent() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("lockfile should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert_eq!(
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        "Pin check: no reviewed-targets.toml present; skipping.\n"
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn pin_check_passes_when_reviewed_targets_match_manifest_and_lockfile() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[
+            (
+                "serde",
+                "1.0.228",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            ),
+            (
+                "serde_derive",
+                "1.0.228",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                None,
+            ),
+        ]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+serde_derive = "1.0.228"
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pin check: PASS"));
+    assert!(rendered.contains("family: serde-family"));
+    assert!(rendered.contains("review record ok at docs/dependency-reviews/2026-05-27-serde.md"));
+    assert!(rendered.contains("direct spec ok for serde=1.0.228"));
+    assert!(rendered.contains(
+        "Cargo.lock ok for serde: matched {version=1.0.228, checksum_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    ));
+    assert!(rendered.contains("Cargo.lock ok for serde_derive: matched {version=1.0.228}"));
+}
+
+#[test]
+fn pin_check_fails_when_review_record_is_missing() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[
+            ("serde", "1.0.228", true),
+            ("serde_derive", "1.0.228", true),
+        ]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = "1.0.228"
+serde_derive = "1.0.228"
+"#,
+    )
+    .expect("reviewed targets should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pin check: FAIL"));
+    assert!(
+        rendered.contains("review record missing at docs/dependency-reviews/2026-05-27-serde.md")
+    );
+}
+
+#[test]
+fn pin_check_fails_when_manifest_or_lockfile_drift_from_reviewed_targets() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = "1.0.228"
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pin check: FAIL"));
+    assert!(rendered.contains(r#"direct spec mismatch for serde: expected "=1.0.228""#));
+    assert!(rendered.contains(r#"found ["Cargo.toml:dependencies:1 (registry)"]"#));
+    assert!(
+        rendered
+            .contains(r#"Cargo.lock mismatch for serde: expected {version=1.0.228}, found versions ["1.0.227"], checksums []"#)
+    );
+}
+
+#[test]
+fn pin_check_fails_when_reviewed_checksum_drifts_from_lockfile() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[(
+            "serde",
+            "1.0.228",
+            Some("registry+https://github.com/rust-lang/crates.io-index"),
+            Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
+        )]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pin check: FAIL"));
+    assert!(rendered.contains(
+        "Cargo.lock mismatch for serde: expected {version=1.0.228, checksum_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}, found versions [\"1.0.228\"], checksums [\"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\"]"
+    ));
+}
+
+#[test]
+fn pin_check_fails_when_reviewed_checksum_is_missing_from_lockfile() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[(
+            "serde",
+            "1.0.228",
+            Some("registry+https://github.com/rust-lang/crates.io-index"),
+            None,
+        )]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pin check: FAIL"));
+    assert!(rendered.contains(
+        "Cargo.lock mismatch for serde: expected {version=1.0.228, checksum_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}, found versions [\"1.0.228\"], checksums []"
+    ));
+}
+
+#[test]
+fn pin_check_accepts_uppercase_lockfile_checksum_for_reviewed_target() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[(
+            "serde",
+            "1.0.228",
+            Some("registry+https://github.com/rust-lang/crates.io-index"),
+            Some("0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"),
+        )]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains(
+        "Cargo.lock ok for serde: matched {version=1.0.228, checksum_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+    ));
+}
+
 fn build_crate_tarball(files: &[(&str, &str)]) -> Vec<u8> {
     let mut tarball = Vec::new();
     {
@@ -1077,10 +1561,26 @@ fn sha256_hex(bytes: &[u8]) -> String {
 fn write_workspace_layout(temp_dir: &Path) {
     fs::create_dir_all(temp_dir.join("crates/barbican")).expect("crate dir should exist");
     fs::create_dir_all(temp_dir.join("crates/cargo-barbican")).expect("crate dir should exist");
+    fs::create_dir_all(temp_dir.join("docs/dependency-reviews")).expect("review dir should exist");
     fs::write(temp_dir.join("Cargo.toml"), "[workspace]\nmembers = []\n")
         .expect("root manifest should write");
     fs::write(temp_dir.join("Cargo.lock"), "version = 4\n").expect("lockfile should write");
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        "[release_age]\nminimum_days = 7\n",
+    )
+    .expect("barbican config should write");
     fs::write(temp_dir.join("deny.toml"), "[advisories]\n").expect("deny config should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        "[rust]\nfamilies = []\n",
+    )
+    .expect("reviewed targets should write");
+    fs::write(
+        temp_dir.join("docs/dependency-reviews/2026-05-27-sample.md"),
+        "# Dependency Review: sample\n",
+    )
+    .expect("review record should write");
     fs::write(
         temp_dir.join("crates/barbican/Cargo.toml"),
         "[package]\nname = \"barbican\"\nversion = \"0.1.1\"\n",
@@ -1093,8 +1593,15 @@ fn write_workspace_layout(temp_dir: &Path) {
     .expect("member manifest should write");
 }
 
+fn write_review_record(temp_dir: &Path, relative_path: &str) {
+    let path = temp_dir.join(relative_path);
+    let parent = path.parent().expect("review record should have a parent");
+    fs::create_dir_all(parent).expect("review record dir should exist");
+    fs::write(path, "# Dependency Review\n").expect("review record should write");
+}
+
 fn lockfile_with_packages(packages: &[(&str, &str, bool)]) -> String {
-    lockfile_with_package_sources(
+    lockfile_with_package_records(
         &packages
             .iter()
             .map(|(name, version, crates_io)| {
@@ -1102,6 +1609,7 @@ fn lockfile_with_packages(packages: &[(&str, &str, bool)]) -> String {
                     *name,
                     *version,
                     crates_io.then_some("registry+https://github.com/rust-lang/crates.io-index"),
+                    None,
                 )
             })
             .collect::<Vec<_>>(),
@@ -1109,14 +1617,26 @@ fn lockfile_with_packages(packages: &[(&str, &str, bool)]) -> String {
 }
 
 fn lockfile_with_package_sources(packages: &[(&str, &str, Option<&str>)]) -> String {
+    lockfile_with_package_records(
+        &packages
+            .iter()
+            .map(|(name, version, source)| (*name, *version, *source, None))
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn lockfile_with_package_records(packages: &[(&str, &str, Option<&str>, Option<&str>)]) -> String {
     let mut lockfile = String::from("version = 4\n");
 
-    for (name, version, source) in packages {
+    for (name, version, source, checksum) in packages {
         lockfile.push_str("\n[[package]]\n");
         lockfile.push_str(&format!("name = \"{name}\"\n"));
         lockfile.push_str(&format!("version = \"{version}\"\n"));
         if let Some(source) = source {
             lockfile.push_str(&format!("source = \"{source}\"\n"));
+        }
+        if let Some(checksum) = checksum {
+            lockfile.push_str(&format!("checksum = \"{checksum}\"\n"));
         }
     }
 
@@ -1137,6 +1657,7 @@ fn metadata_with_packages(packages: &[(&str, &str, &str)]) -> String {
 
 fn fresh_temp_dir() -> PathBuf {
     static BASE: OnceLock<PathBuf> = OnceLock::new();
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let base = BASE.get_or_init(|| {
         let root = std::env::temp_dir().join("cargo-barbican-tests");
@@ -1145,12 +1666,13 @@ fn fresh_temp_dir() -> PathBuf {
     });
 
     let unique = format!(
-        "{}-{}",
+        "{}-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after unix epoch")
-            .as_nanos()
+            .as_nanos(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
     );
     let path = base.join(unique);
     fs::create_dir_all(&path).expect("temp dir should be creatable");

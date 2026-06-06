@@ -7,7 +7,7 @@ routes to its artefacts.
 ## Layer Indexes
 
 - [User](user/README.md) — how to adopt and use cargo-barbican in a consumer repo
-- [Functional](functional/README.md) — planned CLI and behaviour contracts
+- [Functional](functional/README.md) — CLI and behaviour contracts
 - [Architecture](architecture/README.md) — goals, boundaries, and design-decision routing
 - [Contributor](contributor/README.md) — how to contribute to this repo
 - [Standards](standards/README.md) — shared standards adopted by this repo
@@ -16,6 +16,8 @@ routes to its artefacts.
 
 - [Contributing](CONTRIBUTING.md) — contributor entry point at the chosen location
 - [Changelog](CHANGELOG.md) — shipped version-history index with per-version files under `changelog/`
+- [Design Brief](design.md) — compatibility pointer to the canonical design docs
+- [Integration Pointer](integration.md) — compatibility pointer to the canonical user integration guide
 
 ## Shared Standards
 

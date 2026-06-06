@@ -3,6 +3,7 @@ mod age_lock;
 mod assess;
 mod audit;
 mod inspect;
+mod pin_check;
 mod resolve;
 mod review;
 mod verify;
@@ -17,7 +18,9 @@ use std::process::ExitCode;
 
 use barbican::{
     BarbicanConfig, ConfigLoadError, CratesIoClient, ExactCrateSpec, ReleaseAgeOutcome,
-    ReleaseAgeReport, check_release_age, format_age, parse_lockfile, parse_manifest_dependencies,
+    ReleaseAgeReport, ReviewedTargets, ReviewedTargetsError, check_release_age, format_age,
+    parse_lockfile, parse_manifest_dependencies, parse_manifest_direct_requirements,
+    parse_reviewed_targets_toml,
 };
 use clap::Parser;
 
@@ -90,9 +93,10 @@ where
             min_age_days,
             specs,
         } => inspect::run_inspect(min_age_days, specs, current_dir, client, stdout, stderr),
+        Command::PinCheck { config } => pin_check::run_pin_check(&config, current_dir, stdout),
         Command::Review => review::run_review(current_dir, runner, stdout, stderr),
         Command::Audit => audit::run_audit(current_dir, runner, stderr),
-        Command::Verify => verify::run_verify(current_dir, runner, stderr),
+        Command::Verify => verify::run_verify(current_dir, runner, stdout, stderr),
     }
 }
 
@@ -264,6 +268,29 @@ pub(super) fn load_current_manifest_dependencies(
     Ok(dependencies)
 }
 
+pub(super) fn load_current_manifest_direct_requirements(
+    current_dir: &Path,
+) -> Result<Vec<barbican::CargoManifestDirectRequirement>, CommandError> {
+    let manifest_paths = workspace_manifest_paths(current_dir).map_err(CommandError::Io)?;
+    let mut dependencies = Vec::new();
+
+    for manifest_path in manifest_paths {
+        let relative_display = manifest_path.display().to_string();
+        let text = fs::read_to_string(current_dir.join(&manifest_path)).map_err(|source| {
+            CommandError::ManifestRead {
+                path: relative_display.clone(),
+                source,
+            }
+        })?;
+        dependencies.extend(parse_manifest_direct_requirement_text(
+            &relative_display,
+            &text,
+        )?);
+    }
+
+    Ok(dependencies)
+}
+
 pub(super) fn load_base_manifest_dependencies<R>(
     current_dir: &Path,
     runner: &R,
@@ -321,6 +348,45 @@ pub(super) fn parse_manifest_dependency_text(
     Ok(parsed.into_iter().collect())
 }
 
+pub(super) fn parse_manifest_direct_requirement_text(
+    path: &str,
+    text: &str,
+) -> Result<Vec<barbican::CargoManifestDirectRequirement>, CommandError> {
+    let parsed = parse_manifest_direct_requirements(path, text).map_err(|source| {
+        CommandError::ManifestParse {
+            path: path.to_owned(),
+            source,
+        }
+    })?;
+
+    Ok(parsed.into_iter().collect())
+}
+
+pub(super) fn load_reviewed_targets(
+    current_dir: &Path,
+    path: &Path,
+) -> Result<Option<ReviewedTargets>, CommandError> {
+    let config_path = current_dir.join(path);
+    let text = match fs::read_to_string(&config_path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(CommandError::ReviewedTargetsRead {
+                path: path.display().to_string(),
+                source,
+            });
+        }
+    };
+    let reviewed_targets = parse_reviewed_targets_toml(&text).map_err(|source| {
+        CommandError::ReviewedTargetsParse {
+            path: path.display().to_string(),
+            source,
+        }
+    })?;
+
+    Ok(Some(reviewed_targets))
+}
+
 pub(super) fn workspace_manifest_paths(current_dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut paths = BTreeSet::from([PathBuf::from("Cargo.toml")]);
     let crates_dir = current_dir.join("crates");
@@ -337,7 +403,10 @@ pub(super) fn review_paths(current_dir: &Path) -> io::Result<Vec<PathBuf>> {
         .into_iter()
         .collect::<BTreeSet<_>>();
     paths.insert(PathBuf::from("Cargo.lock"));
+    paths.insert(PathBuf::from("barbican.toml"));
     paths.insert(PathBuf::from("deny.toml"));
+    paths.insert(PathBuf::from("reviewed-targets.toml"));
+    paths.insert(PathBuf::from("docs/dependency-reviews"));
 
     Ok(paths.into_iter().collect())
 }
@@ -431,6 +500,14 @@ pub enum CommandError {
         path: String,
         source: io::Error,
     },
+    ReviewedTargetsParse {
+        path: String,
+        source: ReviewedTargetsError,
+    },
+    ReviewedTargetsRead {
+        path: String,
+        source: io::Error,
+    },
     Io(io::Error),
 }
 
@@ -458,6 +535,10 @@ impl fmt::Display for CommandError {
             Self::ManifestRead { path, source } => {
                 write!(formatter, "unable to read {path}: {source}")
             }
+            Self::ReviewedTargetsParse { path, source } => write!(formatter, "{path}: {source}"),
+            Self::ReviewedTargetsRead { path, source } => {
+                write!(formatter, "unable to read {path}: {source}")
+            }
             Self::Io(error) => write!(formatter, "{error}"),
         }
     }
@@ -475,6 +556,8 @@ impl std::error::Error for CommandError {
             Self::LockfileRead { source, .. } => Some(source),
             Self::ManifestParse { source, .. } => Some(source),
             Self::ManifestRead { source, .. } => Some(source),
+            Self::ReviewedTargetsParse { source, .. } => Some(source),
+            Self::ReviewedTargetsRead { source, .. } => Some(source),
             Self::Io(error) => Some(error),
         }
     }

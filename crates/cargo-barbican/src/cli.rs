@@ -4,6 +4,8 @@ use barbican::MAXIMUM_RELEASE_AGE_MINIMUM_DAYS;
 use clap::builder::RangedU64ValueParser;
 use clap::{Parser, Subcommand};
 
+pub(crate) const REVIEWED_TARGETS_CONFIG_FILE: &str = "reviewed-targets.toml";
+
 #[derive(Debug, Parser)]
 #[command(name = "cargo-barbican", bin_name = "cargo barbican")]
 pub struct Cli {
@@ -44,6 +46,10 @@ pub(crate) enum Command {
         min_age_days: Option<u64>,
         #[arg(required = true)]
         specs: Vec<String>,
+    },
+    PinCheck {
+        #[arg(long, default_value = REVIEWED_TARGETS_CONFIG_FILE)]
+        config: PathBuf,
     },
     Review,
     Audit,

@@ -31,18 +31,28 @@ re-sync deliberately.
 - JavaScript ecosystem support.
 - Multi-workspace orchestration.
 
-## Current phase
+## Current implemented surface
 
-The simple hardening path is no longer hypothetical. `age`, `age-lock`,
-`resolve`, `assess`, `inspect`, `review`, `audit`, and `verify` already exist
-on `dev`.
+The simple hardening path is implemented. `age`, `age-lock`, `resolve`,
+`assess`, `inspect`, `pin-check`, `review`, `audit`, and `verify` all exist on
+`dev`.
 
 The current intake layer is:
 
 - `assess` remains the post-add diff classifier
 - `inspect` is the implemented first Rust-only, crates.io-only deep-review surface
-- `pin-check` is intentionally deferred until review-record and checked-pin
-  enforcement have a machine-stable contract
+- `pin-check` is now the implemented first reviewed-target enforcement surface
+- the current enforcement baseline is checked-in review records plus a repo-root
+  `reviewed-targets.toml` manifest for active Rust families
+- `pin-check` now validates that each active reviewed family points at a real
+  checked-in review record path before it trusts the reviewed-target declaration
+- the first gate trusts exact `Cargo.lock` parity plus optional exact direct
+  manifest requirements
+- `verify` now reuses that same reviewed-target gate before `cargo build --locked`
+  and `cargo test --locked`
+- the current reviewed-target gate now supports crates.io reviewed-artefact
+  reconciliation: record the reviewed tarball digest in `reviewed-targets.toml`
+  and verify it against the resolved `Cargo.lock` checksum chain
 
 ## Architectural boundary
 
@@ -58,9 +68,9 @@ shelling out to the binary.
 ## Dependency model
 
 Every dependency addition or dependency-tool install is documented in
-`docs/dependency-reviews/` before it lands. Most planned dependencies are
-expected to inherit from undertask's existing reviewed set; `ureq` is the main
-planned first-principles review because it defines the HTTP boundary.
+`docs/dependency-reviews/` before it lands. Most direct dependencies inherit
+from Undertask's reviewed set; `ureq` is the main first-principles review
+because it defines the HTTP boundary.
 
 ## Repo shape
 
@@ -75,7 +85,7 @@ docs/
   user/                 consumer adoption docs
   functional/           CLI and behaviour contracts
   architecture/         goals, boundaries, and design decisions
-  contributor/          implementation plan and repo workflow
+  contributor/          contributor constraints and repo workflow
   dependency-reviews/   review records and policy template
   standards/            adopted documentation standards
 ```

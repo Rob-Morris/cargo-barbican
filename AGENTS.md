@@ -11,7 +11,7 @@ for the agent route-map (constraints, current state, what to build).
 Read [`docs/architecture/overview.md`](docs/architecture/overview.md) for the
 product goals, boundaries, and system shape, then
 [`docs/contributor/specification.md`](docs/contributor/specification.md) for
-the implementation plan and contributor-facing constraints.
+the current contributor-facing constraints.
 
 ## Source Material
 

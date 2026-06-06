@@ -1,6 +1,6 @@
 # Functional Documentation
 
-What cargo-barbican does. This layer is reference-oriented: the planned CLI,
+What cargo-barbican does. This layer is reference-oriented: the current CLI,
 exit codes, and behavioural contract.
 
-- [CLI](cli.md) — planned subcommand surface and exit-code contract
+- [CLI](cli.md) — current subcommand surface and exit-code contract

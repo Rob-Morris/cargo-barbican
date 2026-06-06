@@ -57,6 +57,37 @@ impl CargoManifestDependency {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CargoManifestDirectRequirement {
+    manifest_path: String,
+    section: String,
+    name: String,
+    source_kind: CargoDependencySourceKind,
+    version_requirement: Option<String>,
+}
+
+impl CargoManifestDirectRequirement {
+    pub fn manifest_path(&self) -> &str {
+        &self.manifest_path
+    }
+
+    pub fn section(&self) -> &str {
+        &self.section
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn source_kind(&self) -> CargoDependencySourceKind {
+        self.source_kind
+    }
+
+    pub fn version_requirement(&self) -> Option<&str> {
+        self.version_requirement.as_deref()
+    }
+}
+
 impl fmt::Display for CargoManifestDependency {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -105,6 +136,44 @@ pub fn parse_manifest_dependencies(
     Ok(dependencies)
 }
 
+pub fn parse_manifest_direct_requirements(
+    manifest_path: &str,
+    text: &str,
+) -> Result<BTreeSet<CargoManifestDirectRequirement>, CargoManifestError> {
+    let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
+    let mut dependencies = BTreeSet::new();
+
+    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        collect_direct_requirement_section(
+            manifest_path,
+            section,
+            root_table.get(section),
+            &mut dependencies,
+        )?;
+    }
+
+    if let Some(Value::Table(targets)) = root_table.get("target") {
+        for (target_name, target_value) in targets {
+            let Some(target_table) = target_value.as_table() else {
+                continue;
+            };
+
+            for suffix in ["dependencies", "dev-dependencies", "build-dependencies"] {
+                let section = format!("target.{target_name}.{suffix}");
+                collect_direct_requirement_section(
+                    manifest_path,
+                    &section,
+                    target_table.get(suffix),
+                    &mut dependencies,
+                )?;
+            }
+        }
+    }
+
+    Ok(dependencies)
+}
+
 fn collect_dependency_section(
     manifest_path: &str,
     section: &str,
@@ -133,24 +202,71 @@ fn collect_dependency_section(
     Ok(())
 }
 
+fn collect_direct_requirement_section(
+    manifest_path: &str,
+    section: &str,
+    value: Option<&Value>,
+    dependencies: &mut BTreeSet<CargoManifestDirectRequirement>,
+) -> Result<(), CargoManifestError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let Some(table) = value.as_table() else {
+        return Err(CargoManifestError::InvalidDependencySection {
+            manifest_path: manifest_path.to_owned(),
+            section: section.to_owned(),
+        });
+    };
+
+    for (name, dependency_value) in table {
+        let (source_kind, version_requirement) = dependency_shape(dependency_value)?;
+        dependencies.insert(CargoManifestDirectRequirement {
+            manifest_path: manifest_path.to_owned(),
+            section: section.to_owned(),
+            name: name.to_owned(),
+            source_kind,
+            version_requirement,
+        });
+    }
+
+    Ok(())
+}
+
 fn dependency_source_kind(value: &Value) -> Result<CargoDependencySourceKind, CargoManifestError> {
+    Ok(dependency_shape(value)?.0)
+}
+
+fn dependency_shape(
+    value: &Value,
+) -> Result<(CargoDependencySourceKind, Option<String>), CargoManifestError> {
     match value {
-        Value::String(_) => Ok(CargoDependencySourceKind::Registry),
+        Value::String(requirement) => Ok((
+            CargoDependencySourceKind::Registry,
+            Some(requirement.clone()),
+        )),
         Value::Table(table) => {
+            let version_requirement = table
+                .get("version")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+
             if table
                 .get("workspace")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
             {
-                Ok(CargoDependencySourceKind::Workspace)
+                Ok((CargoDependencySourceKind::Workspace, version_requirement))
             } else if table.contains_key("git") {
-                Ok(CargoDependencySourceKind::Git)
+                Ok((CargoDependencySourceKind::Git, version_requirement))
             } else if table.contains_key("path") {
-                Ok(CargoDependencySourceKind::Path)
+                Ok((CargoDependencySourceKind::Path, version_requirement))
             } else if table.contains_key("registry") || table.contains_key("registry-index") {
-                Ok(CargoDependencySourceKind::AlternateRegistry)
+                Ok((
+                    CargoDependencySourceKind::AlternateRegistry,
+                    version_requirement,
+                ))
             } else {
-                Ok(CargoDependencySourceKind::Registry)
+                Ok((CargoDependencySourceKind::Registry, version_requirement))
             }
         }
         _ => Err(CargoManifestError::UnsupportedDependencyValue),
@@ -174,7 +290,9 @@ pub enum CargoManifestError {
 
 #[cfg(test)]
 mod tests {
-    use super::{CargoDependencySourceKind, parse_manifest_dependencies};
+    use super::{
+        CargoDependencySourceKind, parse_manifest_dependencies, parse_manifest_direct_requirements,
+    };
 
     #[test]
     fn parses_root_and_target_dependency_sections() {
@@ -236,5 +354,44 @@ alt = { version = "1", registry = "internal" }
         assert!(dependencies.iter().any(|dependency| {
             dependency.source_kind() == CargoDependencySourceKind::AlternateRegistry
         }));
+    }
+
+    #[test]
+    fn parses_direct_version_requirements_for_manifest_entries() {
+        let dependencies = parse_manifest_direct_requirements(
+            "Cargo.toml",
+            r#"
+[dependencies]
+serde = "=1.0.228"
+alt = { version = "=0.2.0", registry = "internal" }
+git-crate = { git = "https://example.com/repo.git", version = "=1.2.3" }
+workspace-crate = { workspace = true }
+"#,
+        )
+        .expect("manifest should parse");
+
+        let rendered = dependencies
+            .iter()
+            .map(|dependency| {
+                format!(
+                    "{}:{}:{}:{}:{:?}",
+                    dependency.manifest_path(),
+                    dependency.section(),
+                    dependency.name(),
+                    dependency.source_kind(),
+                    dependency.version_requirement()
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rendered,
+            vec![
+                r#"Cargo.toml:dependencies:alt:alternate-registry:Some("=0.2.0")"#,
+                r#"Cargo.toml:dependencies:git-crate:git:Some("=1.2.3")"#,
+                r#"Cargo.toml:dependencies:serde:registry:Some("=1.0.228")"#,
+                r#"Cargo.toml:dependencies:workspace-crate:workspace:None"#,
+            ]
+        );
     }
 }
