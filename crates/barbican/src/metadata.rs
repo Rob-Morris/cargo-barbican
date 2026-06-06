@@ -23,6 +23,7 @@ pub fn parse_cargo_metadata(text: &str) -> Result<CargoMetadata, CargoMetadataEr
                 name: package.name,
                 id: package.id,
                 version: package.version,
+                links: package.links,
                 targets: package
                     .targets
                     .into_iter()
@@ -85,7 +86,7 @@ pub fn select_package_id(
         .iter()
         .filter(|node| workspace_members.contains(node.id.as_str()))
         .flat_map(|node| node.deps.iter())
-        .filter(|dependency| dependency.name == crate_name)
+        .filter(|dependency| dependency_name_matches_package(&dependency.name, crate_name))
         .map(|dependency| dependency.pkg.clone())
         .collect();
 
@@ -127,7 +128,12 @@ pub fn package_surfaces(
             .targets
             .iter()
             .any(|target| target.kind.iter().any(|kind| kind == "proc-macro")),
+        has_native_links: package.links.is_some(),
     })
+}
+
+fn dependency_name_matches_package(dependency_name: &str, package_name: &str) -> bool {
+    dependency_name.replace('_', "-") == package_name.replace('_', "-")
 }
 
 #[derive(Debug, Error)]
@@ -158,6 +164,7 @@ pub enum CargoMetadataError {
 pub struct MetadataPackageSurfaces {
     pub has_build_rs: bool,
     pub is_proc_macro: bool,
+    pub has_native_links: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,6 +172,7 @@ struct MetadataPackage {
     name: String,
     id: String,
     version: String,
+    links: Option<String>,
     targets: Vec<MetadataTarget>,
 }
 
@@ -204,6 +212,7 @@ struct RawMetadataPackage {
     name: String,
     id: String,
     version: String,
+    links: Option<String>,
     #[serde(default)]
     targets: Vec<RawMetadataTarget>,
 }
@@ -301,6 +310,42 @@ mod tests {
     }
 
     #[test]
+    fn disambiguates_dash_named_packages_from_underscore_dependency_names() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
+    {"name": "windows-sys", "id": "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.61.0", "version": "0.61.0", "targets": []},
+    {"name": "windows-sys", "id": "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.60.2", "version": "0.60.2", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [
+          {
+            "name": "windows_sys",
+            "pkg": "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.61.0"
+          }
+        ]
+      }
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+
+        let package_id =
+            select_package_id(&metadata, "windows-sys").expect("selection should succeed");
+
+        assert_eq!(
+            package_id,
+            "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.61.0"
+        );
+    }
+
+    #[test]
     fn errors_when_multiple_versions_exist_without_workspace_direct_dependency() {
         let metadata = parse_cargo_metadata(
             r#"{
@@ -330,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_build_rs_and_proc_macro_surfaces() {
+    fn detects_build_rs_proc_macro_and_native_link_surfaces() {
         let metadata = parse_cargo_metadata(
             r#"{
   "packages": [
@@ -338,6 +383,7 @@ mod tests {
       "name": "demo",
       "id": "registry+https://github.com/rust-lang/crates.io-index#demo@1.2.3",
       "version": "1.2.3",
+      "links": "demo-native",
       "targets": [
         {"kind": ["lib"]},
         {"kind": ["custom-build"]},
@@ -359,5 +405,6 @@ mod tests {
 
         assert!(surfaces.has_build_rs);
         assert!(surfaces.is_proc_macro);
+        assert!(surfaces.has_native_links);
     }
 }

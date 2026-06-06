@@ -86,6 +86,11 @@ The current baseline rules for comparative commands are:
 - `resolve` also supports `--dry-run`, which executes the targeted update in an
   internal temp workspace and prints a summary/diff preview of the would-be
   `Cargo.lock` change instead of mutating the repo
+  - the dry-run workspace copy preserves relative symlinks only when their
+    fully resolved target remains inside the source workspace and outside
+    skipped `.git` / `target` paths
+  - absolute, broken, looping, escaping, or skipped-target symlinks fail the
+    dry-run setup rather than being dereferenced or silently skipped
 
 The first active `high_scrutiny` keys are:
 
@@ -96,9 +101,13 @@ The first active `high_scrutiny` keys are:
 - `proc_macro_changes`
 - `native_sys_crates`
 
-`cargo barbican assess` is fail-closed. If the tool cannot complete a required
+`cargo barbican assess` is fail-closed by default under
+`--policy-mode strict`. If the tool cannot complete a required
 dependency-surface inspection for the current implemented surface, it reports a
 blocking finding rather than silently treating the package as safe.
+`--policy-mode elevated-risk` may accept elevated-risk classifications with
+exit 0 for an invocation-scoped review workflow, but it still fails any
+`policy-violating` classification.
 
 `cargo barbican inspect` is currently:
 
@@ -115,6 +124,26 @@ blocking finding rather than silently treating the package as safe.
   inspection failures are blocking; surfaced high-scrutiny execution surfaces
   are elevated-risk
 
+`cargo barbican gatehouse candidate` is currently:
+
+- an exact `crate@version` workflow convenience for isolated candidate intake
+- a composition layer over existing evidence primitives, not a separate policy
+  engine
+- non-mutating with respect to the current repo
+- backed by a disposable minimal Cargo sandbox pinned to the exact candidate
+- dossier-oriented: it renders inspect evidence, sandbox lockfile status,
+  `cargo tree --edges normal`, `cargo audit`, and a suggested next step on
+  stdout
+- non-executing with respect to the candidate: it does not build, test, run
+  build scripts, or load proc macros from the candidate package
+- fail-closed for evidence gathering: failed inspect, lockfile generation,
+  `cargo tree`, or `cargo audit` evidence returns exit 1 after rendering the
+  dossier
+- cleanup-first by default, with `--preserve-sandbox` available for manual
+  inspection of the generated sandbox
+- not a repo-integration simulation; repo adoption remains covered by
+  `resolve`, `assess`, `review`, `pin-check`, and `verify`
+
 The reviewed-target enforcement baseline is:
 
 - repo-root `reviewed-targets.toml` is the machine-enforced source of truth
@@ -125,10 +154,19 @@ The reviewed-target enforcement baseline is:
   - `review_record`
   - optional `direct` exact manifest requirements, including the leading `=`
   - `resolved` exact `Cargo.lock` versions
+  - optional `allowed_surfaces` reviewed execution-surface allowances for
+    crates already present in the same `resolved` map
 - `pin-check` validates that every active `review_record` path actually exists
   before the family declaration is trusted
 - `pin-check` checks exact resolved `Cargo.lock` parity plus any configured
   exact direct manifest requirements
+- `pin-check` validates `allowed_surfaces` manifest integrity, but does not
+  inspect live metadata surfaces
+- `assess` suppresses matching reviewed `build-rs`, `proc-macro`, and
+  `native-sys` execution-surface signals from elevated-risk findings, while
+  rendering them in `Allowed policy exceptions:`
+- `assess` validates the matching family `review_record` exists before trusting
+  an applicable allowance
 - `verify` reuses that same default reviewed-target gate before executing
   `cargo build --locked` and `cargo test --locked`
 
@@ -150,5 +188,9 @@ Contract notes:
   network during enforcement
 - when a structured `checksum_sha256` is present, `pin-check` fails closed on
   checksum drift even if the resolved version still matches
+- `allowed_surfaces` accepts exactly `build-rs`, `proc-macro`, and
+  `native-sys`; unknown identifiers, empty lists, and crates absent from the
+  same family `resolved` map fail closed
+- `review_record` paths must be relative repo paths with no `..` traversal
 - the current implementation does not claim stronger installed-tree or broader
   non-crates.io artefact parity beyond this gate

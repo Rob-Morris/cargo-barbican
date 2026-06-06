@@ -189,7 +189,7 @@ pub fn check_reviewed_rust_targets(
         .rust_families()
         .iter()
         .map(|family| {
-            let mut direct_checks = family
+            let direct_checks = family
                 .direct()
                 .iter()
                 .map(
@@ -203,9 +203,8 @@ pub fn check_reviewed_rust_targets(
                     },
                 )
                 .collect::<Vec<_>>();
-            direct_checks.sort_by(|left, right| left.crate_name.cmp(&right.crate_name));
 
-            let mut resolved_checks = family
+            let resolved_checks = family
                 .resolved()
                 .iter()
                 .map(
@@ -219,7 +218,6 @@ pub fn check_reviewed_rust_targets(
                     },
                 )
                 .collect::<Vec<_>>();
-            resolved_checks.sort_by(|left, right| left.crate_name.cmp(&right.crate_name));
 
             RustReviewedFamilyReport {
                 name: family.name().to_owned(),

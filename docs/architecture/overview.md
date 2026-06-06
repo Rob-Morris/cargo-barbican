@@ -61,6 +61,9 @@ The current intake layer is:
   instead of relying on `HEAD`
 - `resolve` also supports a non-mutating `--dry-run` preview that shows the
   would-be `Cargo.lock` diff without changing the working tree
+  - the copied workspace preserves relative symlinks only when their resolved
+    target remains inside the source workspace and outside skipped `.git` /
+    `target` paths; unsupported symlinks fail closed
 
 ## Architectural boundary
 

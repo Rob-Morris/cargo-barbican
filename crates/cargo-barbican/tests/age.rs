@@ -33,7 +33,12 @@ struct FakeCratesIoClient {
 
 impl FakeCratesIoClient {
     fn with_release(self, spec: &str, published_at: &str, yanked: bool) -> Self {
-        self.with_release_checksum(spec, published_at, yanked, "abc123")
+        self.with_release_checksum(
+            spec,
+            published_at,
+            yanked,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
     }
 
     fn with_release_checksum(
@@ -104,14 +109,18 @@ struct FakeCommandRunner {
     cargo_metadata_result: Result<String, String>,
     cargo_update_result: Result<(), String>,
     cargo_update_lockfile_text: Option<String>,
+    cargo_generate_lockfile_result: Result<(), String>,
+    cargo_tree_result: Result<String, String>,
     git_diff_result: Result<String, String>,
-    cargo_audit_result: Result<(), String>,
+    cargo_audit_result: Result<String, String>,
     cargo_deny_result: Result<(), String>,
     cargo_build_result: Result<(), String>,
     cargo_test_result: Result<(), String>,
     cargo_updates: RefCell<Vec<(String, String)>>,
+    generate_lockfile_calls: RefCell<Vec<PathBuf>>,
+    cargo_tree_calls: RefCell<Vec<PathBuf>>,
     git_diff_paths: RefCell<Vec<PathBuf>>,
-    audit_calls: RefCell<usize>,
+    audit_calls: RefCell<Vec<PathBuf>>,
     deny_calls: RefCell<usize>,
     build_calls: RefCell<usize>,
     test_calls: RefCell<usize>,
@@ -124,14 +133,18 @@ impl Default for FakeCommandRunner {
             cargo_metadata_result: Ok(metadata_with_packages(&[])),
             cargo_update_result: Ok(()),
             cargo_update_lockfile_text: None,
+            cargo_generate_lockfile_result: Ok(()),
+            cargo_tree_result: Ok(String::new()),
             git_diff_result: Ok(String::new()),
-            cargo_audit_result: Ok(()),
+            cargo_audit_result: Ok(String::new()),
             cargo_deny_result: Ok(()),
             cargo_build_result: Ok(()),
             cargo_test_result: Ok(()),
             cargo_updates: RefCell::new(Vec::new()),
+            generate_lockfile_calls: RefCell::new(Vec::new()),
+            cargo_tree_calls: RefCell::new(Vec::new()),
             git_diff_paths: RefCell::new(Vec::new()),
-            audit_calls: RefCell::new(0),
+            audit_calls: RefCell::new(Vec::new()),
             deny_calls: RefCell::new(0),
             build_calls: RefCell::new(0),
             test_calls: RefCell::new(0),
@@ -167,13 +180,45 @@ impl FakeCommandRunner {
         self
     }
 
+    fn with_cargo_tree(mut self, output: &str) -> Self {
+        self.cargo_tree_result = Ok(output.to_owned());
+        self
+    }
+
+    fn with_cargo_tree_error(mut self, detail: &str) -> Self {
+        self.cargo_tree_result = Err(detail.to_owned());
+        self
+    }
+
+    fn with_cargo_generate_lockfile_error(mut self, detail: &str) -> Self {
+        self.cargo_generate_lockfile_result = Err(detail.to_owned());
+        self
+    }
+
     fn with_cargo_audit_error(mut self, detail: &str) -> Self {
         self.cargo_audit_result = Err(detail.to_owned());
         self
     }
 
+    fn with_cargo_audit(mut self, output: &str) -> Self {
+        self.cargo_audit_result = Ok(output.to_owned());
+        self
+    }
+
     fn recorded_updates(&self) -> Vec<(String, String)> {
         self.cargo_updates.borrow().clone()
+    }
+
+    fn recorded_generate_lockfile_calls(&self) -> Vec<PathBuf> {
+        self.generate_lockfile_calls.borrow().clone()
+    }
+
+    fn recorded_cargo_tree_calls(&self) -> Vec<PathBuf> {
+        self.cargo_tree_calls.borrow().clone()
+    }
+
+    fn recorded_audit_calls(&self) -> Vec<PathBuf> {
+        self.audit_calls.borrow().clone()
     }
 
     fn recorded_diff_paths(&self) -> Vec<PathBuf> {
@@ -219,6 +264,33 @@ impl CommandRunner for FakeCommandRunner {
         result
     }
 
+    fn cargo_generate_lockfile(
+        &self,
+        current_dir: &Path,
+    ) -> Result<(), cargo_barbican::RunnerError> {
+        self.generate_lockfile_calls
+            .borrow_mut()
+            .push(current_dir.to_path_buf());
+        let result = self
+            .cargo_generate_lockfile_result
+            .clone()
+            .map_err(runner_exit);
+
+        if result.is_ok() {
+            fs::write(current_dir.join("Cargo.lock"), "version = 4\n")
+                .map_err(cargo_barbican::RunnerError::Spawn)?;
+        }
+
+        result
+    }
+
+    fn cargo_tree(&self, current_dir: &Path) -> Result<String, cargo_barbican::RunnerError> {
+        self.cargo_tree_calls
+            .borrow_mut()
+            .push(current_dir.to_path_buf());
+        self.cargo_tree_result.clone().map_err(runner_exit)
+    }
+
     fn git_diff(
         &self,
         _current_dir: &Path,
@@ -228,8 +300,10 @@ impl CommandRunner for FakeCommandRunner {
         self.git_diff_result.clone().map_err(runner_exit)
     }
 
-    fn cargo_audit(&self, _current_dir: &Path) -> Result<(), cargo_barbican::RunnerError> {
-        *self.audit_calls.borrow_mut() += 1;
+    fn cargo_audit(&self, current_dir: &Path) -> Result<String, cargo_barbican::RunnerError> {
+        self.audit_calls
+            .borrow_mut()
+            .push(current_dir.to_path_buf());
         self.cargo_audit_result.clone().map_err(runner_exit)
     }
 
@@ -323,7 +397,7 @@ fn age_allows_command_line_override_of_minimum_days() {
         "serde@1.0.228",
     ]);
     let client =
-        FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-20T00:00:00Z", false);
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-20T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
     let mut stdout = Vec::new();
@@ -335,8 +409,16 @@ fn age_allows_command_line_override_of_minimum_days() {
     )
     .expect("config should write");
 
-    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-        .expect("command should run");
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(stderr.is_empty());
@@ -396,6 +478,9 @@ fn cli_rejects_excessive_min_age_days() {
             "baseline",
         ])
         .is_err()
+    );
+    assert!(
+        Cli::try_parse_from(["cargo-barbican", "assess", "--policy-mode", "permissive",]).is_err()
     );
 }
 
@@ -630,7 +715,7 @@ fn resolve_honours_min_age_override_for_both_age_checks() {
         "serde@1.0.228",
     ]);
     let client =
-        FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-20T00:00:00Z", false);
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-20T00:00:00Z", false);
     let runner = FakeCommandRunner::default()
         .with_updated_lockfile(&lockfile_with_packages(&[("serde", "1.0.228", true)]))
         .with_cargo_metadata(&metadata_with_packages(&[(
@@ -653,8 +738,16 @@ fn resolve_honours_min_age_override_for_both_age_checks() {
     )
     .expect("current lockfile should write");
 
-    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-        .expect("command should run");
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(stderr.is_empty());
@@ -702,6 +795,8 @@ fn resolve_recheck_flags_too_fresh_transitive_selection_under_injected_clock() {
         lockfile_with_packages(&[("serde", "1.0.227", true)]),
     )
     .expect("current lockfile should write");
+    let original_lockfile =
+        fs::read_to_string(temp_dir.join("Cargo.lock")).expect("lockfile should read");
 
     let exit_code = run_cli_with_runner_at(
         cli,
@@ -715,6 +810,10 @@ fn resolve_recheck_flags_too_fresh_transitive_selection_under_injected_clock() {
     .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::from(1));
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("Cargo.lock")).expect("lockfile should read"),
+        original_lockfile
+    );
     assert!(
         String::from_utf8(stderr)
             .expect("stderr should be utf8")
@@ -890,7 +989,80 @@ fn assess_reports_missing_non_git_base_directory_lockfile() {
 
 #[test]
 fn assess_reports_routine_safe_when_no_findings_are_present() {
+    let (exit_code, rendered, stderr) = run_routine_safe_assess(&[]);
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(rendered.contains("Suggested classification: routine-safe"));
+    assert!(rendered.contains("No policy findings detected."));
+}
+
+#[test]
+fn assess_policy_mode_elevated_risk_preserves_routine_safe_success() {
+    let (exit_code, rendered, stderr) =
+        run_routine_safe_assess(&["--policy-mode", "elevated-risk"]);
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(rendered.contains("Suggested classification: routine-safe"));
+    assert!(rendered.contains("No policy findings detected."));
+    assert!(!rendered.contains("Elevated-risk findings accepted by --policy-mode elevated-risk"));
+}
+
+#[test]
+fn assess_reports_lockfile_checksum_drift_for_existing_selection() {
     let cli = Cli::parse_from(["cargo-barbican", "assess"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_git_show(
+            "HEAD:Cargo.lock",
+            &lockfile_with_package_records(&[(
+                "serde",
+                "1.0.228",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            )]),
+        )
+        .with_git_show("HEAD:Cargo.toml", "[dependencies]\nserde = \"1\"\n");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("current manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[(
+            "serde",
+            "1.0.228",
+            Some("registry+https://github.com/rust-lang/crates.io-index"),
+            Some("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+        )]),
+    )
+    .expect("current lockfile should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Suggested classification: policy-violating"));
+    assert!(rendered.contains(
+        "lockfile checksum drifts: serde@1.0.228 checksum drift: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef -> ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    ));
+    assert!(rendered.contains(
+        "locked crates.io checksums changed for existing selections: serde@1.0.228 checksum drift"
+    ));
+}
+
+fn run_routine_safe_assess(args: &[&str]) -> (ExitCode, String, String) {
+    let mut raw_args = vec!["cargo-barbican", "assess"];
+    raw_args.extend_from_slice(args);
+    let cli = Cli::parse_from(raw_args);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default()
         .with_git_show(
@@ -916,19 +1088,243 @@ fn assess_reports_routine_safe_when_no_findings_are_present() {
     let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
         .expect("command should run");
 
-    assert_eq!(exit_code, ExitCode::SUCCESS);
-    assert!(stderr.is_empty());
-    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
-    assert!(rendered.contains("Suggested classification: routine-safe"));
-    assert!(rendered.contains("No policy findings detected."));
+    (
+        exit_code,
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        String::from_utf8(stderr).expect("stderr should be utf8"),
+    )
 }
 
 #[test]
 fn assess_reports_elevated_risk_findings_for_new_surfaces() {
+    let (exit_code, rendered, stderr) = run_elevated_risk_assess(&[]);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    assert!(rendered.contains("Suggested classification: elevated-risk"));
+    assert!(rendered.contains(
+        "new direct dependencies: Cargo.toml:dependencies:forked, Cargo.toml:dependencies:native-sys"
+    ));
+    assert!(
+        rendered.contains("new non-crates.io direct specs: Cargo.toml:dependencies:forked (git)")
+    );
+    assert!(rendered.contains(
+        "source changes: forked@0.1.0 source=git+https://example.com/forked.git#deadbeef"
+    ));
+    assert!(rendered.contains("new -sys crates: native-sys@1.2.3"));
+    assert!(rendered.contains("new/changed build.rs surface: native-sys@1.2.3"));
+    assert!(rendered.contains("new/changed proc-macro surface: native-sys@1.2.3"));
+    assert!(rendered.contains("Elevated-risk signals:"));
+    assert!(!rendered.contains("Elevated-risk findings accepted by --policy-mode elevated-risk"));
+}
+
+#[test]
+fn assess_policy_mode_elevated_risk_accepts_elevated_risk_findings() {
+    let (exit_code, rendered, stderr) =
+        run_elevated_risk_assess(&["--policy-mode", "elevated-risk"]);
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(rendered.contains("Suggested classification: elevated-risk"));
+    assert!(rendered.contains("Elevated-risk signals:"));
+    assert!(rendered.contains(
+        "Elevated-risk findings accepted by --policy-mode elevated-risk; blocking policy findings would still fail."
+    ));
+}
+
+#[test]
+fn assess_allows_reviewed_execution_surfaces_when_review_record_exists() {
+    let (exit_code, rendered, stderr) =
+        run_allowed_surface_assess("1.2.3", true, &["build-rs", "proc-macro", "native-sys"]);
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(rendered.contains("Suggested classification: routine-safe"));
+    assert!(rendered.contains("Allowed policy exceptions:"));
+    assert!(rendered.contains(
+        "native-sys@1.2.3 build-rs allowed by reviewed family native-family (docs/dependency-reviews/2026-05-27-native.md)"
+    ));
+    assert!(rendered.contains(
+        "native-sys@1.2.3 proc-macro allowed by reviewed family native-family (docs/dependency-reviews/2026-05-27-native.md)"
+    ));
+    assert!(rendered.contains(
+        "native-sys@1.2.3 native-sys allowed by reviewed family native-family (docs/dependency-reviews/2026-05-27-native.md)"
+    ));
+    assert!(!rendered.contains("Elevated-risk signals:"));
+    assert!(!rendered.contains("new/changed build.rs surface: native-sys@1.2.3"));
+    assert!(!rendered.contains("new/changed proc-macro surface: native-sys@1.2.3"));
+    assert!(!rendered.contains("new -sys crates: native-sys@1.2.3"));
+}
+
+#[test]
+fn assess_fails_closed_when_applicable_allowed_surface_review_record_is_missing() {
+    let (exit_code, stdout, stderr) = run_allowed_surface_assess("1.2.3", false, &["build-rs"]);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains(
+        "FAIL allowed policy exception review record missing for native-sys@1.2.3: docs/dependency-reviews/2026-05-27-native.md"
+    ));
+}
+
+#[test]
+fn assess_does_not_fail_for_unrelated_missing_review_record() {
+    let (exit_code, rendered, stderr) = run_allowed_surface_assess("1.2.4", false, &["build-rs"]);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    assert!(rendered.contains("Suggested classification: elevated-risk"));
+    assert!(rendered.contains("Elevated-risk signals:"));
+    assert!(!rendered.contains("Allowed policy exceptions:"));
+    assert!(rendered.contains("new/changed build.rs surface: native-sys@1.2.4"));
+}
+
+#[test]
+fn assess_rejects_malformed_allowed_surface_state() {
+    let cli = Cli::parse_from(["cargo-barbican", "assess"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_git_show("HEAD:Cargo.lock", "version = 4\n")
+        .with_git_show("HEAD:Cargo.toml", "");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(temp_dir.join("Cargo.toml"), "").expect("current manifest should write");
+    fs::write(temp_dir.join("Cargo.lock"), "version = 4\n").expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "native-family"
+review_record = "docs/dependency-reviews/2026-05-27-native.md"
+
+[rust.families.resolved]
+native-sys = "1.2.3"
+
+[rust.families.allowed_surfaces]
+other = ["build-rs"]
+"#,
+    )
+    .expect("reviewed targets should write");
+
+    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect_err("malformed reviewed targets should fail");
+
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+    assert!(error.to_string().contains(
+        "allowed_surfaces entry for other references a crate absent from the same resolved map"
+    ));
+}
+
+fn run_allowed_surface_assess(
+    current_version: &str,
+    write_record: bool,
+    allowed_surfaces: &[&str],
+) -> (ExitCode, String, String) {
     let cli = Cli::parse_from(["cargo-barbican", "assess"]);
     let client = FakeCratesIoClient::default().with_release(
+        &format!("native-sys@{current_version}"),
+        "2020-05-01T00:00:00Z",
+        false,
+    );
+    let runner = FakeCommandRunner::default()
+        .with_git_show("HEAD:Cargo.lock", "version = 4\n")
+        .with_git_show("HEAD:Cargo.toml", "")
+        .with_cargo_metadata(&format!(
+            r#"{{
+  "packages": [
+    {{
+      "name": "native-sys",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#native-sys@{current_version}",
+      "version": "{current_version}",
+      "targets": [
+        {{"kind": ["custom-build"]}},
+        {{"kind": ["proc-macro"]}}
+      ]
+    }}
+  ],
+  "workspace_members": [],
+  "resolve": null
+}}"#
+        ));
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        "[high_scrutiny]\nnew_direct_dependencies = false\n",
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        format!("[dependencies]\nnative-sys = \"{current_version}\"\n"),
+    )
+    .expect("current manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("native-sys", current_version, true)]),
+    )
+    .expect("current lockfile should write");
+    let allowed_surface_section = if allowed_surfaces.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n[rust.families.allowed_surfaces]\nnative-sys = [{}]\n",
+            allowed_surfaces
+                .iter()
+                .map(|surface| format!("\"{surface}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        format!(
+            r#"[rust]
+
+[[rust.families]]
+name = "native-family"
+review_record = "docs/dependency-reviews/2026-05-27-native.md"
+
+[rust.families.resolved]
+native-sys = "1.2.3"
+{allowed_surface_section}"#
+        ),
+    )
+    .expect("reviewed targets should write");
+    if write_record {
+        write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-native.md");
+    }
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    (
+        exit_code,
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        String::from_utf8(stderr).expect("stderr should be utf8"),
+    )
+}
+
+fn run_elevated_risk_assess(args: &[&str]) -> (ExitCode, String, String) {
+    let mut raw_args = vec!["cargo-barbican", "assess"];
+    raw_args.extend_from_slice(args);
+    let cli = Cli::parse_from(raw_args);
+    let client = FakeCratesIoClient::default().with_release(
         "native-sys@1.2.3",
-        "2026-05-01T00:00:00Z",
+        "2020-05-01T00:00:00Z",
         false,
     );
     let runner = FakeCommandRunner::default()
@@ -948,6 +1344,12 @@ fn assess_reports_elevated_risk_findings_for_new_surfaces() {
         {"kind": ["custom-build"]},
         {"kind": ["proc-macro"]}
       ]
+    },
+    {
+      "name": "forked",
+      "id": "git+https://example.com/forked.git#forked@0.1.0",
+      "version": "0.1.0",
+      "targets": []
     }
   ],
   "workspace_members": [],
@@ -992,28 +1394,43 @@ forked = { git = "https://example.com/forked.git" }
     let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
         .expect("command should run");
 
-    assert_eq!(exit_code, ExitCode::from(1));
-    assert!(stderr.is_empty());
-    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
-    assert!(rendered.contains("Suggested classification: elevated-risk"));
-    assert!(rendered.contains(
-        "new direct dependencies: Cargo.toml:dependencies:forked, Cargo.toml:dependencies:native-sys"
-    ));
-    assert!(
-        rendered.contains("new non-crates.io direct specs: Cargo.toml:dependencies:forked (git)")
-    );
-    assert!(rendered.contains(
-        "source changes: forked@0.1.0 source=git+https://example.com/forked.git#deadbeef"
-    ));
-    assert!(rendered.contains("new -sys crates: native-sys@1.2.3"));
-    assert!(rendered.contains("new/changed build.rs surface: native-sys@1.2.3"));
-    assert!(rendered.contains("new/changed proc-macro surface: native-sys@1.2.3"));
-    assert!(rendered.contains("Elevated-risk signals:"));
+    (
+        exit_code,
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        String::from_utf8(stderr).expect("stderr should be utf8"),
+    )
 }
 
 #[test]
 fn assess_reports_policy_violating_when_new_selection_is_too_fresh() {
-    let cli = Cli::parse_from(["cargo-barbican", "assess"]);
+    let (exit_code, rendered, stderr) = run_too_fresh_assess(&[]);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    assert!(rendered.contains("Suggested classification: policy-violating"));
+    assert!(rendered.contains("age violations: serde@1.0.228 ("));
+    assert!(rendered.contains("Blocking policy findings:"));
+    assert!(
+        rendered
+            .contains("newly selected crates.io versions below the minimum age: serde@1.0.228 (")
+    );
+}
+
+#[test]
+fn assess_policy_mode_elevated_risk_does_not_accept_policy_violations() {
+    let (exit_code, rendered, stderr) = run_too_fresh_assess(&["--policy-mode", "elevated-risk"]);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    assert!(rendered.contains("Suggested classification: policy-violating"));
+    assert!(rendered.contains("Blocking policy findings:"));
+    assert!(!rendered.contains("Elevated-risk findings accepted by --policy-mode elevated-risk"));
+}
+
+fn run_too_fresh_assess(args: &[&str]) -> (ExitCode, String, String) {
+    let mut raw_args = vec!["cargo-barbican", "assess"];
+    raw_args.extend_from_slice(args);
+    let cli = Cli::parse_from(raw_args);
     let client =
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
     let runner = FakeCommandRunner::default()
@@ -1053,16 +1470,11 @@ fn assess_reports_policy_violating_when_new_selection_is_too_fresh() {
     )
     .expect("command should run");
 
-    assert_eq!(exit_code, ExitCode::from(1));
-    assert!(stderr.is_empty());
-    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
-    assert!(rendered.contains("Suggested classification: policy-violating"));
-    assert!(rendered.contains("age violations: serde@1.0.228 ("));
-    assert!(rendered.contains("Blocking policy findings:"));
-    assert!(
-        rendered
-            .contains("newly selected crates.io versions below the minimum age: serde@1.0.228 (")
-    );
+    (
+        exit_code,
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        String::from_utf8(stderr).expect("stderr should be utf8"),
+    )
 }
 
 #[test]
@@ -1187,6 +1599,7 @@ fn review_prints_checklist_and_diff_for_policy_files() {
     assert!(recorded_paths.contains(&PathBuf::from("deny.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("reviewed-targets.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("docs/dependency-reviews")));
+    assert!(recorded_paths.contains(&PathBuf::from("app/Cargo.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("crates/barbican/Cargo.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("crates/cargo-barbican/Cargo.toml")));
 }
@@ -1271,7 +1684,7 @@ fn audit_runs_both_delegated_checks() {
         .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
-    assert_eq!(*runner.audit_calls.borrow(), 1);
+    assert_eq!(runner.audit_calls.borrow().len(), 1);
     assert_eq!(*runner.deny_calls.borrow(), 1);
 }
 
@@ -1288,7 +1701,7 @@ fn audit_reports_failures() {
         .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::from(1));
-    assert_eq!(*runner.audit_calls.borrow(), 1);
+    assert_eq!(runner.audit_calls.borrow().len(), 1);
     assert_eq!(*runner.deny_calls.borrow(), 0);
     assert!(
         String::from_utf8(stderr)
@@ -1298,7 +1711,7 @@ fn audit_reports_failures() {
 }
 
 #[test]
-fn verify_runs_locked_build_and_test() {
+fn verify_fails_when_reviewed_targets_manifest_is_absent() {
     let cli = Cli::parse_from(["cargo-barbican", "verify"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
@@ -1309,14 +1722,15 @@ fn verify_runs_locked_build_and_test() {
     let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
         .expect("command should run");
 
-    assert_eq!(exit_code, ExitCode::SUCCESS);
-    assert_eq!(
-        String::from_utf8(stdout).expect("stdout should be utf8"),
-        "Pin check: no reviewed-targets.toml present; skipping.\n"
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL reviewed-targets.toml: reviewed-targets policy required for verify")
     );
-    assert!(stderr.is_empty());
-    assert_eq!(*runner.build_calls.borrow(), 1);
-    assert_eq!(*runner.test_calls.borrow(), 1);
+    assert_eq!(*runner.build_calls.borrow(), 0);
+    assert_eq!(*runner.test_calls.borrow(), 0);
 }
 
 #[test]
@@ -1365,6 +1779,9 @@ serde = "=1.0.228"
 [rust.families.resolved]
 serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
 serde_derive = "1.0.228"
+
+[rust.families.allowed_surfaces]
+serde = ["build-rs"]
 "#,
     )
     .expect("reviewed targets should write");
@@ -1436,6 +1853,7 @@ fn age_smoke_tests_the_ureq_client_against_a_local_http_server() {
         "HTTP/1.1 200 OK",
         r#"{"version":{"checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"2026-05-01T00:00:00Z","yanked":false}}"#,
     ) else {
+        eprintln!("[SKIP] no loopback bind available - skipping HTTP smoke test");
         return;
     };
     let client = UreqCratesIoClient::new(base_url);
@@ -1476,6 +1894,7 @@ fn age_reports_http_statuses_from_the_ureq_client() {
     let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
     let Some((base_url, _requests, handle)) = spawn_http_stub("HTTP/1.1 404 Not Found", "{}")
     else {
+        eprintln!("[SKIP] no loopback bind available - skipping HTTP smoke test");
         return;
     };
     let client = UreqCratesIoClient::new(base_url);
@@ -1562,6 +1981,468 @@ fn inspect_reports_routine_safe_for_clean_crate() {
         client.recorded_tarball_fetches(),
         vec!["sample@0.1.0".to_owned()]
     );
+}
+
+#[test]
+fn gatehouse_candidate_renders_isolated_dossier_and_cleans_up_sandbox() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+        (
+            ".cargo_vcs_info.json",
+            "{\n  \"git\": {\"sha1\": \"abc123\"},\n  \"path_in_vcs\": \"sample\"\n}\n",
+        ),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default()
+        .with_cargo_tree("cargo-barbican-gatehouse-candidate v0.0.0\n+-- sample v0.1.0\n")
+        .with_cargo_audit("No vulnerable packages found\n");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Gatehouse candidate: sample@0.1.0"));
+    assert!(rendered.contains("Inspect evidence:"));
+    assert!(rendered.contains("classification: routine-safe"));
+    assert!(rendered.contains("Sandbox lockfile:"));
+    assert!(rendered.contains("OK generated with cargo generate-lockfile"));
+    assert!(rendered.contains("Cargo tree:"));
+    assert!(rendered.contains("sample v0.1.0"));
+    assert!(rendered.contains("Cargo audit:"));
+    assert!(rendered.contains("No vulnerable packages found"));
+    assert!(rendered.contains("Suggested next step:"));
+    assert_eq!(client.recorded_fetches(), vec!["sample@0.1.0".to_owned()]);
+    assert_eq!(
+        client.recorded_tarball_fetches(),
+        vec!["sample@0.1.0".to_owned()]
+    );
+    let lockfile_calls = runner.recorded_generate_lockfile_calls();
+    assert_eq!(lockfile_calls.len(), 1);
+    assert_eq!(runner.recorded_cargo_tree_calls(), lockfile_calls);
+    assert_eq!(runner.recorded_audit_calls(), lockfile_calls);
+    assert!(!lockfile_calls[0].exists());
+    assert!(!temp_dir.join("Cargo.toml").exists());
+    assert!(!temp_dir.join("Cargo.lock").exists());
+}
+
+#[test]
+fn gatehouse_candidate_preserves_sandbox_when_requested() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from([
+        "cargo-barbican",
+        "gatehouse",
+        "candidate",
+        "--preserve-sandbox",
+        "sample@0.1.0",
+    ]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default()
+        .with_cargo_tree("sample v0.1.0\n")
+        .with_cargo_audit("No vulnerable packages found\n");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("status: preserved for inspection"));
+    let sandbox_path = runner.recorded_generate_lockfile_calls()[0].clone();
+    assert!(sandbox_path.is_dir());
+    assert!(rendered.contains(&sandbox_path.display().to_string()));
+    assert!(sandbox_path.join("src/lib.rs").is_file());
+    assert!(sandbox_path.join("Cargo.lock").is_file());
+    assert!(
+        fs::read_to_string(sandbox_path.join("Cargo.toml"))
+            .expect("candidate manifest should read")
+            .contains("\"sample\" = \"=0.1.0\"")
+    );
+
+    fs::remove_dir_all(sandbox_path).expect("preserved sandbox should clean up");
+}
+
+#[test]
+fn gatehouse_candidate_rejects_non_exact_specs_before_sandboxing() {
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("Expected exact crate@version spec")
+    );
+    assert!(runner.recorded_generate_lockfile_calls().is_empty());
+}
+
+#[test]
+fn gatehouse_candidate_reports_cargo_audit_failures_in_the_dossier() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default()
+        .with_cargo_tree("sample v0.1.0\n")
+        .with_cargo_audit_error("vulnerable dependency found");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Cargo audit:"));
+    assert!(rendered.contains("FAIL command exited with status 1"));
+    assert!(rendered.contains("stderr: vulnerable dependency found"));
+    assert!(
+        rendered.contains("Do not admit this candidate until the failed evidence is reviewed.")
+    );
+    assert!(!runner.recorded_generate_lockfile_calls()[0].exists());
+}
+
+#[test]
+fn gatehouse_candidate_reports_fetch_failures_in_the_dossier() {
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default().with_error(
+        "sample@0.1.0",
+        CratesIoClientError::Transport {
+            reason: "network blocked".to_owned(),
+        },
+    );
+    let runner = FakeCommandRunner::default()
+        .with_cargo_tree("sample v0.1.0\n")
+        .with_cargo_audit("No vulnerable packages found\n");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Inspect evidence:"));
+    assert!(rendered.contains("FAIL sample@0.1.0: unable to reach crates.io (network blocked)"));
+    assert!(rendered.contains("Cargo tree:"));
+    assert!(rendered.contains("Cargo audit:"));
+    assert!(
+        rendered.contains("Do not admit this candidate until the failed evidence is reviewed.")
+    );
+    assert!(!runner.recorded_generate_lockfile_calls()[0].exists());
+}
+
+#[test]
+fn gatehouse_candidate_reports_tarball_fetch_failures_in_the_dossier() {
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default().with_release_checksum(
+        "sample@0.1.0",
+        "2020-05-01T00:00:00Z",
+        false,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+    let runner = FakeCommandRunner::default()
+        .with_cargo_tree("sample v0.1.0\n")
+        .with_cargo_audit("No vulnerable packages found\n");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Inspect evidence:"));
+    assert!(
+        rendered.contains(
+            "FAIL sample@0.1.0: unable to reach crates.io (missing fake tarball response)"
+        )
+    );
+    assert!(rendered.contains("Cargo tree:"));
+    assert!(rendered.contains("Cargo audit:"));
+    assert!(
+        rendered.contains("Do not admit this candidate until the failed evidence is reviewed.")
+    );
+    assert!(!runner.recorded_generate_lockfile_calls()[0].exists());
+}
+
+#[test]
+fn gatehouse_candidate_keeps_collecting_evidence_after_non_routine_inspect() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("build.rs", "fn main() {}\n"),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default()
+        .with_cargo_tree("sample v0.1.0\n")
+        .with_cargo_audit("No vulnerable packages found\n");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("classification: elevated-risk"));
+    assert!(rendered.contains("build.rs surfaces: build.rs"));
+    assert!(rendered.contains("Sandbox lockfile:"));
+    assert!(rendered.contains("Cargo tree:"));
+    assert!(rendered.contains("Cargo audit:"));
+    assert_eq!(runner.recorded_cargo_tree_calls().len(), 1);
+    assert_eq!(runner.recorded_audit_calls().len(), 1);
+}
+
+#[test]
+fn gatehouse_candidate_honours_injected_clock_for_release_age() {
+    // An otherwise-clean crate published 6 days before `fixed_now()` (2020-06-01)
+    // is too fresh and must classify policy-violating. Age is the sole driver
+    // here, so this guards the gatehouse candidate call site's clock wiring:
+    // under the wall clock the release would read as years old and wrongly pass.
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-26T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default()
+        .with_cargo_tree("sample v0.1.0\n")
+        .with_cargo_audit("No vulnerable packages found\n");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("classification: policy-violating"));
+    assert!(rendered.contains("below the 7-day minimum"));
+}
+
+#[test]
+fn gatehouse_candidate_lockfile_generation_failure_skips_later_evidence() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default().with_cargo_generate_lockfile_error("lock failed");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Sandbox lockfile:"));
+    assert!(rendered.contains("FAIL command exited with status 1"));
+    assert!(rendered.contains("stderr: lock failed"));
+    assert!(!rendered.contains("Cargo tree:"));
+    assert!(!rendered.contains("Cargo audit:"));
+    assert!(runner.recorded_cargo_tree_calls().is_empty());
+    assert!(runner.recorded_audit_calls().is_empty());
+    assert!(!runner.recorded_generate_lockfile_calls()[0].exists());
+}
+
+#[test]
+fn gatehouse_candidate_renders_empty_success_output_explicitly() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Cargo tree:\n  OK\n  output: none"));
+    assert!(rendered.contains("Cargo audit:\n  OK\n  output: none"));
+}
+
+#[test]
+fn gatehouse_candidate_reports_cargo_tree_failures_in_the_dossier() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default()
+        .with_cargo_tree_error("tree failed")
+        .with_cargo_audit("No vulnerable packages found\n");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Cargo tree:"));
+    assert!(rendered.contains("stderr: tree failed"));
+    assert!(rendered.contains("Cargo audit:"));
+    assert!(rendered.contains("No vulnerable packages found"));
 }
 
 #[test]
@@ -1657,7 +2538,12 @@ fn inspect_reports_policy_violation_for_checksum_mismatch() {
     ]);
     let cli = Cli::parse_from(["cargo-barbican", "inspect", "sample@0.1.0"]);
     let client = FakeCratesIoClient::default()
-        .with_release_checksum("sample@0.1.0", "2026-05-01T00:00:00Z", false, "deadbeef")
+        .with_release_checksum(
+            "sample@0.1.0",
+            "2026-05-01T00:00:00Z",
+            false,
+            "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        )
         .with_tarball("sample@0.1.0", &tarball);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -1772,6 +2658,53 @@ serde_derive = "1.0.228"
         "Cargo.lock ok for serde: matched {version=1.0.228, checksum_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
     ));
     assert!(rendered.contains("Cargo.lock ok for serde_derive: matched {version=1.0.228}"));
+}
+
+#[test]
+fn pin_check_fails_when_allowed_surface_state_is_malformed() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = "1.0.228"
+
+[rust.families.allowed_surfaces]
+serde_derive = ["proc-macro"]
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+
+    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect_err("malformed reviewed targets should fail");
+
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+    assert!(error.to_string().contains(
+        "allowed_surfaces entry for serde_derive references a crate absent from the same resolved map"
+    ));
 }
 
 #[test]
@@ -2078,11 +3011,15 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn write_workspace_layout(temp_dir: &Path) {
+    fs::create_dir_all(temp_dir.join("app")).expect("workspace member dir should exist");
     fs::create_dir_all(temp_dir.join("crates/barbican")).expect("crate dir should exist");
     fs::create_dir_all(temp_dir.join("crates/cargo-barbican")).expect("crate dir should exist");
     fs::create_dir_all(temp_dir.join("docs/dependency-reviews")).expect("review dir should exist");
-    fs::write(temp_dir.join("Cargo.toml"), "[workspace]\nmembers = []\n")
-        .expect("root manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"crates/*\", \"app\"]\n",
+    )
+    .expect("root manifest should write");
     fs::write(temp_dir.join("Cargo.lock"), "version = 4\n").expect("lockfile should write");
     fs::write(
         temp_dir.join("barbican.toml"),
@@ -2100,6 +3037,11 @@ fn write_workspace_layout(temp_dir: &Path) {
         "# Dependency Review: sample\n",
     )
     .expect("review record should write");
+    fs::write(
+        temp_dir.join("app/Cargo.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("workspace member manifest should write");
     fs::write(
         temp_dir.join("crates/barbican/Cargo.toml"),
         "[package]\nname = \"barbican\"\nversion = \"0.1.1\"\n",

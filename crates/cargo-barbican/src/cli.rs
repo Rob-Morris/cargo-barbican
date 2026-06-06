@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use barbican::MAXIMUM_RELEASE_AGE_MINIMUM_DAYS;
 use clap::builder::RangedU64ValueParser;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 pub(crate) const REVIEWED_TARGETS_CONFIG_FILE: &str = "reviewed-targets.toml";
 
@@ -44,6 +44,8 @@ pub(crate) enum Command {
         base_ref: Option<String>,
         #[arg(long, conflicts_with = "base_ref")]
         base_dir: Option<PathBuf>,
+        #[arg(long, value_enum, default_value = "strict")]
+        policy_mode: AssessPolicyMode,
         #[arg(long, value_parser = min_age_days_parser())]
         min_age_days: Option<u64>,
         #[arg(long, default_value = "Cargo.lock")]
@@ -55,6 +57,10 @@ pub(crate) enum Command {
         #[arg(required = true)]
         specs: Vec<String>,
     },
+    Gatehouse {
+        #[command(subcommand)]
+        command: GatehouseCommand,
+    },
     PinCheck {
         #[arg(long, default_value = REVIEWED_TARGETS_CONFIG_FILE)]
         config: PathBuf,
@@ -65,6 +71,24 @@ pub(crate) enum Command {
     },
     Audit,
     Verify,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum GatehouseCommand {
+    Candidate(GatehouseCandidateArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct GatehouseCandidateArgs {
+    #[arg(long)]
+    pub(crate) preserve_sandbox: bool,
+    pub(crate) spec: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum AssessPolicyMode {
+    Strict,
+    ElevatedRisk,
 }
 
 fn min_age_days_parser() -> RangedU64ValueParser<u64> {

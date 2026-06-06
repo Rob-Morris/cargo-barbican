@@ -58,12 +58,7 @@ impl RustInspectReport {
             || !self.inspection_failures.is_empty()
         {
             RustAssessmentClassification::PolicyViolating
-        } else if !self.build_script_paths.is_empty()
-            || self.proc_macro
-            || self.native_sys_crate
-            || self.package_links.is_some()
-            || !self.native_source_paths.is_empty()
-        {
+        } else if self.has_execution_surface() {
             RustAssessmentClassification::ElevatedRisk
         } else {
             RustAssessmentClassification::RoutineSafe
@@ -120,6 +115,16 @@ impl RustInspectReport {
 
     pub fn inspection_failures(&self) -> &[String] {
         &self.inspection_failures
+    }
+
+    fn has_execution_surface(&self) -> bool {
+        has_execution_surface(
+            !self.build_script_paths.is_empty(),
+            self.proc_macro,
+            self.native_sys_crate,
+            self.package_links.is_some(),
+            !self.native_source_paths.is_empty(),
+        )
     }
 }
 
@@ -196,11 +201,10 @@ pub fn inspect_published_crate_at(
     now: OffsetDateTime,
     minimum_days: u64,
 ) -> RustInspectReport {
-    let published_checksum_sha256_hex = release.checksum_sha256_hex.clone();
+    let published_checksum_sha256_hex = release.checksum_sha256_hex.to_string();
     let release_age = evaluate_release_age(spec.clone(), release, now, minimum_days);
     let local_checksum_sha256_hex = sha256_hex(tarball_bytes);
-    let checksum_matches =
-        local_checksum_sha256_hex.eq_ignore_ascii_case(&published_checksum_sha256_hex);
+    let checksum_matches = local_checksum_sha256_hex == published_checksum_sha256_hex;
 
     if !checksum_matches {
         return RustInspectReport {
@@ -251,9 +255,31 @@ struct TarballInspection {
     inspection_failures: Vec<String>,
 }
 
+impl TarballInspection {
+    fn has_execution_surface(&self) -> bool {
+        has_execution_surface(
+            !self.build_script_paths.is_empty(),
+            self.proc_macro,
+            self.native_sys_crate,
+            self.package_links.is_some(),
+            !self.native_source_paths.is_empty(),
+        )
+    }
+}
+
+fn has_execution_surface(
+    has_build_script: bool,
+    proc_macro: bool,
+    native_sys_crate: bool,
+    has_package_links: bool,
+    has_native_source: bool,
+) -> bool {
+    has_build_script || proc_macro || native_sys_crate || has_package_links || has_native_source
+}
+
 fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> TarballInspection {
     let mut inspection = TarballInspection {
-        native_sys_crate: spec.crate_name().ends_with("-sys"),
+        native_sys_crate: spec.is_native_sys(),
         ..TarballInspection::default()
     };
 
@@ -344,7 +370,8 @@ fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> Tarb
     inspection.ioc_hits = scan_ioc_hits(
         &files,
         &inspection.build_script_paths,
-        inspection.proc_macro,
+        &inspection.native_source_paths,
+        inspection.has_execution_surface(),
     );
     inspection.build_script_paths.sort();
     inspection.native_source_paths.sort();
@@ -357,13 +384,15 @@ fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> Tarb
 fn scan_ioc_hits(
     files: &[ArchiveTextFile],
     build_script_paths: &[String],
-    proc_macro: bool,
+    native_source_paths: &[String],
+    has_execution_surface: bool,
 ) -> Vec<IocHit> {
     files
         .iter()
         .filter(|file| {
             build_script_paths.iter().any(|path| path == &file.path)
-                || (proc_macro && is_proc_macro_source_path(&file.path))
+                || native_source_paths.iter().any(|path| path == &file.path)
+                || (has_execution_surface && is_source_like_path(&file.path))
         })
         .flat_map(|file| {
             IOC_PATTERNS.iter().filter_map(|(needle, description)| {
@@ -376,14 +405,15 @@ fn scan_ioc_hits(
 }
 
 fn is_proc_macro_source_path(path: &str) -> bool {
-    path.ends_with(".rs")
-        && !path.starts_with("tests/")
-        && !path.starts_with("examples/")
-        && !path.starts_with("benches/")
+    path.ends_with(".rs") && !is_non_production_path(path)
+}
+
+fn is_source_like_path(path: &str) -> bool {
+    is_proc_macro_source_path(path) || is_native_source_path(path)
 }
 
 fn is_native_source_path(path: &str) -> bool {
-    if path.starts_with("tests/") || path.starts_with("examples/") || path.starts_with("benches/") {
+    if is_non_production_path(path) {
         return false;
     }
 
@@ -399,6 +429,10 @@ fn is_native_source_path(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn is_non_production_path(path: &str) -> bool {
+    path.starts_with("tests/") || path.starts_with("examples/") || path.starts_with("benches/")
+}
+
 fn parse_published_manifest(text: &str) -> Result<PublishedManifestSignals, toml::de::Error> {
     let manifest: PublishedManifest = toml::from_str(text)?;
     let proc_macro = manifest.lib.and_then(|lib| lib.proc_macro).unwrap_or(false);
@@ -408,6 +442,7 @@ fn parse_published_manifest(text: &str) -> Result<PublishedManifestSignals, toml
         .and_then(|package| package.links.clone());
     let build_script_path = match manifest.package.and_then(|package| package.build) {
         None => None,
+        Some(Value::Boolean(true)) => Some("build.rs".to_owned()),
         Some(Value::Boolean(false)) => None,
         Some(Value::String(path)) => Some(path),
         Some(other) => Some(other.to_string()),
@@ -524,19 +559,7 @@ fn decompress_crate_gzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     let footer_offset = bytes.len() - GZIP_FOOTER_LEN;
-    let expected_size = u32::from_le_bytes(
-        bytes[footer_offset + 4..footer_offset + 8]
-            .try_into()
-            .unwrap(),
-    ) as usize;
-    if expected_size > MAX_DECOMPRESSED_CRATE_BYTES {
-        return Err(format!(
-            "crate tarball expands beyond the {} byte inspection limit",
-            MAX_DECOMPRESSED_CRATE_BYTES
-        ));
-    }
-
-    decompress_to_vec_with_limit(&bytes[offset..footer_offset], expected_size)
+    decompress_to_vec_with_limit(&bytes[offset..footer_offset], MAX_DECOMPRESSED_CRATE_BYTES)
         .map_err(|error| error.to_string())
 }
 
@@ -623,7 +646,9 @@ mod tests {
     use time::format_description::well_known::Rfc3339;
 
     use super::{CrateVcsInfo, RustInspectReport, inspect_published_crate_at, sha256_hex};
-    use crate::{CrateRelease, ExactCrateSpec, assessment::RustAssessmentClassification};
+    use crate::{
+        CrateRelease, ExactCrateSpec, Sha256Digest, assessment::RustAssessmentClassification,
+    };
 
     fn build_crate_tarball(files: &[(&str, &str)]) -> Vec<u8> {
         let mut tarball = Vec::new();
@@ -653,7 +678,8 @@ mod tests {
 
     fn release_for_tarball(tarball: &[u8]) -> CrateRelease {
         CrateRelease {
-            checksum_sha256_hex: sha256_hex(tarball),
+            checksum_sha256_hex: Sha256Digest::try_from(sha256_hex(tarball).as_str())
+                .expect("fixture checksum should parse"),
             published_at_raw: "2026-05-01T00:00:00Z".to_owned(),
             published_at: time::OffsetDateTime::parse("2026-05-01T00:00:00Z", &Rfc3339)
                 .expect("timestamp should parse"),
@@ -743,6 +769,22 @@ mod tests {
     }
 
     #[test]
+    fn package_build_true_uses_default_build_script_path() {
+        let tarball = build_crate_tarball(&[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"sample\"\nversion = \"0.1.0\"\nbuild = true\n",
+            ),
+            ("build.rs", "fn main() {}\n"),
+        ]);
+
+        let report = inspect(spec("sample"), &tarball);
+
+        assert_eq!(report.build_script_paths(), ["build.rs"]);
+        assert!(report.inspection_failures().is_empty());
+    }
+
+    #[test]
     fn checksum_mismatch_blocks_and_skips_deep_inspection() {
         let tarball = build_crate_tarball(&[
             (
@@ -752,7 +794,10 @@ mod tests {
             ("build.rs", "fn main() {}\n"),
         ]);
         let mut release = release_for_tarball(&tarball);
-        release.checksum_sha256_hex = "deadbeef".to_owned();
+        release.checksum_sha256_hex = Sha256Digest::try_from(
+            "deadbeef0123456789abcdef0123456789abcdef0123456789abcdef01234567",
+        )
+        .expect("fixture checksum should parse");
 
         let report = inspect_published_crate_at(
             spec("sample"),
@@ -806,5 +851,108 @@ mod tests {
                 .iter()
                 .any(|hit| hit.indicator().contains("Command::new("))
         );
+    }
+
+    #[test]
+    fn build_script_helper_modules_are_ioc_scanned() {
+        let tarball = build_crate_tarball(&[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+            ),
+            ("build.rs", "mod evil;\nfn main() { evil::run(); }\n"),
+            (
+                "evil.rs",
+                "pub fn run() { std::process::Command::new(\"curl\"); }\n",
+            ),
+        ]);
+
+        let report = inspect(spec("sample"), &tarball);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.build_script_paths(), ["build.rs"]);
+        assert!(report.ioc_hits().iter().any(|hit| {
+            hit.path() == "evil.rs" && hit.indicator().contains("std::process::Command")
+        }));
+    }
+
+    #[test]
+    fn native_source_ioc_hits_block_after_verified_checksum() {
+        let tarball = build_crate_tarball(&[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"native-sys\"\nversion = \"0.1.0\"\nlinks = \"native\"\n",
+            ),
+            (
+                "vendor/native.c",
+                "void run(void) { system(\"curl https://example.com\"); }\n",
+            ),
+        ]);
+
+        let report = inspect(spec("native-sys"), &tarball);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.native_source_paths(), ["vendor/native.c"]);
+        assert!(
+            report.ioc_hits().iter().any(|hit| {
+                hit.path() == "vendor/native.c" && hit.indicator().contains("curl ")
+            })
+        );
+    }
+
+    #[test]
+    fn attacker_named_native_directories_are_ioc_scanned() {
+        let tarball = build_crate_tarball(&[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"native-sys\"\nversion = \"0.1.0\"\nlinks = \"native\"\n",
+            ),
+            (
+                "integration/evil.c",
+                "void run(void) { system(\"curl https://example.com\"); }\n",
+            ),
+        ]);
+
+        let report = inspect(spec("native-sys"), &tarball);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.native_source_paths(), ["integration/evil.c"]);
+        assert!(report.ioc_hits().iter().any(|hit| {
+            hit.path() == "integration/evil.c" && hit.indicator().contains("curl ")
+        }));
+    }
+
+    #[test]
+    fn proc_macro_src_tests_are_ioc_scanned() {
+        let tarball = build_crate_tarball(&[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"sample-macro\"\nversion = \"0.1.0\"\n\n[lib]\nproc-macro = true\n",
+            ),
+            (
+                "src/tests/payload.rs",
+                "fn run() { std::process::Command::new(\"curl\"); }\n",
+            ),
+        ]);
+
+        let report = inspect(spec("sample-macro"), &tarball);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert!(report.ioc_hits().iter().any(|hit| {
+            hit.path() == "src/tests/payload.rs"
+                && hit.indicator().contains("std::process::Command")
+        }));
     }
 }

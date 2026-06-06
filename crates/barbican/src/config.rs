@@ -3,7 +3,7 @@ use thiserror::Error;
 
 pub const MAXIMUM_RELEASE_AGE_MINIMUM_DAYS: u64 = 365_000;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct BarbicanConfig {
     pub release_age: ReleaseAgeConfig,
@@ -15,16 +15,6 @@ impl BarbicanConfig {
     pub fn from_toml_str(text: &str) -> Result<Self, ConfigLoadError> {
         let config: Self = toml::from_str(text).map_err(ConfigLoadError::Parse)?;
         config.validate()
-    }
-}
-
-impl Default for BarbicanConfig {
-    fn default() -> Self {
-        Self {
-            release_age: ReleaseAgeConfig::default(),
-            high_scrutiny: HighScrutinyConfig::default(),
-            delegates: DelegatesConfig::default(),
-        }
     }
 }
 

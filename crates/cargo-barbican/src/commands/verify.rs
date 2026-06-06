@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
+use std::{fs, io};
 
 use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
@@ -17,6 +18,30 @@ pub(super) fn run_verify<R>(
 where
     R: CommandRunner + ?Sized,
 {
+    match fs::symlink_metadata(current_dir.join(REVIEWED_TARGETS_CONFIG_FILE)) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => {
+            return fail(
+                stderr,
+                format!("{REVIEWED_TARGETS_CONFIG_FILE}: reviewed-targets policy is not a file"),
+            );
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return fail(
+                stderr,
+                format!(
+                    "{REVIEWED_TARGETS_CONFIG_FILE}: reviewed-targets policy required for verify"
+                ),
+            );
+        }
+        Err(error) => {
+            return fail(
+                stderr,
+                format!("unable to inspect {REVIEWED_TARGETS_CONFIG_FILE}: {error}"),
+            );
+        }
+    }
+
     let pin_check_exit =
         run_pin_check(Path::new(REVIEWED_TARGETS_CONFIG_FILE), current_dir, stdout)?;
     if pin_check_exit != ExitCode::SUCCESS {

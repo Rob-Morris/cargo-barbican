@@ -36,10 +36,15 @@ cargo barbican resolve [--dry-run] [--min-age-days N] <crate@version>...
     workspace root and in `$CARGO_HOME`. Ancestor `.cargo/config.toml` files
     between the workspace root and `$HOME` are not copied into the preview
     workspace, so they can make dry-run resolution differ from an in-place run.
+    The dry-run workspace copy preserves relative symlinks only after proving
+    their fully resolved target remains inside the source workspace and does
+    not point into skipped `.git` or `target` paths. Absolute, broken,
+    looping, escaping, or skipped-target symlinks fail the dry-run setup rather
+    than being dereferenced or silently skipped.
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
 
-cargo barbican assess [--base-ref REF | --base-dir PATH] [--lockfile Cargo.lock] [--min-age-days N]
+cargo barbican assess [--base-ref REF | --base-dir PATH] [--policy-mode strict|elevated-risk] [--lockfile Cargo.lock] [--min-age-days N]
     Diff the current Rust dependency state against a baseline dependency
     state and classify the change as `routine-safe`, `elevated-risk`, or
     `policy-violating`. By default the baseline is the current workspace
@@ -57,9 +62,12 @@ cargo barbican assess [--base-ref REF | --base-dir PATH] [--lockfile Cargo.lock]
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
     Enabled `[high_scrutiny]` keys decide which elevated-risk findings are
-    active. The first slice is fail-closed: any blocking finding, including a
-    required inspection failure, or any enabled elevated-risk finding returns
-    exit 1.
+    active. The default `--policy-mode strict` path is fail-closed: any
+    blocking finding, including a required inspection failure, or any enabled
+    elevated-risk finding returns exit 1. `--policy-mode elevated-risk`
+    accepts elevated-risk findings with exit 0 while still printing the
+    elevated-risk classification and still failing any `policy-violating`
+    result.
 
 cargo barbican inspect [--min-age-days N] <crate@version>...
     Pre-add deep review for one or more exact crates.io candidates.
@@ -76,11 +84,35 @@ cargo barbican inspect [--min-age-days N] <crate@version>...
     `elevated-risk`, or `policy-violating`.
     IOC hits, checksum mismatches, and required-inspection failures are
     `policy-violating`. `build.rs`, `proc-macro`, and native `-sys` / FFI
-    surfaces are `elevated-risk` unless a later slice proves a narrower rule.
+    surfaces are `elevated-risk` unless they match an exact reviewed
+    execution-surface allowance in `reviewed-targets.toml`.
     The first slice is fail-closed for routine intake: any non-routine result
     returns exit 1.
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
+    Matching reviewed execution-surface allowances are rendered in an
+    `Allowed policy exceptions:` section and do not contribute to the
+    `elevated-risk` classification by themselves. The matching family
+    `review_record` must exist before `assess` trusts the allowance.
+
+cargo barbican gatehouse candidate [--preserve-sandbox] <crate@version>
+    Assemble a human-readable candidate-intake dossier for one exact crates.io
+    dependency candidate without mutating the current repo. This is a workflow
+    convenience layer over the base evidence commands, not a separate policy
+    engine. The first slice:
+    - runs the same exact-candidate inspection used by `inspect`
+    - creates a disposable minimal Cargo project pinned to `=version`
+    - generates the sandbox `Cargo.lock` with Cargo
+    - runs `cargo tree --edges normal` in the sandbox
+    - runs `cargo audit` in the sandbox
+    - renders one dossier on stdout
+    The command does not build, test, or execute the candidate package. It
+    resolves metadata and lockfile state, runs static inspection of the
+    published crate tarball, renders Cargo's dependency graph, and audits the
+    generated lockfile.
+    The sandbox is removed by default. `--preserve-sandbox` keeps it for
+    manual inspection and prints the sandbox path. Any failed required evidence
+    step returns exit 1 after rendering the failure in the dossier.
 
 cargo barbican pin-check [--config reviewed-targets.toml]
     Check active reviewed Rust families against the current workspace manifests
@@ -94,12 +126,17 @@ cargo barbican pin-check [--config reviewed-targets.toml]
     - checks exact resolved `Cargo.lock` versions for every active reviewed family
     - for structured crates.io `resolved` entries, also checks the reviewed
       `checksum_sha256` against the resolved `Cargo.lock` checksum chain
+    - validates any `allowed_surfaces` entries point at crates in the same
+      family `resolved` map
     The first slice treats exact `Cargo.lock` parity as the load-bearing
     execution gate. It does not yet verify installed-tree or stronger
     build-input parity.
     Structured crates.io reviewed-artefact form:
     - `serde = { version = "1.0.228", checksum_sha256 = "..." }`
     - legacy string entries such as `serde = "1.0.228"` remain accepted
+    - execution-surface allowances are declared separately, for example:
+      `serde = ["build-rs", "proc-macro"]` under
+      `[rust.families.allowed_surfaces]`
     - stronger installed-tree or broader non-crates.io artefact parity remains
       out of scope for this slice
 
@@ -123,9 +160,10 @@ cargo barbican verify
     1. `pin-check` with the default repo-root `reviewed-targets.toml`
     2. `cargo build --locked`
     3. `cargo test --locked`
-    If no reviewed-target manifest is present, or no active Rust families are
-    configured, the pin-check step skips successfully and verification
-    continues.
+    The standalone `pin-check` command skips successfully when no
+    reviewed-target manifest is present or no active Rust families are
+    configured. `verify` fails closed instead: build/test execution requires an
+    explicit reviewed-target policy.
 ```
 
 ## Exit codes
@@ -140,6 +178,9 @@ cargo barbican verify
 - `crates/cargo-barbican/` owns CLI parsing, subprocess calls, and the concrete HTTP implementation.
 - Behaviour should match undertask where the surface overlaps unless the docs explicitly say otherwise.
 - The deeper intake path is now shaped as a separate `inspect` command rather than additional scope hidden inside `assess`.
+- `gatehouse candidate` is a workflow-convenience layer for isolated
+  candidate intake evidence. It composes existing policy/evidence primitives
+  and delegated Cargo checks; it does not define new policy semantics.
 - Reviewed-target enforcement has a dedicated `pin-check` surface, and `verify`
   now reuses that same gate before code-executing build/test steps. The
   foundation for that work is checked-in review records plus a repo-root

@@ -3,10 +3,12 @@ mod age_lock;
 mod assess;
 mod audit;
 mod diff_render;
+mod gatehouse;
 mod inspect;
 mod pin_check;
 mod resolve;
 mod review;
+mod scratch_dir;
 mod verify;
 
 use std::collections::BTreeSet;
@@ -22,6 +24,7 @@ use barbican::{
     ReleaseAgeOutcome, ReleaseAgeReport, ReviewedTargets, ReviewedTargetsError,
     check_release_age_at, format_age, parse_lockfile, parse_manifest_dependencies,
     parse_manifest_direct_requirements, parse_reviewed_targets_toml,
+    parse_workspace_member_manifest_paths,
 };
 use clap::Parser;
 
@@ -134,11 +137,13 @@ where
         Command::Assess {
             base_ref,
             base_dir,
+            policy_mode,
             min_age_days,
             lockfile,
         } => assess::run_assess(
             base_ref.as_deref(),
             base_dir.as_deref(),
+            policy_mode,
             min_age_days,
             &lockfile,
             current_dir,
@@ -160,6 +165,9 @@ where
             stdout,
             stderr,
         ),
+        Command::Gatehouse { command } => {
+            gatehouse::run_gatehouse(command, current_dir, client, runner, now, stdout, stderr)
+        }
         Command::PinCheck { config } => pin_check::run_pin_check(&config, current_dir, stdout),
         Command::Review { base_dir } => {
             review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)
@@ -249,6 +257,14 @@ pub(super) fn render_release_age_report(report: &ReleaseAgeReport) -> String {
     }
 }
 
+pub(super) fn join_display<T: fmt::Display>(values: &[T], separator: &str) -> String {
+    values
+        .iter()
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(separator)
+}
+
 pub(super) fn load_config(current_dir: &Path) -> Result<BarbicanConfig, CommandError> {
     let path = current_dir.join(CONFIG_FILE_NAME);
 
@@ -264,12 +280,61 @@ pub(super) fn load_config(current_dir: &Path) -> Result<BarbicanConfig, CommandE
 
 pub(super) fn crates_io_base_url() -> Result<String, CommandError> {
     match env::var(CRATES_IO_BASE_URL_ENV) {
-        Ok(value) => Ok(value),
+        Ok(value) => {
+            validate_crates_io_base_url(&value)?;
+            Ok(value)
+        }
         Err(env::VarError::NotPresent) => Ok(DEFAULT_CRATES_IO_BASE_URL.to_owned()),
         Err(env::VarError::NotUnicode(_)) => Err(CommandError::InvalidEnvironment {
             name: CRATES_IO_BASE_URL_ENV,
         }),
     }
+}
+
+fn validate_crates_io_base_url(value: &str) -> Result<(), CommandError> {
+    let lowercase = value.to_ascii_lowercase();
+
+    if lowercase.starts_with("https://") {
+        return Ok(());
+    }
+
+    let Some(authority_and_path) = lowercase.strip_prefix("http://") else {
+        return Err(CommandError::InvalidCratesIoBaseUrl {
+            value: value.to_owned(),
+        });
+    };
+
+    if is_loopback_http_authority(authority_and_path) {
+        Ok(())
+    } else {
+        Err(CommandError::InvalidCratesIoBaseUrl {
+            value: value.to_owned(),
+        })
+    }
+}
+
+fn is_loopback_http_authority(authority_and_path: &str) -> bool {
+    let authority = authority_and_path
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    if authority.contains('@') {
+        return false;
+    }
+
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        let Some((host, remainder)) = rest.split_once(']') else {
+            return false;
+        };
+        if !remainder.is_empty() && !remainder.starts_with(':') {
+            return false;
+        }
+        host
+    } else {
+        authority.split(':').next().unwrap_or_default()
+    };
+
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
 pub(super) fn load_current_lockfile(
@@ -278,6 +343,14 @@ pub(super) fn load_current_lockfile(
 ) -> Result<barbican::Lockfile, CommandError> {
     let display = lockfile.display().to_string();
     load_lockfile_from_path(&current_dir.join(lockfile), &display)
+}
+
+pub(super) fn load_current_lockfile_with_text(
+    current_dir: &Path,
+    lockfile: &Path,
+) -> Result<(barbican::Lockfile, String), CommandError> {
+    let display = lockfile.display().to_string();
+    load_lockfile_with_text_from_path(&current_dir.join(lockfile), &display)
 }
 
 pub(super) fn load_current_lockfile_text(
@@ -310,12 +383,23 @@ pub(super) fn load_lockfile_from_path(
     path: &Path,
     display: &str,
 ) -> Result<barbican::Lockfile, CommandError> {
+    let (lockfile, _) = load_lockfile_with_text_from_path(path, display)?;
+
+    Ok(lockfile)
+}
+
+fn load_lockfile_with_text_from_path(
+    path: &Path,
+    display: &str,
+) -> Result<(barbican::Lockfile, String), CommandError> {
     let text = load_lockfile_text_from_path(path, display)?;
 
-    parse_lockfile(&text).map_err(|source| CommandError::LockfileParse {
+    let lockfile = parse_lockfile(&text).map_err(|source| CommandError::LockfileParse {
         path: display.to_owned(),
         source,
-    })
+    })?;
+
+    Ok((lockfile, text))
 }
 
 pub(super) fn load_git_base_lockfile<R>(
@@ -344,43 +428,21 @@ where
 pub(super) fn load_manifest_dependencies_from_root(
     root_dir: &Path,
 ) -> Result<Vec<barbican::CargoManifestDependency>, CommandError> {
-    let manifest_paths = workspace_manifest_paths(root_dir).map_err(CommandError::Io)?;
     let mut dependencies = Vec::new();
 
-    for manifest_path in manifest_paths {
-        let relative_display = manifest_path.display().to_string();
-        let text = fs::read_to_string(root_dir.join(&manifest_path)).map_err(|source| {
-            CommandError::ManifestRead {
-                path: relative_display.clone(),
-                source,
-            }
-        })?;
+    for (relative_display, text) in load_manifest_texts_from_root(root_dir)? {
         dependencies.extend(parse_manifest_dependency_text(&relative_display, &text)?);
     }
 
     Ok(dependencies)
 }
 
-pub(super) fn load_current_manifest_dependencies(
-    current_dir: &Path,
-) -> Result<Vec<barbican::CargoManifestDependency>, CommandError> {
-    load_manifest_dependencies_from_root(current_dir)
-}
-
 pub(super) fn load_current_manifest_direct_requirements(
     current_dir: &Path,
 ) -> Result<Vec<barbican::CargoManifestDirectRequirement>, CommandError> {
-    let manifest_paths = workspace_manifest_paths(current_dir).map_err(CommandError::Io)?;
     let mut dependencies = Vec::new();
 
-    for manifest_path in manifest_paths {
-        let relative_display = manifest_path.display().to_string();
-        let text = fs::read_to_string(current_dir.join(&manifest_path)).map_err(|source| {
-            CommandError::ManifestRead {
-                path: relative_display.clone(),
-                source,
-            }
-        })?;
+    for (relative_display, text) in load_manifest_texts_from_root(current_dir)? {
         dependencies.extend(parse_manifest_direct_requirement_text(
             &relative_display,
             &text,
@@ -390,10 +452,22 @@ pub(super) fn load_current_manifest_direct_requirements(
     Ok(dependencies)
 }
 
-pub(super) fn load_manifest_dependencies_from_base_dir(
-    base_dir: &Path,
-) -> Result<Vec<barbican::CargoManifestDependency>, CommandError> {
-    load_manifest_dependencies_from_root(base_dir)
+fn load_manifest_texts_from_root(root_dir: &Path) -> Result<Vec<(String, String)>, CommandError> {
+    let manifest_paths = workspace_manifest_paths(root_dir)?;
+    let mut manifests = Vec::new();
+
+    for manifest_path in manifest_paths {
+        let relative_display = manifest_path.display().to_string();
+        let text = fs::read_to_string(root_dir.join(&manifest_path)).map_err(|source| {
+            CommandError::ManifestRead {
+                path: relative_display.clone(),
+                source,
+            }
+        })?;
+        manifests.push((relative_display, text));
+    }
+
+    Ok(manifests)
 }
 
 pub(super) fn load_base_manifest_dependencies<R>(
@@ -404,7 +478,7 @@ pub(super) fn load_base_manifest_dependencies<R>(
 where
     R: CommandRunner + ?Sized,
 {
-    let manifest_paths = workspace_manifest_paths(current_dir).map_err(CommandError::Io)?;
+    let manifest_paths = workspace_manifest_paths(current_dir)?;
     let mut dependencies = Vec::new();
 
     for manifest_path in manifest_paths {
@@ -492,20 +566,83 @@ pub(super) fn load_reviewed_targets(
     Ok(Some(reviewed_targets))
 }
 
-pub(super) fn workspace_manifest_paths(current_dir: &Path) -> io::Result<Vec<PathBuf>> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ReviewRecordCheck {
+    family_name: String,
+    review_record: String,
+    exists: bool,
+}
+
+impl ReviewRecordCheck {
+    pub(super) fn family_name(&self) -> &str {
+        &self.family_name
+    }
+
+    pub(super) fn review_record(&self) -> &str {
+        &self.review_record
+    }
+
+    pub(super) fn is_success(&self) -> bool {
+        self.exists
+    }
+}
+
+pub(super) fn check_review_record_paths(
+    current_dir: &Path,
+    reviewed_targets: &ReviewedTargets,
+) -> Vec<ReviewRecordCheck> {
+    reviewed_targets
+        .rust_families()
+        .iter()
+        .map(|family| {
+            let review_record = family.review_record().to_owned();
+
+            ReviewRecordCheck {
+                family_name: family.name().to_owned(),
+                exists: review_record_exists(current_dir, &review_record),
+                review_record,
+            }
+        })
+        .collect()
+}
+
+pub(super) fn review_record_exists(current_dir: &Path, review_record: &str) -> bool {
+    fs::symlink_metadata(current_dir.join(review_record))
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
+}
+
+pub(super) fn workspace_manifest_paths(current_dir: &Path) -> Result<Vec<PathBuf>, CommandError> {
     let mut paths = BTreeSet::from([PathBuf::from("Cargo.toml")]);
+    let root_manifest_text =
+        fs::read_to_string(current_dir.join("Cargo.toml")).map_err(|source| {
+            CommandError::ManifestRead {
+                path: "Cargo.toml".to_owned(),
+                source,
+            }
+        })?;
+    for member in parse_workspace_member_manifest_paths("Cargo.toml", &root_manifest_text).map_err(
+        |source| CommandError::ManifestParse {
+            path: "Cargo.toml".to_owned(),
+            source,
+        },
+    )? {
+        paths.insert(PathBuf::from(member));
+    }
+
     let crates_dir = current_dir.join("crates");
 
     if crates_dir.is_dir() {
         collect_relative_files_matching(&crates_dir, current_dir, &mut paths, &mut |path| {
             path.file_name().is_some_and(|name| name == "Cargo.toml")
-        })?;
+        })
+        .map_err(CommandError::Io)?;
     }
 
     Ok(paths.into_iter().collect())
 }
 
-pub(super) fn review_paths(current_dir: &Path) -> io::Result<Vec<PathBuf>> {
+pub(super) fn review_paths(current_dir: &Path) -> Result<Vec<PathBuf>, CommandError> {
     let mut paths = workspace_manifest_paths(current_dir)?
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -528,9 +665,7 @@ pub(super) fn collect_relative_files_matching<F>(
 where
     F: FnMut(&Path) -> bool,
 {
-    if !directory.is_dir() {
-        return Ok(());
-    }
+    debug_assert!(directory.is_dir());
 
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
@@ -575,6 +710,68 @@ fn git_show_reports_missing_path_at_ref(error: &RunnerError, path: &str, base_re
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::scratch_dir::ScratchDir;
+    use super::{review_record_exists, validate_crates_io_base_url};
+
+    #[test]
+    fn accepts_https_crates_io_base_urls() {
+        validate_crates_io_base_url("https://crates.io").expect("https should be accepted");
+        validate_crates_io_base_url("https://example.invalid:8443/api")
+            .expect("https with host and path should be accepted");
+    }
+
+    #[test]
+    fn accepts_loopback_http_crates_io_base_urls() {
+        for url in [
+            "http://127.0.0.1:8080",
+            "http://localhost:8080/api",
+            "http://[::1]:8080",
+        ] {
+            validate_crates_io_base_url(url).expect("loopback HTTP should be accepted");
+        }
+    }
+
+    #[test]
+    fn rejects_non_loopback_or_non_http_crates_io_base_urls() {
+        for url in [
+            "http://example.com",
+            "http://localhost.evil",
+            "http://localhost@evil.com",
+            "http://127.0.0.1@evil.com",
+            "http://127.0.0.1:80@evil.com",
+            "http://192.168.0.1",
+            "http://[::1]:80@evil.com",
+            "http://[::1]evil",
+            "ftp://crates.io",
+            "file:///tmp/crates",
+        ] {
+            validate_crates_io_base_url(url).expect_err("base URL should fail");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn review_record_symlinks_do_not_satisfy_gates() {
+        let scratch = ScratchDir::create("cargo-barbican-review-record-test", false)
+            .expect("scratch dir should create");
+        let real_record = scratch.path().join("real.md");
+        fs::write(&real_record, "review").expect("real review record should write");
+        let review_dir = scratch.path().join("docs/dependency-reviews");
+        fs::create_dir_all(&review_dir).expect("review dir should create");
+        std::os::unix::fs::symlink(&real_record, review_dir.join("linked.md"))
+            .expect("review record symlink should create");
+
+        assert!(!review_record_exists(
+            scratch.path(),
+            "docs/dependency-reviews/linked.md"
+        ));
+    }
+}
+
 pub(super) fn exit_code_from_policy_failures(failed: bool) -> ExitCode {
     if failed {
         ExitCode::from(1)
@@ -596,6 +793,9 @@ pub enum CommandError {
     },
     InvalidEnvironment {
         name: &'static str,
+    },
+    InvalidCratesIoBaseUrl {
+        value: String,
     },
     LockfileMissing {
         path: String,
@@ -640,6 +840,10 @@ impl fmt::Display for CommandError {
             Self::InvalidEnvironment { name } => {
                 write!(formatter, "environment variable {name} is not valid UTF-8")
             }
+            Self::InvalidCratesIoBaseUrl { value } => write!(
+                formatter,
+                "{CRATES_IO_BASE_URL_ENV} must use https://, or http:// loopback for local tests: {value}"
+            ),
             Self::LockfileMissing { path } => write!(formatter, "{path}: lockfile not found"),
             Self::LockfileParse { path, source } => write!(formatter, "{path}: {source}"),
             Self::LockfileRead { path, source } => {
@@ -667,6 +871,7 @@ impl std::error::Error for CommandError {
             Self::ConfigRead { source, .. } => Some(source),
             Self::GitRead { source, .. } => Some(source),
             Self::InvalidEnvironment { .. } => None,
+            Self::InvalidCratesIoBaseUrl { .. } => None,
             Self::LockfileMissing { .. } => None,
             Self::LockfileParse { source, .. } => Some(source),
             Self::LockfileRead { source, .. } => Some(source),

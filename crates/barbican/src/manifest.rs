@@ -1,8 +1,11 @@
 use std::collections::BTreeSet;
 use std::fmt;
+use std::path::{Component, Path};
 
 use thiserror::Error;
 use toml::Value;
+
+const DEPENDENCY_SECTIONS: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CargoDependencySourceKind {
@@ -106,32 +109,9 @@ pub fn parse_manifest_dependencies(
     let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
     let mut dependencies = BTreeSet::new();
 
-    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
-        collect_dependency_section(
-            manifest_path,
-            section,
-            root_table.get(section),
-            &mut dependencies,
-        )?;
-    }
-
-    if let Some(Value::Table(targets)) = root_table.get("target") {
-        for (target_name, target_value) in targets {
-            let Some(target_table) = target_value.as_table() else {
-                continue;
-            };
-
-            for suffix in ["dependencies", "dev-dependencies", "build-dependencies"] {
-                let section = format!("target.{target_name}.{suffix}");
-                collect_dependency_section(
-                    manifest_path,
-                    &section,
-                    target_table.get(suffix),
-                    &mut dependencies,
-                )?;
-            }
-        }
-    }
+    traverse_manifest_sections(manifest_path, root_table, |section, value| {
+        collect_dependency_section(manifest_path, section, value, &mut dependencies)
+    })?;
 
     Ok(dependencies)
 }
@@ -144,34 +124,100 @@ pub fn parse_manifest_direct_requirements(
     let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
     let mut dependencies = BTreeSet::new();
 
-    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
-        collect_direct_requirement_section(
-            manifest_path,
-            section,
-            root_table.get(section),
-            &mut dependencies,
-        )?;
+    traverse_manifest_sections(manifest_path, root_table, |section, value| {
+        collect_direct_requirement_section(manifest_path, section, value, &mut dependencies)
+    })?;
+
+    Ok(dependencies)
+}
+
+pub fn parse_workspace_member_manifest_paths(
+    manifest_path: &str,
+    text: &str,
+) -> Result<Vec<String>, CargoManifestError> {
+    let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
+    let Some(workspace_value) = root_table.get("workspace") else {
+        return Ok(Vec::new());
+    };
+    let Some(workspace_table) = workspace_value.as_table() else {
+        return Err(CargoManifestError::InvalidWorkspaceSection {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+    let Some(members_value) = workspace_table.get("members") else {
+        return Ok(Vec::new());
+    };
+    let Some(members) = members_value.as_array() else {
+        return Err(CargoManifestError::InvalidWorkspaceMembers {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+
+    members
+        .iter()
+        .filter_map(|member| match member.as_str() {
+            Some(path) if contains_glob_metacharacter(path) => None,
+            Some(path) if is_workspace_relative_member_path(path) => {
+                Some(Ok(format!("{path}/Cargo.toml")))
+            }
+            Some(path) => Some(Err(CargoManifestError::InvalidWorkspaceMemberPath {
+                manifest_path: manifest_path.to_owned(),
+                member: path.to_owned(),
+            })),
+            None => Some(Err(CargoManifestError::InvalidWorkspaceMembers {
+                manifest_path: manifest_path.to_owned(),
+            })),
+        })
+        .collect()
+}
+
+fn contains_glob_metacharacter(path: &str) -> bool {
+    path.bytes()
+        .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b']'))
+}
+
+fn is_workspace_relative_member_path(path: &str) -> bool {
+    !path.is_empty()
+        && Path::new(path)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
+fn traverse_manifest_sections(
+    manifest_path: &str,
+    root_table: &toml::map::Map<String, Value>,
+    mut visit: impl FnMut(&str, Option<&Value>) -> Result<(), CargoManifestError>,
+) -> Result<(), CargoManifestError> {
+    for section in DEPENDENCY_SECTIONS {
+        visit(section, root_table.get(section))?;
     }
 
-    if let Some(Value::Table(targets)) = root_table.get("target") {
-        for (target_name, target_value) in targets {
-            let Some(target_table) = target_value.as_table() else {
-                continue;
-            };
+    let Some(target_value) = root_table.get("target") else {
+        return Ok(());
+    };
+    let Some(targets) = target_value.as_table() else {
+        return Err(CargoManifestError::InvalidDependencySection {
+            manifest_path: manifest_path.to_owned(),
+            section: "target".to_owned(),
+        });
+    };
 
-            for suffix in ["dependencies", "dev-dependencies", "build-dependencies"] {
-                let section = format!("target.{target_name}.{suffix}");
-                collect_direct_requirement_section(
-                    manifest_path,
-                    &section,
-                    target_table.get(suffix),
-                    &mut dependencies,
-                )?;
-            }
+    for (target_name, target_value) in targets {
+        let Some(target_table) = target_value.as_table() else {
+            return Err(CargoManifestError::InvalidDependencySection {
+                manifest_path: manifest_path.to_owned(),
+                section: format!("target.{target_name}"),
+            });
+        };
+
+        for suffix in DEPENDENCY_SECTIONS {
+            let section = format!("target.{target_name}.{suffix}");
+            visit(&section, target_table.get(suffix))?;
         }
     }
 
-    Ok(dependencies)
+    Ok(())
 }
 
 fn collect_dependency_section(
@@ -250,11 +296,7 @@ fn dependency_shape(
                 .and_then(Value::as_str)
                 .map(str::to_owned);
 
-            if table
-                .get("workspace")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
+            if workspace_dependency_value(table)? {
                 Ok((CargoDependencySourceKind::Workspace, version_requirement))
             } else if table.contains_key("git") {
                 Ok((CargoDependencySourceKind::Git, version_requirement))
@@ -273,6 +315,16 @@ fn dependency_shape(
     }
 }
 
+fn workspace_dependency_value(
+    table: &toml::map::Map<String, Value>,
+) -> Result<bool, CargoManifestError> {
+    match table.get("workspace") {
+        Some(Value::Boolean(value)) => Ok(*value),
+        Some(_) => Err(CargoManifestError::InvalidWorkspaceValue),
+        None => Ok(false),
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum CargoManifestError {
     #[error("unable to parse Cargo.toml: {0}")]
@@ -284,6 +336,17 @@ pub enum CargoManifestError {
         manifest_path: String,
         section: String,
     },
+    #[error("{manifest_path}: workspace section must be a table")]
+    InvalidWorkspaceSection { manifest_path: String },
+    #[error("{manifest_path}: workspace members must be an array of strings")]
+    InvalidWorkspaceMembers { manifest_path: String },
+    #[error("{manifest_path}: workspace member path must stay inside the workspace: {member}")]
+    InvalidWorkspaceMemberPath {
+        manifest_path: String,
+        member: String,
+    },
+    #[error("Cargo dependency workspace value must be a boolean")]
+    InvalidWorkspaceValue,
     #[error("unsupported Cargo dependency value shape")]
     UnsupportedDependencyValue,
 }
@@ -291,7 +354,8 @@ pub enum CargoManifestError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CargoDependencySourceKind, parse_manifest_dependencies, parse_manifest_direct_requirements,
+        CargoDependencySourceKind, CargoManifestError, parse_manifest_dependencies,
+        parse_manifest_direct_requirements, parse_workspace_member_manifest_paths,
     };
 
     #[test]
@@ -393,5 +457,122 @@ workspace-crate = { workspace = true }
                 r#"Cargo.toml:dependencies:workspace-crate:workspace:None"#,
             ]
         );
+    }
+
+    #[test]
+    fn rejects_non_table_target_entries() {
+        let error = parse_manifest_dependencies(
+            "Cargo.toml",
+            r#"
+[target]
+bad = "not a table"
+"#,
+        )
+        .expect_err("manifest should fail");
+
+        assert!(matches!(
+            error,
+            CargoManifestError::InvalidDependencySection { section, .. }
+                if section == "target.bad"
+        ));
+    }
+
+    #[test]
+    fn rejects_non_table_target_section() {
+        let error = parse_manifest_dependencies(
+            "Cargo.toml",
+            r#"
+target = "not a table"
+"#,
+        )
+        .expect_err("manifest should fail");
+
+        assert!(matches!(
+            error,
+            CargoManifestError::InvalidDependencySection { section, .. }
+                if section == "target"
+        ));
+    }
+
+    #[test]
+    fn rejects_non_boolean_workspace_dependency_values() {
+        let error = parse_manifest_dependencies(
+            "Cargo.toml",
+            r#"
+[dependencies]
+local = { workspace = "yes" }
+"#,
+        )
+        .expect_err("manifest should fail");
+
+        assert!(matches!(error, CargoManifestError::InvalidWorkspaceValue));
+    }
+
+    #[test]
+    fn parses_workspace_member_manifest_paths() {
+        let members = parse_workspace_member_manifest_paths(
+            "Cargo.toml",
+            r#"
+[workspace]
+members = ["crates/*", "app", "libs/core"]
+"#,
+        )
+        .expect("workspace should parse");
+
+        assert_eq!(members, vec!["app/Cargo.toml", "libs/core/Cargo.toml"]);
+    }
+
+    #[test]
+    fn rejects_invalid_workspace_members_shape() {
+        let error = parse_workspace_member_manifest_paths(
+            "Cargo.toml",
+            r#"
+[workspace]
+members = "app"
+"#,
+        )
+        .expect_err("workspace members should fail");
+
+        assert!(matches!(
+            error,
+            CargoManifestError::InvalidWorkspaceMembers { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_workspace_members_outside_workspace() {
+        let error = parse_workspace_member_manifest_paths(
+            "Cargo.toml",
+            r#"
+[workspace]
+members = ["../outside"]
+"#,
+        )
+        .expect_err("workspace member should fail");
+
+        assert!(matches!(
+            error,
+            CargoManifestError::InvalidWorkspaceMemberPath { member, .. }
+                if member == "../outside"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_absolute_workspace_members() {
+        let error = parse_workspace_member_manifest_paths(
+            "Cargo.toml",
+            r#"
+[workspace]
+members = ["/tmp/outside"]
+"#,
+        )
+        .expect_err("workspace member should fail");
+
+        assert!(matches!(
+            error,
+            CargoManifestError::InvalidWorkspaceMemberPath { member, .. }
+                if member == "/tmp/outside"
+        ));
     }
 }

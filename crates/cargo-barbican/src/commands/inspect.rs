@@ -9,7 +9,7 @@ use barbican::{
 };
 
 use super::{
-    CommandError, exit_code_from_policy_failures, load_config, parse_specs,
+    CommandError, exit_code_from_policy_failures, join_display, load_config, parse_specs,
     render_release_age_report,
 };
 
@@ -64,7 +64,7 @@ where
     Ok(exit_code_from_policy_failures(failed))
 }
 
-fn render_inspect_report(report: &RustInspectReport) -> String {
+pub(super) fn render_inspect_report(report: &RustInspectReport) -> String {
     let mut rendered = String::new();
     rendered.push_str(&format!("Inspect {}\n", report.spec()));
     rendered.push_str(&format!("  classification: {}\n", report.classification()));
@@ -144,12 +144,4 @@ fn render_slice<T: Display>(values: &[T]) -> String {
     } else {
         join_display(values, ", ")
     }
-}
-
-fn join_display<T: Display>(values: &[T], separator: &str) -> String {
-    values
-        .iter()
-        .map(|value| value.to_string())
-        .collect::<Vec<_>>()
-        .join(separator)
 }

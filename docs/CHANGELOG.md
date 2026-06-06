@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.6.0](changelog/v0.6.0.md) | 2026-06-07 | Add elevated-risk policy workflow and gatehouse dossiers |
 | [v0.5.0](changelog/v0.5.0.md) | 2026-06-07 | Add explicit baselines and dry-run review previews |
 | [v0.4.0](changelog/v0.4.0.md) | 2026-06-07 | Add reviewed-target enforcement and verification |
 | [v0.3.0](changelog/v0.3.0.md) | 2026-06-07 | Add crates.io inspection for pre-add review |

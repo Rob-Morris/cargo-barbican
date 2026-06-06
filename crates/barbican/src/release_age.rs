@@ -80,8 +80,8 @@ pub fn evaluate_release_age(
     now: OffsetDateTime,
     minimum_days: u64,
 ) -> ReleaseAgeReport {
-    let age_seconds = (now - release.published_at).whole_seconds();
-    let clamped_age_seconds = age_seconds.max(0) as u64;
+    let age_seconds = (now - release.published_at).whole_seconds().max(0);
+    let clamped_age_seconds = age_seconds as u64;
     let minimum_age_seconds = minimum_days.saturating_mul(86_400);
 
     let outcome = if release.yanked {
@@ -124,13 +124,16 @@ pub fn format_age(seconds: i64) -> String {
 mod tests {
     use time::OffsetDateTime;
 
-    use crate::{CrateRelease, ExactCrateSpec};
+    use crate::{CrateRelease, ExactCrateSpec, Sha256Digest};
 
     use super::{ReleaseAgeOutcome, evaluate_release_age, format_age};
 
     fn release(timestamp: &str, yanked: bool) -> CrateRelease {
         CrateRelease {
-            checksum_sha256_hex: "abc123".to_owned(),
+            checksum_sha256_hex: Sha256Digest::try_from(
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+            .expect("fixture checksum should parse"),
             published_at_raw: timestamp.to_owned(),
             published_at: OffsetDateTime::parse(
                 timestamp,

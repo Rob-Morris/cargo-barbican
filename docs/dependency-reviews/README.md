@@ -18,10 +18,18 @@ For later checked-pin enforcement, the machine-readable companion file is
   the leading `=`
 - `resolved` — exact `Cargo.lock` targets; for crates.io reviewed artefacts the
   preferred form is `{ version = "...", checksum_sha256 = "..." }`
+- optional `allowed_surfaces` — reviewed `build-rs`, `proc-macro`, or
+  `native-sys` execution surfaces for crates already present in the same
+  `resolved` map
 
 When a crates.io family carries `checksum_sha256`, `pin-check` reconciles that
 digest against the resolved `Cargo.lock` checksum chain as part of the local
 execution gate.
+
+When a reviewed family carries `allowed_surfaces`, `assess` can suppress the
+matching execution-surface elevated-risk signal while still rendering the
+reviewed exception in an `Allowed policy exceptions:` section. The family
+`review_record` is the evidence path for those allowances.
 
 `inspect` can supply evidence for a review record, but it does not by itself
 activate an entry in `reviewed-targets.toml`.
@@ -88,6 +96,9 @@ YYYY-MM-DD-short-subject.md
 - Resolved reviewed set:
   For crates.io families, record the reviewed tarball `checksum_sha256` when
   activating or changing the machine gate.
+- Allowed execution surfaces:
+  List any reviewed `build-rs`, `proc-macro`, or `native-sys` allowances added
+  under `[rust.families.allowed_surfaces]`.
 
 ## Release Age
 

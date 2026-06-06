@@ -4,22 +4,24 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, OffsetDateTime, RustAssessmentClassification, RustAssessmentFinding,
-    RustAssessmentFindingCategory, RustAssessmentFindingSeverity, RustAssessmentReport,
-    parse_cargo_metadata,
+    CratesIoClient, OffsetDateTime, ReviewedExecutionSurfaceAllowance,
+    RustAssessmentClassification, RustAssessmentFinding, RustAssessmentFindingCategory,
+    RustAssessmentFindingSeverity, RustAssessmentReport, parse_cargo_metadata,
 };
 
+use crate::cli::{AssessPolicyMode, REVIEWED_TARGETS_CONFIG_FILE};
 use crate::command_runner::CommandRunner;
 
 use super::{
-    CommandError, DEFAULT_BASE_REF, fail, load_base_manifest_dependencies, load_config,
-    load_current_lockfile, load_current_manifest_dependencies, load_git_base_lockfile,
-    load_lockfile_from_path, load_manifest_dependencies_from_base_dir,
+    CommandError, DEFAULT_BASE_REF, fail, join_display, load_base_manifest_dependencies,
+    load_config, load_current_lockfile, load_git_base_lockfile, load_lockfile_from_path,
+    load_manifest_dependencies_from_root, load_reviewed_targets, review_record_exists,
 };
 
 pub(super) fn run_assess<C, R>(
     base_ref: Option<&str>,
     base_dir: Option<&Path>,
+    policy_mode: AssessPolicyMode,
     min_age_days: Option<u64>,
     lockfile: &Path,
     current_dir: &Path,
@@ -35,6 +37,10 @@ where
 {
     let config = load_config(current_dir)?;
     let minimum_days = min_age_days.unwrap_or(config.release_age.minimum_days);
+    let reviewed_execution_surface_allowances =
+        load_reviewed_targets(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?
+            .map(|reviewed_targets| reviewed_targets.execution_surface_allowances())
+            .unwrap_or_default();
     let base_root = base_dir.map(|base_dir| current_dir.join(base_dir));
     let current_lockfile = match load_current_lockfile(current_dir, lockfile) {
         Ok(lockfile) => lockfile,
@@ -59,12 +65,12 @@ where
             Err(error) => return fail(stderr, error),
         }
     };
-    let current_manifests = match load_current_manifest_dependencies(current_dir) {
+    let current_manifests = match load_manifest_dependencies_from_root(current_dir) {
         Ok(manifests) => manifests,
         Err(error) => return fail(stderr, error),
     };
     let base_manifests = if let Some(base_root) = &base_root {
-        match load_manifest_dependencies_from_base_dir(base_root) {
+        match load_manifest_dependencies_from_root(base_root) {
             Ok(manifests) => manifests,
             Err(error) => return fail(stderr, error),
         }
@@ -92,16 +98,59 @@ where
         &metadata,
         minimum_days,
         &config.high_scrutiny,
+        &reviewed_execution_surface_allowances,
         now,
     );
 
+    if let Some(allowed_surface) = report
+        .allowed_execution_surfaces()
+        .iter()
+        .find(|allowed_surface| !review_record_exists(current_dir, allowed_surface.review_record()))
+    {
+        return fail(
+            stderr,
+            format!(
+                "allowed policy exception review record missing for {}: {}",
+                allowed_surface.spec(),
+                allowed_surface.review_record()
+            ),
+        );
+    }
+
     render_assessment_report(stdout, &report)?;
 
-    Ok(match report.classification() {
+    if accepts_elevated_risk(report.classification(), policy_mode) {
+        writeln!(
+            stdout,
+            "Elevated-risk findings accepted by --policy-mode elevated-risk; blocking policy findings would still fail."
+        )
+        .map_err(CommandError::Io)?;
+    }
+
+    Ok(assessment_exit_code(report.classification(), policy_mode))
+}
+
+fn assessment_exit_code(
+    classification: RustAssessmentClassification,
+    policy_mode: AssessPolicyMode,
+) -> ExitCode {
+    if accepts_elevated_risk(classification, policy_mode) {
+        return ExitCode::SUCCESS;
+    }
+
+    match classification {
         RustAssessmentClassification::RoutineSafe => ExitCode::SUCCESS,
         RustAssessmentClassification::ElevatedRisk
         | RustAssessmentClassification::PolicyViolating => ExitCode::from(1),
-    })
+    }
+}
+
+fn accepts_elevated_risk(
+    classification: RustAssessmentClassification,
+    policy_mode: AssessPolicyMode,
+) -> bool {
+    classification == RustAssessmentClassification::ElevatedRisk
+        && policy_mode == AssessPolicyMode::ElevatedRisk
 }
 
 fn render_assessment_report(
@@ -138,6 +187,11 @@ fn render_assessment_report(
     render_assessment_line(stdout, "yanked versions", report.yanked_versions())?;
     render_assessment_line(
         stdout,
+        "lockfile checksum drifts",
+        report.locked_checksum_drifts(),
+    )?;
+    render_assessment_line(
+        stdout,
         "source changes",
         report.non_crates_io_source_changes(),
     )?;
@@ -167,12 +221,28 @@ fn render_assessment_report(
         report,
         RustAssessmentFindingSeverity::Elevated,
     )?;
+    render_allowed_policy_exceptions(stdout, report.allowed_execution_surfaces())?;
 
     if report.findings().is_empty() {
         writeln!(stdout, "No policy findings detected.").map_err(CommandError::Io)?;
     }
 
     Ok(())
+}
+
+fn render_allowed_policy_exceptions(
+    stdout: &mut dyn Write,
+    allowed_surfaces: &[ReviewedExecutionSurfaceAllowance],
+) -> Result<(), CommandError> {
+    if allowed_surfaces.is_empty() {
+        return Ok(());
+    }
+
+    writeln!(stdout, "Allowed policy exceptions:").map_err(CommandError::Io)?;
+    for allowed_surface in allowed_surfaces {
+        writeln!(stdout, "  - {allowed_surface}").map_err(CommandError::Io)?;
+    }
+    writeln!(stdout).map_err(CommandError::Io)
 }
 
 fn render_assessment_line<T: Display>(
@@ -242,6 +312,10 @@ fn render_finding_summary(report: &RustAssessmentReport, finding: RustAssessment
             "newly selected yanked crate versions: {}",
             join_display(report.yanked_versions(), ", ")
         ),
+        RustAssessmentFindingCategory::LockedChecksumDrifts => format!(
+            "locked crates.io checksums changed for existing selections: {}",
+            join_display(report.locked_checksum_drifts(), ", ")
+        ),
         RustAssessmentFindingCategory::NonCratesIoSourceChanges => format!(
             "non-crates.io source changes detected: {}",
             join_display(report.non_crates_io_source_changes(), ", ")
@@ -263,10 +337,6 @@ fn render_finding_summary(report: &RustAssessmentReport, finding: RustAssessment
             join_display(report.inspection_failures(), "; ")
         ),
     }
-}
-
-fn join_display<T: Display>(values: &[T], separator: &str) -> String {
-    join_display_with(values, separator, |value| value.to_string())
 }
 
 fn join_display_with<T>(values: &[T], separator: &str, render: impl Fn(&T) -> String) -> String {

@@ -21,6 +21,10 @@ impl ExactCrateSpec {
     pub fn version(&self) -> &str {
         &self.version
     }
+
+    pub fn is_native_sys(&self) -> bool {
+        self.crate_name.ends_with("-sys")
+    }
 }
 
 impl fmt::Display for ExactCrateSpec {
@@ -55,10 +59,15 @@ impl ExactCrateSpec {
         version: &str,
         original: String,
     ) -> Result<Self, ExactCrateSpecError> {
-        if version
-            .chars()
-            .any(|character| matches!(character, '^' | '~' | '*' | '<' | '>' | '='))
-        {
+        if crate_name.is_empty() || version.is_empty() {
+            return Err(ExactCrateSpecError::InvalidShape(original));
+        }
+
+        if !is_valid_crate_name(crate_name) {
+            return Err(ExactCrateSpecError::InvalidCrateName(original));
+        }
+
+        if !is_valid_version(version) {
             return Err(ExactCrateSpecError::VersionRange(original));
         }
 
@@ -69,10 +78,28 @@ impl ExactCrateSpec {
     }
 }
 
+fn is_valid_crate_name(crate_name: &str) -> bool {
+    crate_name
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn is_valid_version(version: &str) -> bool {
+    let mut bytes = version.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+
+    first.is_ascii_alphanumeric()
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ExactCrateSpecError {
     #[error("Expected exact crate@version spec, got: {0}")]
     InvalidShape(String),
+    #[error("Crate names may contain only ASCII letters, numbers, '_' and '-': {0}")]
+    InvalidCrateName(String),
     #[error("Version ranges are not allowed in routine checks: {0}")]
     VersionRange(String),
 }
@@ -102,6 +129,18 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_crate_names() {
+        let error = "foo\"@1.0.0"
+            .parse::<ExactCrateSpec>()
+            .expect_err("spec should fail");
+
+        assert_eq!(
+            error,
+            ExactCrateSpecError::InvalidCrateName("foo\"@1.0.0".to_owned())
+        );
+    }
+
+    #[test]
     fn rejects_version_ranges() {
         let error = "serde@^1.0.228"
             .parse::<ExactCrateSpec>()
@@ -111,5 +150,43 @@ mod tests {
             error,
             ExactCrateSpecError::VersionRange("serde@^1.0.228".to_owned())
         );
+    }
+
+    #[test]
+    fn rejects_empty_parts_from_parts() {
+        let error = ExactCrateSpec::from_parts("", "1.0.0").expect_err("name should fail");
+        assert_eq!(
+            error,
+            ExactCrateSpecError::InvalidShape("@1.0.0".to_owned())
+        );
+
+        let error = ExactCrateSpec::from_parts("serde", "").expect_err("version should fail");
+        assert_eq!(
+            error,
+            ExactCrateSpecError::InvalidShape("serde@".to_owned())
+        );
+    }
+
+    #[test]
+    fn rejects_versions_with_url_path_characters() {
+        let error = "serde@1.0.0/../serde"
+            .parse::<ExactCrateSpec>()
+            .expect_err("version should fail");
+
+        assert_eq!(
+            error,
+            ExactCrateSpecError::VersionRange("serde@1.0.0/../serde".to_owned())
+        );
+    }
+
+    #[test]
+    fn rejects_versions_with_non_alphanumeric_prefixes() {
+        for spec in ["serde@-1.0.0", "serde@+meta", "serde@.1"] {
+            let error = spec
+                .parse::<ExactCrateSpec>()
+                .expect_err("version should fail");
+
+            assert_eq!(error, ExactCrateSpecError::VersionRange(spec.to_owned()));
+        }
     }
 }

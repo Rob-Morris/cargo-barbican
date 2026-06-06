@@ -77,6 +77,7 @@ current implemented surface on `dev` is:
 - `cargo barbican resolve`
 - `cargo barbican assess`
 - `cargo barbican inspect`
+- `cargo barbican gatehouse candidate`
 - `cargo barbican pin-check`
 - `cargo barbican review`
 - `cargo barbican audit`
@@ -99,11 +100,16 @@ The current comparative baseline behaviour is:
   rather than a git ref
 - `resolve --dry-run` now previews the would-be `Cargo.lock` diff without
   mutating the working tree
+  - the copied workspace preserves relative symlinks only when their resolved
+    target stays inside the source workspace and outside skipped `.git` /
+    `target` paths; unsupported symlinks fail closed
 
 The current intake layer now includes the first pre-add deep-review slice:
 
 - `cargo barbican inspect` exists as the first Rust-only, crates.io-only
   pre-add deep-review surface
+- `cargo barbican gatehouse candidate` exists as the first workflow
+  convenience surface for isolated exact-candidate intake dossiers
 - `cargo barbican pin-check` now exists as the first reviewed-target
   enforcement surface over repo-root `reviewed-targets.toml`
 - `pin-check` now validates that every active reviewed family points at a real
@@ -112,6 +118,11 @@ The current intake layer now includes the first pre-add deep-review slice:
   manifest requirements; stronger build-input parity remains deferred
 - for structured crates.io `resolved` entries, `pin-check` also reconciles the
   reviewed `checksum_sha256` against the resolved `Cargo.lock` checksum chain
+- reviewed families can now declare exact `allowed_surfaces` for reviewed
+  `build-rs`, `proc-macro`, and `native-sys` execution surfaces
+- `assess` renders matched reviewed execution-surface allowances separately and
+  excludes them from elevated-risk classification, but fails closed if the
+  matching family review record is missing
 - `cargo barbican verify` now reuses the default `pin-check` gate before
   running locked build/test verification
 

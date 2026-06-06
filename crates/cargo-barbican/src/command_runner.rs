@@ -13,8 +13,10 @@ pub trait CommandRunner {
         package_id: &str,
         version: &str,
     ) -> Result<(), RunnerError>;
+    fn cargo_generate_lockfile(&self, current_dir: &Path) -> Result<(), RunnerError>;
+    fn cargo_tree(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn git_diff(&self, current_dir: &Path, paths: &[PathBuf]) -> Result<String, RunnerError>;
-    fn cargo_audit(&self, current_dir: &Path) -> Result<(), RunnerError>;
+    fn cargo_audit(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn cargo_deny(&self, current_dir: &Path) -> Result<(), RunnerError>;
     fn cargo_build_locked(&self, current_dir: &Path) -> Result<(), RunnerError>;
     fn cargo_test_locked(&self, current_dir: &Path) -> Result<(), RunnerError>;
@@ -87,7 +89,9 @@ impl CommandRunner for RealCommandRunner {
 
     fn git_diff(&self, current_dir: &Path, paths: &[PathBuf]) -> Result<String, RunnerError> {
         let mut command = ProcessCommand::new("git");
-        command.current_dir(current_dir).arg("diff").arg("--");
+        command
+            .current_dir(current_dir)
+            .args(["diff", "HEAD", "--"]);
         for path in paths {
             command.arg(path);
         }
@@ -95,8 +99,16 @@ impl CommandRunner for RealCommandRunner {
         stdout_from_output(run_prepared_command(command)?)
     }
 
-    fn cargo_audit(&self, current_dir: &Path) -> Result<(), RunnerError> {
-        run_cargo_command_status(current_dir, ["audit"])
+    fn cargo_generate_lockfile(&self, current_dir: &Path) -> Result<(), RunnerError> {
+        run_cargo_command_status(current_dir, ["generate-lockfile"])
+    }
+
+    fn cargo_tree(&self, current_dir: &Path) -> Result<String, RunnerError> {
+        run_cargo_command(current_dir, ["tree", "--edges", "normal"])
+    }
+
+    fn cargo_audit(&self, current_dir: &Path) -> Result<String, RunnerError> {
+        run_cargo_command(current_dir, ["audit"])
     }
 
     fn cargo_deny(&self, current_dir: &Path) -> Result<(), RunnerError> {

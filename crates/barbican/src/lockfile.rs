@@ -24,6 +24,7 @@ pub struct LockedPackage {
     pub version: String,
     pub source: Option<String>,
     pub checksum: Option<Sha256Digest>,
+    exact_spec: ExactCrateSpec,
 }
 
 impl LockedPackage {
@@ -31,14 +32,16 @@ impl LockedPackage {
         self.source.as_deref() == Some(CRATES_IO_SOURCE)
     }
 
-    pub fn exact_spec(&self) -> Result<ExactCrateSpec, LockfileError> {
-        ExactCrateSpec::from_parts(&self.name, &self.version).map_err(|source| {
-            LockfileError::InvalidPackageSpec {
-                name: self.name.clone(),
-                version: self.version.clone(),
-                source,
-            }
-        })
+    pub fn exact_spec(&self) -> &ExactCrateSpec {
+        &self.exact_spec
+    }
+
+    pub fn checksum(&self) -> Option<&Sha256Digest> {
+        self.checksum.as_ref()
+    }
+
+    pub fn has_same_identity(&self, other: &Self) -> bool {
+        self.identity() == other.identity()
     }
 }
 
@@ -47,13 +50,14 @@ pub fn parse_lockfile(text: &str) -> Result<Lockfile, LockfileError> {
     let mut packages = Vec::with_capacity(raw.package.len());
 
     for package in raw.package {
-        ExactCrateSpec::from_parts(&package.name, &package.version).map_err(|source| {
-            LockfileError::InvalidPackageSpec {
-                name: package.name.clone(),
-                version: package.version.clone(),
-                source,
-            }
-        })?;
+        let exact_spec =
+            ExactCrateSpec::from_parts(&package.name, &package.version).map_err(|source| {
+                LockfileError::InvalidPackageSpec {
+                    name: package.name.clone(),
+                    version: package.version.clone(),
+                    source,
+                }
+            })?;
 
         let checksum = package
             .checksum
@@ -73,6 +77,7 @@ pub fn parse_lockfile(text: &str) -> Result<Lockfile, LockfileError> {
             version: package.version,
             source: package.source,
             checksum,
+            exact_spec,
         });
     }
 
@@ -83,19 +88,16 @@ pub fn added_crates_io_specs(
     current: &Lockfile,
     base: &Lockfile,
 ) -> Result<Vec<ExactCrateSpec>, LockfileError> {
-    let base_packages: HashSet<&LockedPackage> = base.packages.iter().collect();
+    let base_packages: HashSet<PackageIdentity<'_>> =
+        base.packages.iter().map(LockedPackage::identity).collect();
     let mut added_specs = Vec::new();
 
     for package in &current.packages {
-        if !package.is_crates_io() || base_packages.contains(package) {
+        if !package.is_crates_io() || base_packages.contains(&package.identity()) {
             continue;
         }
 
-        added_specs.push(
-            package
-                .exact_spec()
-                .expect("parse_lockfile guarantees exact locked package specs"),
-        );
+        added_specs.push(package.exact_spec().clone());
     }
 
     added_specs.sort_by(|left, right| {
@@ -105,6 +107,85 @@ pub fn added_crates_io_specs(
     });
 
     Ok(added_specs)
+}
+
+pub fn changed_crates_io_checksums<'a>(
+    current: &'a Lockfile,
+    base: &'a Lockfile,
+) -> Vec<LockedChecksumChange<'a>> {
+    let mut changes = Vec::new();
+
+    for current_package in current
+        .packages
+        .iter()
+        .filter(|package| package.is_crates_io())
+    {
+        let Some(current_checksum) = current_package.checksum() else {
+            continue;
+        };
+        let Some(base_package) = base.packages.iter().find(|base_package| {
+            base_package.is_crates_io() && base_package.identity() == current_package.identity()
+        }) else {
+            continue;
+        };
+        let Some(base_checksum) = base_package.checksum() else {
+            continue;
+        };
+
+        if base_checksum != current_checksum {
+            changes.push(LockedChecksumChange {
+                spec: current_package.exact_spec(),
+                base_checksum,
+                current_checksum,
+            });
+        }
+    }
+
+    changes.sort_by(|left, right| {
+        left.spec()
+            .crate_name()
+            .cmp(right.spec().crate_name())
+            .then_with(|| left.spec().version().cmp(right.spec().version()))
+    });
+    changes
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LockedChecksumChange<'a> {
+    spec: &'a ExactCrateSpec,
+    base_checksum: &'a Sha256Digest,
+    current_checksum: &'a Sha256Digest,
+}
+
+impl<'a> LockedChecksumChange<'a> {
+    pub fn spec(&self) -> &'a ExactCrateSpec {
+        self.spec
+    }
+
+    pub fn base_checksum(&self) -> &'a Sha256Digest {
+        self.base_checksum
+    }
+
+    pub fn current_checksum(&self) -> &'a Sha256Digest {
+        self.current_checksum
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PackageIdentity<'a> {
+    name: &'a str,
+    version: &'a str,
+    source: Option<&'a str>,
+}
+
+impl LockedPackage {
+    fn identity(&self) -> PackageIdentity<'_> {
+        PackageIdentity {
+            name: &self.name,
+            version: &self.version,
+            source: self.source.as_deref(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -230,6 +311,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
                 ExactCrateSpec::from_parts("toml", "0.8.23").expect("spec should build"),
             ]
         );
+    }
+
+    #[test]
+    fn checksum_only_differences_do_not_mark_packages_as_added() {
+        let base = parse_lockfile(
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+"#,
+        )
+        .expect("base lockfile should parse");
+
+        let current = parse_lockfile(
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+"#,
+        )
+        .expect("current lockfile should parse");
+
+        let added = added_crates_io_specs(&current, &base).expect("selection should succeed");
+
+        assert!(added.is_empty());
     }
 
     #[test]

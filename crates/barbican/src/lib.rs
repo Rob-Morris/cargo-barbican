@@ -18,9 +18,9 @@ pub mod sha256;
 pub mod spec;
 
 pub use assessment::{
-    InspectionFailure, NonCratesIoSourceChange, ReleaseAgeViolation, RustAssessmentClassification,
-    RustAssessmentFinding, RustAssessmentFindingCategory, RustAssessmentFindingSeverity,
-    RustAssessmentReport, assess_rust_update, assess_rust_update_at,
+    InspectionFailure, LockedChecksumDrift, NonCratesIoSourceChange, ReleaseAgeViolation,
+    RustAssessmentClassification, RustAssessmentFinding, RustAssessmentFindingCategory,
+    RustAssessmentFindingSeverity, RustAssessmentReport, assess_rust_update, assess_rust_update_at,
 };
 pub use config::{
     BarbicanConfig, ConfigLoadError, DelegatesConfig, HighScrutinyConfig,
@@ -33,11 +33,13 @@ pub use inspect::{
     CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate, inspect_published_crate_at,
 };
 pub use lockfile::{
-    CRATES_IO_SOURCE, LockedPackage, Lockfile, LockfileError, added_crates_io_specs, parse_lockfile,
+    CRATES_IO_SOURCE, LockedChecksumChange, LockedPackage, Lockfile, LockfileError,
+    added_crates_io_specs, changed_crates_io_checksums, parse_lockfile,
 };
 pub use manifest::{
     CargoDependencySourceKind, CargoManifestDependency, CargoManifestDirectRequirement,
     CargoManifestError, parse_manifest_dependencies, parse_manifest_direct_requirements,
+    parse_workspace_member_manifest_paths,
 };
 pub use metadata::{
     CargoMetadata, CargoMetadataError, MetadataPackageSurfaces, package_surfaces,
@@ -52,8 +54,8 @@ pub use release_age::{
     evaluate_release_age, format_age,
 };
 pub use reviewed_targets::{
-    ReviewedResolvedTarget, ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError,
-    parse_reviewed_targets_toml,
+    ExecutionSurfaceKind, ReviewedExecutionSurfaceAllowance, ReviewedResolvedTarget,
+    ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError, parse_reviewed_targets_toml,
 };
 pub use sha256::{Sha256Digest, Sha256DigestError};
 pub use spec::{ExactCrateSpec, ExactCrateSpecError};

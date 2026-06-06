@@ -29,7 +29,7 @@ where
         };
         render_non_git_review_diff(&base_root, current_dir)?
     } else {
-        let paths = review_paths(current_dir).map_err(CommandError::Io)?;
+        let paths = review_paths(current_dir)?;
         match runner.git_diff(current_dir, &paths) {
             Ok(diff) => diff,
             Err(error) => return fail(stderr, format!("git diff: {error}")),
@@ -74,8 +74,7 @@ fn render_non_git_review_diff(
     base_root: &Path,
     current_dir: &Path,
 ) -> Result<String, CommandError> {
-    let review_file_paths =
-        non_git_review_file_paths(base_root, current_dir).map_err(CommandError::Io)?;
+    let review_file_paths = non_git_review_file_paths(base_root, current_dir)?;
     let mut rendered = String::new();
 
     for relative_path in review_file_paths {
@@ -99,13 +98,16 @@ fn render_non_git_review_diff(
     Ok(rendered)
 }
 
-fn non_git_review_file_paths(base_root: &Path, current_dir: &Path) -> io::Result<Vec<PathBuf>> {
+fn non_git_review_file_paths(
+    base_root: &Path,
+    current_dir: &Path,
+) -> Result<Vec<PathBuf>, CommandError> {
     let mut paths = BTreeSet::new();
     insert_review_root_paths(&mut paths);
     paths.extend(workspace_manifest_paths(current_dir)?);
     paths.extend(workspace_manifest_paths(base_root)?);
-    collect_review_record_paths(current_dir, &mut paths)?;
-    collect_review_record_paths(base_root, &mut paths)?;
+    collect_review_record_paths(current_dir, &mut paths).map_err(CommandError::Io)?;
+    collect_review_record_paths(base_root, &mut paths).map_err(CommandError::Io)?;
 
     Ok(paths.into_iter().collect())
 }
@@ -113,7 +115,7 @@ fn non_git_review_file_paths(base_root: &Path, current_dir: &Path) -> io::Result
 fn collect_review_record_paths(root_dir: &Path, paths: &mut BTreeSet<PathBuf>) -> io::Result<()> {
     let review_dir = root_dir.join(REVIEW_RECORDS_DIR);
 
-    match fs::metadata(&review_dir) {
+    match fs::symlink_metadata(&review_dir) {
         Ok(metadata) if metadata.is_dir() => {
             collect_relative_files_matching(&review_dir, root_dir, paths, &mut |_| true)
         }

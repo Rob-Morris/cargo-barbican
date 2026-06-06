@@ -8,6 +8,7 @@ use ureq::Agent;
 const USER_AGENT: &str = concat!("cargo-barbican/", env!("CARGO_PKG_VERSION"));
 pub const DEFAULT_CRATES_IO_BASE_URL: &str = "https://crates.io";
 pub const CRATES_IO_BASE_URL_ENV: &str = "CARGO_BARBICAN_CRATES_IO_BASE_URL";
+const MAX_TARBALL_BYTES: u64 = 128 * 1024 * 1024;
 
 pub struct UreqCratesIoClient {
     agent: Agent,
@@ -23,14 +24,14 @@ impl UreqCratesIoClient {
 
         Self {
             agent: config.into(),
-            base_url,
+            base_url: base_url.trim_end_matches('/').to_owned(),
         }
     }
 
     fn version_url(&self, spec: &ExactCrateSpec) -> String {
         format!(
             "{}/api/v1/crates/{}/{}",
-            self.base_url.trim_end_matches('/'),
+            self.base_url,
             spec.crate_name(),
             spec.version()
         )
@@ -39,7 +40,7 @@ impl UreqCratesIoClient {
     fn tarball_url(&self, spec: &ExactCrateSpec) -> String {
         format!(
             "{}/api/v1/crates/{}/{}/download",
-            self.base_url.trim_end_matches('/'),
+            self.base_url,
             spec.crate_name(),
             spec.version()
         )
@@ -90,6 +91,8 @@ impl CratesIoClient for UreqCratesIoClient {
 
         response
             .body_mut()
+            .with_config()
+            .limit(MAX_TARBALL_BYTES)
             .read_to_vec()
             .map_err(|error| CratesIoClientError::Transport {
                 reason: error.to_string(),

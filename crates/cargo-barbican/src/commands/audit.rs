@@ -14,7 +14,7 @@ pub(super) fn run_audit<R>(
 where
     R: CommandRunner + ?Sized,
 {
-    if let Err(error) = runner.cargo_audit(current_dir) {
+    if let Err(error) = runner.cargo_audit(current_dir).map(|_| ()) {
         return fail(stderr, format!("cargo audit: {error}"));
     }
     if let Err(error) = runner.cargo_deny(current_dir) {

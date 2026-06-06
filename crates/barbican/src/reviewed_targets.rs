@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::path::Component;
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -14,6 +16,13 @@ impl ReviewedTargets {
     pub fn rust_families(&self) -> &[ReviewedRustFamily] {
         &self.rust_families
     }
+
+    pub fn execution_surface_allowances(&self) -> Vec<ReviewedExecutionSurfaceAllowance> {
+        self.rust_families
+            .iter()
+            .flat_map(ReviewedRustFamily::execution_surface_allowances)
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +31,7 @@ pub struct ReviewedRustFamily {
     review_record: String,
     direct: BTreeMap<String, String>,
     resolved: BTreeMap<String, ReviewedResolvedTarget>,
+    allowed_surfaces: BTreeMap<String, BTreeSet<ExecutionSurfaceKind>>,
 }
 
 impl ReviewedRustFamily {
@@ -39,6 +49,95 @@ impl ReviewedRustFamily {
 
     pub fn resolved(&self) -> &BTreeMap<String, ReviewedResolvedTarget> {
         &self.resolved
+    }
+
+    pub fn allowed_surfaces(&self) -> &BTreeMap<String, BTreeSet<ExecutionSurfaceKind>> {
+        &self.allowed_surfaces
+    }
+
+    fn execution_surface_allowances(&self) -> Vec<ReviewedExecutionSurfaceAllowance> {
+        self.allowed_surfaces
+            .iter()
+            .flat_map(|(crate_name, surfaces)| {
+                let target = self
+                    .resolved
+                    .get(crate_name)
+                    .expect("parse_reviewed_targets_toml validates allowance targets");
+                surfaces
+                    .iter()
+                    .map(|surface| ReviewedExecutionSurfaceAllowance {
+                        spec: ExactCrateSpec::from_parts(crate_name, target.version())
+                            .expect("parse_reviewed_targets_toml validates exact specs"),
+                        surface: *surface,
+                        family: self.name.clone(),
+                        review_record: self.review_record.clone(),
+                    })
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExecutionSurfaceKind {
+    BuildRs,
+    ProcMacro,
+    NativeSys,
+}
+
+impl ExecutionSurfaceKind {
+    fn parse(value: &str) -> Result<Self, ()> {
+        match value {
+            "build-rs" => Ok(Self::BuildRs),
+            "proc-macro" => Ok(Self::ProcMacro),
+            "native-sys" => Ok(Self::NativeSys),
+            _ => Err(()),
+        }
+    }
+}
+
+impl fmt::Display for ExecutionSurfaceKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BuildRs => write!(formatter, "build-rs"),
+            Self::ProcMacro => write!(formatter, "proc-macro"),
+            Self::NativeSys => write!(formatter, "native-sys"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReviewedExecutionSurfaceAllowance {
+    spec: ExactCrateSpec,
+    surface: ExecutionSurfaceKind,
+    family: String,
+    review_record: String,
+}
+
+impl ReviewedExecutionSurfaceAllowance {
+    pub fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
+    pub fn surface(&self) -> ExecutionSurfaceKind {
+        self.surface
+    }
+
+    pub fn family(&self) -> &str {
+        &self.family
+    }
+
+    pub fn review_record(&self) -> &str {
+        &self.review_record
+    }
+}
+
+impl fmt::Display for ReviewedExecutionSurfaceAllowance {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} {} allowed by reviewed family {} ({})",
+            self.spec, self.surface, self.family, self.review_record
+        )
     }
 }
 
@@ -80,6 +179,13 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
     let mut rust_families = Vec::with_capacity(raw.rust.families.len());
 
     for family in raw.rust.families {
+        if review_record_path_is_unsafe(&family.review_record) {
+            return Err(ReviewedTargetsError::UnsafeReviewRecordPath {
+                family: family.name,
+                review_record: family.review_record,
+            });
+        }
+
         if family.resolved.is_empty() {
             return Err(ReviewedTargetsError::EmptyResolvedSet {
                 family: family.name,
@@ -144,15 +250,52 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
             );
         }
 
+        let mut allowed_surfaces = BTreeMap::new();
+        for (crate_name, raw_surfaces) in family.allowed_surfaces {
+            if !resolved.contains_key(&crate_name) {
+                return Err(ReviewedTargetsError::AllowedSurfaceTargetMissing {
+                    family: family.name.clone(),
+                    crate_name,
+                });
+            }
+            if raw_surfaces.is_empty() {
+                return Err(ReviewedTargetsError::EmptyAllowedSurfaces {
+                    family: family.name.clone(),
+                    crate_name,
+                });
+            }
+
+            let mut surfaces = BTreeSet::new();
+            for raw_surface in raw_surfaces {
+                let surface = ExecutionSurfaceKind::parse(&raw_surface).map_err(|()| {
+                    ReviewedTargetsError::InvalidAllowedSurface {
+                        family: family.name.clone(),
+                        crate_name: crate_name.clone(),
+                        surface: raw_surface,
+                    }
+                })?;
+                surfaces.insert(surface);
+            }
+
+            allowed_surfaces.insert(crate_name, surfaces);
+        }
+
         rust_families.push(ReviewedRustFamily {
             name: family.name,
             review_record: family.review_record,
             direct: family.direct,
             resolved,
+            allowed_surfaces,
         });
     }
 
     Ok(ReviewedTargets { rust_families })
+}
+
+fn review_record_path_is_unsafe(path: &str) -> bool {
+    std::path::Path::new(path)
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::RootDir))
 }
 
 #[derive(Debug, Error)]
@@ -197,6 +340,27 @@ pub enum ReviewedTargetsError {
         crate_name: String,
         checksum: String,
     },
+    #[error(
+        "family {family} review_record path must be relative and stay inside the repo: {review_record}"
+    )]
+    UnsafeReviewRecordPath {
+        family: String,
+        review_record: String,
+    },
+    #[error("family {family} allowed_surfaces entry for {crate_name} is empty")]
+    EmptyAllowedSurfaces { family: String, crate_name: String },
+    #[error(
+        "family {family} allowed_surfaces entry for {crate_name} references a crate absent from the same resolved map"
+    )]
+    AllowedSurfaceTargetMissing { family: String, crate_name: String },
+    #[error(
+        "family {family} allowed_surfaces entry for {crate_name} has unknown surface {surface}"
+    )]
+    InvalidAllowedSurface {
+        family: String,
+        crate_name: String,
+        surface: String,
+    },
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -219,6 +383,8 @@ struct RawReviewedRustFamily {
     direct: BTreeMap<String, String>,
     #[serde(default)]
     resolved: BTreeMap<String, RawReviewedResolvedTarget>,
+    #[serde(default)]
+    allowed_surfaces: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -233,7 +399,7 @@ enum RawReviewedResolvedTarget {
 
 #[cfg(test)]
 mod tests {
-    use super::{ReviewedTargetsError, parse_reviewed_targets_toml};
+    use super::{ExecutionSurfaceKind, ReviewedTargetsError, parse_reviewed_targets_toml};
     use crate::Sha256Digest;
 
     #[test]
@@ -252,6 +418,9 @@ serde = "=1.0.228"
 [rust.families.resolved]
 serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
 serde_derive = "1.0.228"
+
+[rust.families.allowed_surfaces]
+serde = ["build-rs", "proc-macro", "build-rs"]
 "#,
         )
         .expect("reviewed targets should parse");
@@ -285,6 +454,41 @@ serde_derive = "1.0.228"
                 .and_then(|target| target.checksum_sha256()),
             None
         );
+        assert_eq!(
+            family
+                .allowed_surfaces()
+                .get("serde")
+                .expect("allowance should parse")
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![
+                ExecutionSurfaceKind::BuildRs,
+                ExecutionSurfaceKind::ProcMacro
+            ]
+        );
+        let allowances = targets.execution_surface_allowances();
+        assert_eq!(allowances.len(), 2);
+        assert_eq!(allowances[0].spec().to_string(), "serde@1.0.228");
+        assert_eq!(allowances[0].family(), "serde-family");
+        assert_eq!(
+            allowances[0].review_record(),
+            "docs/dependency-reviews/2026-05-27-serde.md"
+        );
+    }
+
+    #[test]
+    fn execution_surface_kind_strings_round_trip() {
+        for kind in [
+            ExecutionSurfaceKind::BuildRs,
+            ExecutionSurfaceKind::ProcMacro,
+            ExecutionSurfaceKind::NativeSys,
+        ] {
+            assert_eq!(
+                ExecutionSurfaceKind::parse(&kind.to_string()).expect("kind should parse"),
+                kind
+            );
+        }
     }
 
     #[test]
@@ -332,6 +536,34 @@ review_record = "docs/dependency-reviews/2026-05-27-serde.md"
     }
 
     #[test]
+    fn rejects_review_record_paths_outside_the_repo() {
+        for review_record in [
+            "../docs/dependency-reviews/native.md",
+            "/tmp/native.md",
+            "docs/../native.md",
+        ] {
+            let error = parse_reviewed_targets_toml(&format!(
+                r#"
+[rust]
+
+[[rust.families]]
+name = "native-family"
+review_record = "{review_record}"
+
+[rust.families.resolved]
+native-sys = "1.2.3"
+"#
+            ))
+            .expect_err("unsafe review record path should fail");
+
+            assert!(matches!(
+                error,
+                ReviewedTargetsError::UnsafeReviewRecordPath { .. }
+            ));
+        }
+    }
+
+    #[test]
     fn rejects_invalid_resolved_checksum() {
         let error = parse_reviewed_targets_toml(
             r#"
@@ -350,6 +582,81 @@ serde = { version = "1.0.228", checksum_sha256 = "not-a-sha256" }
         assert!(matches!(
             error,
             ReviewedTargetsError::InvalidResolvedChecksum { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_unknown_allowed_surface_identifiers() {
+        let error = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "native-family"
+review_record = "docs/dependency-reviews/2026-05-27-native.md"
+
+[rust.families.resolved]
+native-sys = "1.2.3"
+
+[rust.families.allowed_surfaces]
+native-sys = ["ffi"]
+"#,
+        )
+        .expect_err("unknown allowed surface should fail");
+
+        assert!(matches!(
+            error,
+            ReviewedTargetsError::InvalidAllowedSurface { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_allowed_surface_lists() {
+        let error = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "native-family"
+review_record = "docs/dependency-reviews/2026-05-27-native.md"
+
+[rust.families.resolved]
+native-sys = "1.2.3"
+
+[rust.families.allowed_surfaces]
+native-sys = []
+"#,
+        )
+        .expect_err("empty allowed surface list should fail");
+
+        assert!(matches!(
+            error,
+            ReviewedTargetsError::EmptyAllowedSurfaces { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_allowed_surface_targets_absent_from_resolved_map() {
+        let error = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "native-family"
+review_record = "docs/dependency-reviews/2026-05-27-native.md"
+
+[rust.families.resolved]
+other = "1.2.3"
+
+[rust.families.allowed_surfaces]
+native-sys = ["native-sys"]
+"#,
+        )
+        .expect_err("allowance target outside resolved map should fail");
+
+        assert!(matches!(
+            error,
+            ReviewedTargetsError::AllowedSurfaceTargetMissing { .. }
         ));
     }
 }
