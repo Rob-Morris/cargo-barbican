@@ -6,6 +6,7 @@ mod diff_render;
 mod gatehouse;
 mod inspect;
 mod pin_check;
+mod policy;
 mod resolve;
 mod review;
 mod scratch_dir;
@@ -168,6 +169,7 @@ where
         Command::Gatehouse { command } => {
             gatehouse::run_gatehouse(command, current_dir, client, runner, now, stdout, stderr)
         }
+        Command::Policy { command } => policy::run_policy(command, current_dir, stdout),
         Command::PinCheck { config } => pin_check::run_pin_check(&config, current_dir, stdout),
         Command::Review { base_dir } => {
             review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)
@@ -824,6 +826,10 @@ pub enum CommandError {
         path: String,
         source: io::Error,
     },
+    ScaffoldIo {
+        path: String,
+        source: io::Error,
+    },
     Io(io::Error),
 }
 
@@ -859,6 +865,12 @@ impl fmt::Display for CommandError {
             Self::ReviewedTargetsRead { path, source } => {
                 write!(formatter, "unable to read {path}: {source}")
             }
+            Self::ScaffoldIo { path, source } => {
+                write!(
+                    formatter,
+                    "unable to update policy scaffold {path}: {source}"
+                )
+            }
             Self::Io(error) => write!(formatter, "{error}"),
         }
     }
@@ -879,6 +891,7 @@ impl std::error::Error for CommandError {
             Self::ManifestRead { source, .. } => Some(source),
             Self::ReviewedTargetsParse { source, .. } => Some(source),
             Self::ReviewedTargetsRead { source, .. } => Some(source),
+            Self::ScaffoldIo { source, .. } => Some(source),
             Self::Io(error) => Some(error),
         }
     }

@@ -61,6 +61,10 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: GatehouseCommand,
     },
+    Policy {
+        #[command(subcommand)]
+        command: PolicyCommand,
+    },
     PinCheck {
         #[arg(long, default_value = REVIEWED_TARGETS_CONFIG_FILE)]
         config: PathBuf,
@@ -76,6 +80,11 @@ pub(crate) enum Command {
 #[derive(Debug, Subcommand)]
 pub(crate) enum GatehouseCommand {
     Candidate(GatehouseCandidateArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PolicyCommand {
+    Init,
 }
 
 #[derive(Debug, Args)]

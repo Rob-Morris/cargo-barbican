@@ -6,9 +6,12 @@ boundary.
 
 ## Scope
 
-cargo-barbican is a Cargo subcommand for Rust supply-chain hardening. The v0.1
-goal is a local-install-first tool that replaces the equivalent Rust workflow
-currently implemented in undertask's Python and shell scripts.
+cargo-barbican is a Cargo subcommand for Rust supply-chain hardening: a
+portable, policy-first tool that gives a Rust repo one dependency-intake gate.
+It was extracted from the equivalent Rust workflow in undertask's Python and
+shell scripts and has grown its own product surface beyond them. Local/git
+install-and-pin is the current distribution; crates.io publication is deferred,
+not foreclosed.
 
 ## Source material
 
@@ -23,8 +26,10 @@ Read the matching undertask sources before redesigning behaviour:
 - `docs/dependency-reviews/`
 
 The reference repo is
-[undertask](https://github.com/rob-morris/undertask). Re-implement faithfully;
-deviations should be documented explicitly.
+[undertask](https://github.com/rob-morris/undertask). It is a working reference,
+not the specification: re-implement its proven behaviour faithfully where
+surfaces overlap, and expect cargo-barbican to extend beyond it as a policy
+product. Document both deviations and extensions explicitly.
 
 ## Dependency discipline
 
@@ -143,6 +148,19 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   inspection of the generated sandbox
 - not a repo-integration simulation; repo adoption remains covered by
   `resolve`, `assess`, `review`, `pin-check`, and `verify`
+
+`cargo barbican policy init` is currently:
+
+- the deterministic setup command for explicit repo policy scaffolding
+- non-interactive and non-certifying: it does not review existing dependencies
+  or generate active reviewed families
+- template-backed: it writes the shipped `barbican.toml`,
+  `reviewed-targets.toml`, and dependency-review README templates when absent
+- conservative with existing files: regular files are preserved, existing
+  `barbican.toml` is validated, and symlinks or wrong-type scaffold paths fail
+  closed
+- adoption-guidance oriented: successful output points operators to the manual
+  adoption guide before `pin-check` / `verify`
 
 The reviewed-target enforcement baseline is:
 

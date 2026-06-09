@@ -1,7 +1,7 @@
 # CLI Contract
 
-Current `cargo barbican` surface for v0.1. This document describes the
-intended behaviour of the implemented command set on `dev`.
+Current `cargo barbican` surface. This document describes the intended
+behaviour of the implemented command set.
 
 ## Subcommands
 
@@ -114,6 +114,26 @@ cargo barbican gatehouse candidate [--preserve-sandbox] <crate@version>
     manual inspection and prints the sandbox path. Any failed required evidence
     step returns exit 1 after rendering the failure in the dossier.
 
+cargo barbican policy init
+    Create the explicit policy scaffold for adopting cargo-barbican in a repo.
+    The first slice creates missing:
+    - `barbican.toml`
+    - `reviewed-targets.toml`
+    - `docs/dependency-reviews/`
+    - `docs/dependency-reviews/README.md`
+    It does not create `deny.toml`, active reviewed families, dependency
+    review records, or inventory reports.
+    Existing regular files are preserved. Existing `barbican.toml` is read
+    and validated. Malformed config fails before dependent scaffold files are
+    created. Symlinks, directories, and other wrong-type paths at scaffold
+    locations or existing scaffold ancestors fail closed rather than being
+    followed or overwritten.
+    For Windows, see the project-level Platform Support posture in
+    `docs/architecture/overview.md`; until full Windows support lands, run
+    from trusted checkouts without junctions in scaffold paths.
+    The command prints an action report and next-step guidance pointing to
+    the manual adoption guide.
+
 cargo barbican pin-check [--config reviewed-targets.toml]
     Check active reviewed Rust families against the current workspace manifests
     and `Cargo.lock`.
@@ -176,7 +196,7 @@ cargo barbican verify
 
 - `crates/barbican/` owns pure policy logic and remains testable without network access.
 - `crates/cargo-barbican/` owns CLI parsing, subprocess calls, and the concrete HTTP implementation.
-- Behaviour should match undertask where the surface overlaps unless the docs explicitly say otherwise.
+- Where the surface overlaps undertask, behaviour should match its proven workflow unless the docs explicitly say otherwise; cargo-barbican also owns surface beyond undertask.
 - The deeper intake path is now shaped as a separate `inspect` command rather than additional scope hidden inside `assess`.
 - `gatehouse candidate` is a workflow-convenience layer for isolated
   candidate intake evidence. It composes existing policy/evidence primitives

@@ -15,8 +15,10 @@ constraints.
 
 ## What you are building
 
-A Cargo subcommand for Rust supply-chain hardening. Pure Rust. Replaces the
-Python scripts currently in [`undertask`](https://github.com/rob-morris/undertask).
+A Cargo subcommand for Rust supply-chain hardening. Pure Rust. A portable,
+policy-first tool that gives a Rust repo one dependency-intake gate — extracted
+from [`undertask`](https://github.com/rob-morris/undertask)'s Rust scripts as
+its origin and reference, but a product in its own right, not a 1:1 port.
 
 The full current design, behaviour, and contributor constraints are in the
 architecture, functional, and contributor docs. This file is a route-map.
@@ -32,7 +34,9 @@ architecture, functional, and contributor docs. This file is a route-map.
   and `cargo`.
 - Coupling the library crate to subprocess concerns. The library uses a
   trait for HTTP; subprocesses live in the binary.
-- Publishing to crates.io. v0.1 is local-install only.
+- Publishing to crates.io. Publication is a deliberate future distribution
+  decision, not foreclosed; the current release line is local/git
+  install-and-pin. Get explicit sign-off before publishing.
 
 ## Invariants
 
@@ -40,8 +44,10 @@ architecture, functional, and contributor docs. This file is a route-map.
 - The binary (`crates/cargo-barbican/`) is the only crate that shells out.
 - Every dependency in `Cargo.toml` has a corresponding review record in
   `docs/dependency-reviews/` written **before** the dependency is added.
-- Behaviour matches undertask where the surface overlaps; deviations are
-  documented in `docs/functional/cli.md` and `docs/architecture/overview.md`.
+- Where the surface overlaps undertask, behaviour matches its proven workflow;
+  cargo-barbican also extends beyond undertask, and both deviations and
+  extensions are documented in `docs/functional/cli.md` and
+  `docs/architecture/overview.md`.
 - Shipped repo versions are tracked in `docs/CHANGELOG.md` and
   `docs/changelog/`, and the two crate manifest versions move together.
 - Commit subjects follow `docs/standards/commit-messages.md`, and versioned
@@ -70,7 +76,7 @@ docs/
 ## Current state
 
 The repo has now moved beyond scaffolding and the dependency baseline. The
-current implemented surface on `dev` is:
+current implemented surface is:
 
 - `cargo barbican age`
 - `cargo barbican age-lock`
@@ -78,6 +84,7 @@ current implemented surface on `dev` is:
 - `cargo barbican assess`
 - `cargo barbican inspect`
 - `cargo barbican gatehouse candidate`
+- `cargo barbican policy init`
 - `cargo barbican pin-check`
 - `cargo barbican review`
 - `cargo barbican audit`
@@ -110,6 +117,9 @@ The current intake layer now includes the first pre-add deep-review slice:
   pre-add deep-review surface
 - `cargo barbican gatehouse candidate` exists as the first workflow
   convenience surface for isolated exact-candidate intake dossiers
+- `cargo barbican policy init` exists as the deterministic policy scaffold
+  command for consumer adoption; it creates missing explicit policy files but
+  does not review or certify existing dependencies
 - `cargo barbican pin-check` now exists as the first reviewed-target
   enforcement surface over repo-root `reviewed-targets.toml`
 - `pin-check` now validates that every active reviewed family points at a real
@@ -139,7 +149,9 @@ In undertask:
 - `deny.toml`
 - `docs/dependency-reviews/` (samples — the format we adopt)
 
-These are the reference. Re-implement faithfully; don't redesign.
+These are the reference. Re-implement their proven behaviour faithfully where
+surfaces overlap; extensions beyond undertask are expected as the policy
+product grows.
 
 ## Conventions
 
@@ -150,12 +162,14 @@ These are the reference. Re-implement faithfully; don't redesign.
 
 ## Before committing
 
-1. `cargo build --locked` passes.
-2. `cargo test --locked` passes.
-3. `cargo audit` and `cargo deny check advisories bans sources` pass.
-4. Any new dependency has a checked-in review record.
-5. If either crate version changed, `docs/CHANGELOG.md` and the matching
-   `docs/changelog/vX.Y.Z.md` entry changed with it.
-6. `.canaries/pre-commit.md` was followed and `.canary--pre-commit` was
-   written locally, left unstaged, and allowed to be deleted by the hook.
-7. The commit subject matches `docs/standards/commit-messages.md`.
+Follow [`.canaries/pre-commit.md`](../../.canaries/pre-commit.md), write
+`.canary--pre-commit`, and leave it unstaged. The canary brief is the
+canonical before-commit checklist; see [`process.md`](process.md) for the
+supporting workflow and local hook details.
+
+The default verification command is `sh scripts/verify.sh` with no flags. Do
+not manually substitute the raw cargo/audit/deny sequence for that dogfooded
+gate. Off `main`, use `--vanilla` or `--skip REASON` only for a known
+intermediate state, and record the reason in `.canary--pre-commit`.
+`VERIFY_BRANCH_OVERRIDE` exists only for tests and controlled local validation
+of the branch guard; do not use it for normal commit verification.

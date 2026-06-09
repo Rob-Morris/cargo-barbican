@@ -1,6 +1,8 @@
 # User Documentation
 
 How to adopt and use cargo-barbican from a consumer repo. This layer is
-task-oriented: installation, integration, and re-sync workflow.
+task-oriented: installation, command workflows, and re-sync workflow.
 
-- [Integration](integration.md) — consumer adoption flow and re-sync model
+- [Command Guide](commands.md) — workflows and per-command usage reference
+- [Adoption](adoption.md) — manual onboarding after policy scaffolding
+- [Integration](integration.md) — install, template, and re-sync model
