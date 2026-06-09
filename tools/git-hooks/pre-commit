@@ -5,4 +5,5 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
 git diff --cached --check
+sh scripts/check_doc_versions.sh --staged
 sh scripts/check_pre_commit_canary.sh

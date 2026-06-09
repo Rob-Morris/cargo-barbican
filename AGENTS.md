@@ -1,7 +1,10 @@
 # cargo-barbican
 
-A Cargo subcommand for Rust supply-chain hardening. Pure Rust. Local use first;
-public crate later if warranted.
+A Cargo subcommand for Rust supply-chain hardening: a policy-first tool that
+gives a Rust repo one gate for what enters its dependency graph. Pure Rust,
+designed as a portable product that consumer repos install and pin. Distributed
+today by local/git install-and-pin; crates.io publication is a deferred
+decision, not foreclosed.
 
 ALWAYS DO FIRST: Read [`docs/contributor/agents.md`](docs/contributor/agents.md)
 for the agent route-map (constraints, current state, what to build).
@@ -15,10 +18,12 @@ the current contributor-facing constraints.
 
 ## Source Material
 
-This tool ports Python scripts from
-[`~/Development/undertask/scripts/`](https://github.com/rob-morris/undertask)
-into Rust. The Python implementation works; this is a re-implementation, not
-a clean-slate design. Read undertask's scripts before reinventing anything.
+cargo-barbican was extracted from the Rust supply-chain policy tooling in
+[`~/Development/undertask/scripts/`](https://github.com/rob-morris/undertask).
+undertask is the origin and a working reference, not the specification:
+cargo-barbican is a portable policy product in its own right and has grown a
+surface beyond the original scripts. Read undertask's scripts as reference
+before reinventing equivalent behaviour.
 
 Relevant undertask files:
 
@@ -37,12 +42,10 @@ This repo follows the
 
 ## Before Committing
 
-1. `cargo build --locked` and `cargo test --locked` pass.
-2. Every dependency added is recorded in `docs/dependency-reviews/`.
-3. `cargo deny check advisories bans sources` passes.
-4. `cargo audit` passes.
-5. Follow `.canaries/pre-commit.md`, write `.canary--pre-commit`, and leave it unstaged.
-6. Commit subjects follow `docs/standards/commit-messages.md`.
+Follow [`.canaries/pre-commit.md`](.canaries/pre-commit.md), write
+`.canary--pre-commit`, and leave it unstaged. The canary brief is the
+canonical before-commit checklist; it covers verification, dependency
+provenance, docs routing, version bundles, and commit-subject policy.
 
 ## Local Overrides
 

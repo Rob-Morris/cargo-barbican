@@ -10,6 +10,7 @@ This repo ships opt-in distributed Git hooks:
 - pre-commit checker: [`tools/git-hooks/pre-commit`](../../tools/git-hooks/pre-commit)
 - commit-message checker: [`tools/git-hooks/commit-msg`](../../tools/git-hooks/commit-msg)
 - reusable shell checks:
+  - [`scripts/verify.sh`](../../scripts/verify.sh)
   - [`scripts/check_pre_commit_canary.sh`](../../scripts/check_pre_commit_canary.sh)
   - [`scripts/check_commit_msg.sh`](../../scripts/check_commit_msg.sh)
 
@@ -38,8 +39,8 @@ Before committing:
 Receipt format:
 
 ```text
-[1] Verification: done
-[2] Delegated inspectors: skip, cargo-audit not yet installed on this machine
+[1] Verification: done, sh scripts/verify.sh passed
+[2] Dependency provenance: done
 ```
 
 See [Canary](../standards/canary.md) for the full rules.
@@ -71,8 +72,39 @@ Repo branch policy is simple:
 
 ## Verification Expectations
 
-The hook package is deliberately light. It does not replace the repo's actual
-verification commands or dependency-review policy.
+The repo-level verification entry point is:
+
+```bash
+sh scripts/verify.sh
+```
+
+The default path dogfoods cargo-barbican by running:
+
+```bash
+cargo run --locked --bin cargo-barbican -- audit
+cargo run --locked --bin cargo-barbican -- verify
+```
+
+Because `verify` is the CI enforcement gate, it fails closed when the repo has
+not adopted `reviewed-targets.toml`. Off `main` only, contributors may use one
+of the explicit escape hatches and must record the reason in
+`.canary--pre-commit`:
+
+```bash
+sh scripts/verify.sh --vanilla
+sh scripts/verify.sh --skip "known breaking refactor: <reason>"
+```
+
+`--vanilla` runs the raw underlying checks:
+
+```bash
+cargo audit
+cargo deny check advisories bans sources
+cargo build --locked
+cargo test --locked
+```
+
+`--vanilla` and `--skip` are rejected on `main`.
 
 ## Local Invocation Notes
 
@@ -92,13 +124,8 @@ Reason:
 - that is the wrong launcher contract for commands such as `resolve` that are
   supposed to mutate `Cargo.lock`
 
-Normal pre-commit expectations still include:
-
-- `cargo build --locked`
-- `cargo test --locked`
-- `cargo audit`
-- `cargo deny check advisories bans sources`
-- checked-in dependency review records for direct dependency and `deny.toml` changes
+Normal pre-commit expectations still include checked-in dependency review
+records for direct dependency and `deny.toml` changes.
 
 Those expectations are recorded in the canary brief and contributor docs even
 when the hook cannot prove every one of them mechanically from the staged
