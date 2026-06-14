@@ -5,16 +5,19 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, ExactCrateSpec, OffsetDateTime, RustAssessmentClassification,
-    inspect_published_crate_at,
+    CratesIoClient, ExactCrateSpec, OffsetDateTime, ReleaseAgeOutcome,
+    RustAssessmentClassification, evaluate_release_age, inspect_published_crate_at,
 };
 
-use crate::cli::{GatehouseCandidateArgs, GatehouseCommand};
+use crate::cli::{GatehouseCandidateArgs, GatehouseCommand, REVIEWED_TARGETS_CONFIG_FILE};
 use crate::command_runner::{CommandRunner, RunnerError};
 
 use super::inspect::render_inspect_report;
 use super::scratch_dir::ScratchDir;
-use super::{CommandError, fail, load_config};
+use super::{
+    CommandError, ReviewedReleaseAgeExceptions, fail, load_config,
+    load_reviewed_release_age_exceptions, render_missing_release_age_exception_review_record,
+};
 
 pub(super) fn run_gatehouse<C, R>(
     command: GatehouseCommand,
@@ -54,9 +57,17 @@ where
         Err(error) => return fail(stderr, error),
     };
     let minimum_days = load_config(current_dir)?.release_age.minimum_days;
+    let reviewed_release_age_exceptions =
+        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
     let mut dossier = CandidateDossier::new(&spec);
 
-    match render_candidate_inspect(&spec, minimum_days, client, now) {
+    match render_candidate_inspect(
+        &spec,
+        minimum_days,
+        &reviewed_release_age_exceptions,
+        client,
+        now,
+    ) {
         Ok((rendered, failed)) => {
             dossier.push_inspect(&rendered);
             if failed {
@@ -122,6 +133,7 @@ where
 fn render_candidate_inspect<C>(
     spec: &ExactCrateSpec,
     minimum_days: u64,
+    reviewed_release_age_exceptions: &ReviewedReleaseAgeExceptions,
     client: &C,
     now: OffsetDateTime,
 ) -> Result<(String, bool), String>
@@ -131,10 +143,36 @@ where
     let release = client
         .fetch_release(spec)
         .map_err(|error| format!("{spec}: {error}"))?;
+    let age_exception = reviewed_release_age_exceptions
+        .honoured()
+        .iter()
+        .find(|exception| exception.spec() == spec);
+    let release_age = evaluate_release_age(
+        spec.clone(),
+        release.clone(),
+        now,
+        minimum_days,
+        age_exception,
+    );
+    if matches!(release_age.outcome(), ReleaseAgeOutcome::TooFresh) {
+        if let Some(exception) = reviewed_release_age_exceptions.missing_for_spec(spec) {
+            return Err(render_missing_release_age_exception_review_record(
+                exception,
+            ));
+        }
+    }
+
     let tarball = client
         .fetch_release_tarball(spec)
         .map_err(|error| format!("{spec}: {error}"))?;
-    let report = inspect_published_crate_at(spec.clone(), release, &tarball, now, minimum_days);
+    let report = inspect_published_crate_at(
+        spec.clone(),
+        release,
+        &tarball,
+        now,
+        minimum_days,
+        age_exception,
+    );
     let failed = !matches!(
         report.classification(),
         RustAssessmentClassification::RoutineSafe

@@ -18,9 +18,10 @@ pub mod sha256;
 pub mod spec;
 
 pub use assessment::{
-    InspectionFailure, LockedChecksumDrift, NonCratesIoSourceChange, ReleaseAgeViolation,
-    RustAssessmentClassification, RustAssessmentFinding, RustAssessmentFindingCategory,
-    RustAssessmentFindingSeverity, RustAssessmentReport, assess_rust_update, assess_rust_update_at,
+    InspectionFailure, LockedChecksumDrift, NonCratesIoSourceChange,
+    ReleaseAgeExceptionArtefactMismatch, ReleaseAgeViolation, RustAssessmentClassification,
+    RustAssessmentFinding, RustAssessmentFindingCategory, RustAssessmentFindingSeverity,
+    RustAssessmentReport, assess_rust_update, assess_rust_update_at,
 };
 pub use config::{
     BarbicanConfig, ConfigLoadError, DelegatesConfig, HighScrutinyConfig,
@@ -54,8 +55,9 @@ pub use release_age::{
     evaluate_release_age, format_age,
 };
 pub use reviewed_targets::{
-    ExecutionSurfaceKind, ReviewedExecutionSurfaceAllowance, ReviewedResolvedTarget,
-    ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError, parse_reviewed_targets_toml,
+    ExecutionSurfaceKind, ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException,
+    ReviewedResolvedTarget, ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError,
+    parse_reviewed_targets_toml,
 };
 pub use sha256::{Sha256Digest, Sha256DigestError};
 pub use spec::{ExactCrateSpec, ExactCrateSpecError};

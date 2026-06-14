@@ -1406,6 +1406,425 @@ fn assess_allows_reviewed_execution_surfaces_when_review_record_exists() {
 }
 
 #[test]
+fn age_allows_too_fresh_release_with_reviewed_age_exception() {
+    let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    write_age_exception_policy(
+        &temp_dir,
+        "serde",
+        "1.0.228",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        true,
+    );
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("ALLOW serde@1.0.228"));
+    assert!(rendered.contains(
+        "release-age exception allowed by reviewed family serde-family (docs/dependency-reviews/2026-05-27-serde.md)"
+    ));
+}
+
+#[test]
+fn age_does_not_honour_age_exception_with_missing_review_record() {
+    let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    write_age_exception_policy(
+        &temp_dir,
+        "serde",
+        "1.0.228",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        false,
+    );
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let rendered = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.contains(
+        "FAIL allowed release-age exception review record missing for serde@1.0.228: docs/dependency-reviews/2026-05-27-serde.md"
+    ));
+    assert!(!rendered.contains("ALLOW"));
+}
+
+#[test]
+fn age_ignores_missing_age_exception_record_when_release_is_old_enough() {
+    let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-20T00:00:00Z", false);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    write_age_exception_policy(
+        &temp_dir,
+        "serde",
+        "1.0.228",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        false,
+    );
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("OK   serde@1.0.228"));
+    assert!(!rendered.contains("review record missing"));
+}
+
+#[test]
+fn age_blocks_reviewed_age_exception_checksum_mismatch() {
+    let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    write_age_exception_policy(
+        &temp_dir,
+        "serde",
+        "1.0.228",
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        true,
+    );
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let rendered = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.contains("release-age exception artefact mismatch"));
+    assert!(rendered.contains(
+        "expected sha256 abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+    ));
+    assert!(
+        rendered.contains("found 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+    );
+}
+
+#[test]
+fn age_rejects_malformed_age_exception_state() {
+    let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = "1.0.228"
+
+[rust.families.allowed_age_exceptions]
+serde = "1.0.228"
+"#,
+    )
+    .expect("reviewed targets should write");
+
+    let error = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect_err("malformed reviewed targets should fail");
+
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+    assert!(error.to_string().contains(
+        "allowed_age_exceptions entry for serde requires the resolved target to carry checksum_sha256"
+    ));
+}
+
+#[test]
+fn assess_lists_reviewed_age_exception_under_allowed_policy_exceptions() {
+    let cli = Cli::parse_from(["cargo-barbican", "assess"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
+    let runner = FakeCommandRunner::default()
+        .with_git_show("HEAD:Cargo.lock", "version = 4\n")
+        .with_git_show("HEAD:Cargo.toml", "")
+        .with_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "serde",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "version": "1.0.228",
+      "targets": [{"kind": ["lib"]}]
+    }
+  ],
+  "workspace_members": [],
+  "resolve": null
+}"#,
+        );
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        "[high_scrutiny]\nnew_direct_dependencies = false\n",
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("lockfile should write");
+    write_age_exception_policy(
+        &temp_dir,
+        "serde",
+        "1.0.228",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        true,
+    );
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Suggested classification: routine-safe"));
+    assert!(rendered.contains("Allowed policy exceptions:"));
+    assert!(rendered.contains(
+        "serde@1.0.228 release age allowed by reviewed family serde-family (docs/dependency-reviews/2026-05-27-serde.md)"
+    ));
+    assert!(!rendered.contains("age violations"));
+}
+
+#[test]
+fn assess_does_not_honour_age_exception_with_missing_review_record() {
+    let cli = Cli::parse_from(["cargo-barbican", "assess"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
+    let runner = FakeCommandRunner::default()
+        .with_git_show("HEAD:Cargo.lock", "version = 4\n")
+        .with_git_show("HEAD:Cargo.toml", "")
+        .with_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "serde",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "version": "1.0.228",
+      "targets": [{"kind": ["lib"]}]
+    }
+  ],
+  "workspace_members": [],
+  "resolve": null
+}"#,
+        );
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        "[high_scrutiny]\nnew_direct_dependencies = false\n",
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("lockfile should write");
+    write_age_exception_policy(
+        &temp_dir,
+        "serde",
+        "1.0.228",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        false,
+    );
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let stderr = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(stderr.contains(
+        "FAIL allowed release-age exception review record missing for serde@1.0.228: docs/dependency-reviews/2026-05-27-serde.md"
+    ));
+}
+
+#[test]
+fn assess_blocks_reviewed_age_exception_checksum_mismatch() {
+    let cli = Cli::parse_from(["cargo-barbican", "assess"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
+    let runner = FakeCommandRunner::default()
+        .with_git_show("HEAD:Cargo.lock", "version = 4\n")
+        .with_git_show("HEAD:Cargo.toml", "")
+        .with_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "serde",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "version": "1.0.228",
+      "targets": [{"kind": ["lib"]}]
+    }
+  ],
+  "workspace_members": [],
+  "resolve": null
+}"#,
+        );
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        "[high_scrutiny]\nnew_direct_dependencies = false\n",
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("lockfile should write");
+    write_age_exception_policy(
+        &temp_dir,
+        "serde",
+        "1.0.228",
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        true,
+    );
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Suggested classification: policy-violating"));
+    assert!(rendered.contains("release-age exception artefact mismatches"));
+    assert!(
+        rendered
+            .contains("reviewed release-age exception artefact checksums did not match crates.io")
+    );
+    assert!(
+        rendered.contains(
+            "serde@1.0.228 release-age exception artefact mismatch for family serde-family"
+        )
+    );
+    assert!(
+        rendered
+            .contains("expected abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+    );
+    assert!(
+        rendered.contains("found 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+    );
+}
+
+#[test]
 fn assess_fails_closed_when_applicable_allowed_surface_review_record_is_missing() {
     let (exit_code, stdout, stderr) = run_allowed_surface_assess("1.2.3", false, &["build-rs"]);
 
@@ -2740,6 +3159,92 @@ fn inspect_honours_injected_clock_for_release_age() {
 }
 
 #[test]
+fn inspect_renders_reviewed_release_age_exception() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "inspect", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-26T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    write_age_exception_policy(&temp_dir, "sample", "0.1.0", &checksum, true);
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("classification: routine-safe"));
+    assert!(rendered.contains("release age: ALLOW sample@0.1.0"));
+    assert!(rendered.contains(
+        "release-age exception allowed by reviewed family sample-family (docs/dependency-reviews/2026-05-27-sample.md)"
+    ));
+}
+
+#[test]
+fn gatehouse_candidate_renders_reviewed_release_age_exception() {
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "candidate", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-26T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default()
+        .with_cargo_tree("sample v0.1.0")
+        .with_cargo_audit("No vulnerable packages found");
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    write_age_exception_policy(&temp_dir, "sample", "0.1.0", &checksum, true);
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Gatehouse candidate: sample@0.1.0"));
+    assert!(rendered.contains("release age: ALLOW sample@0.1.0"));
+    assert!(rendered.contains(
+        "release-age exception allowed by reviewed family sample-family (docs/dependency-reviews/2026-05-27-sample.md)"
+    ));
+}
+
+#[test]
 fn inspect_reports_elevated_risk_for_build_script_and_native_surface() {
     let tarball = build_crate_tarball(&[
         (
@@ -2953,6 +3458,53 @@ serde_derive = ["proc-macro"]
     assert!(stderr.is_empty());
     assert!(error.to_string().contains(
         "allowed_surfaces entry for serde_derive references a crate absent from the same resolved map"
+    ));
+}
+
+#[test]
+fn pin_check_fails_when_allowed_age_exception_state_is_malformed() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = "1.0.228"
+
+[rust.families.allowed_age_exceptions]
+serde = "1.0.228"
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+
+    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect_err("malformed reviewed targets should fail");
+
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+    assert!(error.to_string().contains(
+        "allowed_age_exceptions entry for serde requires the resolved target to carry checksum_sha256"
     ));
 }
 
@@ -3308,6 +3860,40 @@ fn write_review_record(temp_dir: &Path, relative_path: &str) {
     let parent = path.parent().expect("review record should have a parent");
     fs::create_dir_all(parent).expect("review record dir should exist");
     fs::write(path, "# Dependency Review\n").expect("review record should write");
+}
+
+fn write_age_exception_policy(
+    temp_dir: &Path,
+    crate_name: &str,
+    version: &str,
+    checksum: &str,
+    write_record: bool,
+) {
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        format!(
+            r#"[rust]
+
+[[rust.families]]
+name = "{crate_name}-family"
+review_record = "docs/dependency-reviews/2026-05-27-{crate_name}.md"
+
+[rust.families.resolved]
+{crate_name} = {{ version = "{version}", checksum_sha256 = "{checksum}" }}
+
+[rust.families.allowed_age_exceptions]
+{crate_name} = "{version}"
+"#
+        ),
+    )
+    .expect("reviewed targets should write");
+
+    if write_record {
+        write_review_record(
+            temp_dir,
+            &format!("docs/dependency-reviews/2026-05-27-{crate_name}.md"),
+        );
+    }
 }
 
 fn lockfile_with_packages(packages: &[(&str, &str, bool)]) -> String {

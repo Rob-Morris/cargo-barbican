@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.7.0
+# Synced from cargo-barbican v0.8.0
 # Copy this template into a consumer repo, then edit that repo's
 # reviewed-targets.toml to declare reviewed dependency families.
 
@@ -17,6 +17,8 @@
 #   preferred form is `{ version = "...", checksum_sha256 = "..." }`
 # - optional `allowed_surfaces`: reviewed execution surfaces for crates already
 #   present in the same `resolved` map
+# - optional `allowed_age_exceptions`: reviewed release-age exceptions for
+#   crates already present in the same `resolved` map with `checksum_sha256`
 
 [rust]
 
@@ -33,3 +35,6 @@
 #
 # [rust.families.allowed_surfaces]
 # some-crate = ["build-rs", "native-sys"]
+#
+# [rust.families.allowed_age_exceptions]
+# some-crate = "1.2.3"

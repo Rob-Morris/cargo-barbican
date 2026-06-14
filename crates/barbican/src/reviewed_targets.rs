@@ -23,6 +23,13 @@ impl ReviewedTargets {
             .flat_map(ReviewedRustFamily::execution_surface_allowances)
             .collect()
     }
+
+    pub fn release_age_exceptions(&self) -> Vec<ReviewedReleaseAgeException> {
+        self.rust_families
+            .iter()
+            .flat_map(ReviewedRustFamily::release_age_exceptions)
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +39,7 @@ pub struct ReviewedRustFamily {
     direct: BTreeMap<String, String>,
     resolved: BTreeMap<String, ReviewedResolvedTarget>,
     allowed_surfaces: BTreeMap<String, BTreeSet<ExecutionSurfaceKind>>,
+    allowed_age_exceptions: BTreeMap<String, String>,
 }
 
 impl ReviewedRustFamily {
@@ -55,6 +63,10 @@ impl ReviewedRustFamily {
         &self.allowed_surfaces
     }
 
+    pub fn allowed_age_exceptions(&self) -> &BTreeMap<String, String> {
+        &self.allowed_age_exceptions
+    }
+
     fn execution_surface_allowances(&self) -> Vec<ReviewedExecutionSurfaceAllowance> {
         self.allowed_surfaces
             .iter()
@@ -72,6 +84,28 @@ impl ReviewedRustFamily {
                         family: self.name.clone(),
                         review_record: self.review_record.clone(),
                     })
+            })
+            .collect()
+    }
+
+    fn release_age_exceptions(&self) -> Vec<ReviewedReleaseAgeException> {
+        self.allowed_age_exceptions
+            .iter()
+            .map(|(crate_name, version)| {
+                let target = self
+                    .resolved
+                    .get(crate_name)
+                    .expect("parse_reviewed_targets_toml validates age exception targets");
+                ReviewedReleaseAgeException {
+                    spec: ExactCrateSpec::from_parts(crate_name, version)
+                        .expect("parse_reviewed_targets_toml validates exact specs"),
+                    checksum_sha256: target
+                        .checksum_sha256()
+                        .expect("parse_reviewed_targets_toml validates age exception checksums")
+                        .clone(),
+                    family: self.name.clone(),
+                    review_record: self.review_record.clone(),
+                }
             })
             .collect()
     }
@@ -137,6 +171,42 @@ impl fmt::Display for ReviewedExecutionSurfaceAllowance {
             formatter,
             "{} {} allowed by reviewed family {} ({})",
             self.spec, self.surface, self.family, self.review_record
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReviewedReleaseAgeException {
+    spec: ExactCrateSpec,
+    checksum_sha256: Sha256Digest,
+    family: String,
+    review_record: String,
+}
+
+impl ReviewedReleaseAgeException {
+    pub fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
+    pub fn checksum_sha256(&self) -> &Sha256Digest {
+        &self.checksum_sha256
+    }
+
+    pub fn family(&self) -> &str {
+        &self.family
+    }
+
+    pub fn review_record(&self) -> &str {
+        &self.review_record
+    }
+}
+
+impl fmt::Display for ReviewedReleaseAgeException {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} release age allowed by reviewed family {} ({})",
+            self.spec, self.family, self.review_record
         )
     }
 }
@@ -280,12 +350,39 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
             allowed_surfaces.insert(crate_name, surfaces);
         }
 
+        let mut allowed_age_exceptions = BTreeMap::new();
+        for (crate_name, version) in family.allowed_age_exceptions {
+            let Some(target) = resolved.get(&crate_name) else {
+                return Err(ReviewedTargetsError::AllowedAgeExceptionTargetMissing {
+                    family: family.name.clone(),
+                    crate_name,
+                });
+            };
+            if target.checksum_sha256().is_none() {
+                return Err(ReviewedTargetsError::AllowedAgeExceptionChecksumMissing {
+                    family: family.name.clone(),
+                    crate_name,
+                });
+            }
+            if target.version() != version {
+                return Err(ReviewedTargetsError::AllowedAgeExceptionVersionMismatch {
+                    family: family.name.clone(),
+                    crate_name,
+                    exception_version: version,
+                    resolved_version: target.version().to_owned(),
+                });
+            }
+
+            allowed_age_exceptions.insert(crate_name, version);
+        }
+
         rust_families.push(ReviewedRustFamily {
             name: family.name,
             review_record: family.review_record,
             direct: family.direct,
             resolved,
             allowed_surfaces,
+            allowed_age_exceptions,
         });
     }
 
@@ -361,6 +458,23 @@ pub enum ReviewedTargetsError {
         crate_name: String,
         surface: String,
     },
+    #[error(
+        "family {family} allowed_age_exceptions entry for {crate_name} references a crate absent from the same resolved map"
+    )]
+    AllowedAgeExceptionTargetMissing { family: String, crate_name: String },
+    #[error(
+        "family {family} allowed_age_exceptions entry for {crate_name} requires the resolved target to carry checksum_sha256"
+    )]
+    AllowedAgeExceptionChecksumMissing { family: String, crate_name: String },
+    #[error(
+        "family {family} allowed_age_exceptions entry for {crate_name} version {exception_version} does not match resolved version {resolved_version}"
+    )]
+    AllowedAgeExceptionVersionMismatch {
+        family: String,
+        crate_name: String,
+        exception_version: String,
+        resolved_version: String,
+    },
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -385,6 +499,8 @@ struct RawReviewedRustFamily {
     resolved: BTreeMap<String, RawReviewedResolvedTarget>,
     #[serde(default)]
     allowed_surfaces: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    allowed_age_exceptions: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -421,6 +537,9 @@ serde_derive = "1.0.228"
 
 [rust.families.allowed_surfaces]
 serde = ["build-rs", "proc-macro", "build-rs"]
+
+[rust.families.allowed_age_exceptions]
+serde = "1.0.228"
 "#,
         )
         .expect("reviewed targets should parse");
@@ -473,6 +592,18 @@ serde = ["build-rs", "proc-macro", "build-rs"]
         assert_eq!(allowances[0].family(), "serde-family");
         assert_eq!(
             allowances[0].review_record(),
+            "docs/dependency-reviews/2026-05-27-serde.md"
+        );
+        let age_exceptions = targets.release_age_exceptions();
+        assert_eq!(age_exceptions.len(), 1);
+        assert_eq!(age_exceptions[0].spec().to_string(), "serde@1.0.228");
+        assert_eq!(
+            age_exceptions[0].checksum_sha256().as_str(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        );
+        assert_eq!(age_exceptions[0].family(), "serde-family");
+        assert_eq!(
+            age_exceptions[0].review_record(),
             "docs/dependency-reviews/2026-05-27-serde.md"
         );
     }
@@ -658,5 +789,108 @@ native-sys = ["native-sys"]
             error,
             ReviewedTargetsError::AllowedSurfaceTargetMissing { .. }
         ));
+    }
+
+    #[test]
+    fn rejects_allowed_age_exception_targets_absent_from_resolved_map() {
+        let error = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+
+[rust.families.allowed_age_exceptions]
+other = "1.0.0"
+"#,
+        )
+        .expect_err("age exception target outside resolved map should fail");
+
+        assert!(matches!(
+            error,
+            ReviewedTargetsError::AllowedAgeExceptionTargetMissing { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_allowed_age_exception_targets_without_resolved_checksums() {
+        let error = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = "1.0.228"
+
+[rust.families.allowed_age_exceptions]
+serde = "1.0.228"
+"#,
+        )
+        .expect_err("age exception target without checksum should fail");
+
+        assert!(matches!(
+            error,
+            ReviewedTargetsError::AllowedAgeExceptionChecksumMissing { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_allowed_age_exception_version_mismatches() {
+        let error = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+
+[rust.families.allowed_age_exceptions]
+serde = "1.0.227"
+"#,
+        )
+        .expect_err("age exception version mismatch should fail");
+
+        assert!(matches!(
+            error,
+            ReviewedTargetsError::AllowedAgeExceptionVersionMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn allows_transitive_age_exception_targets_in_resolved_map() {
+        let targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+serde_derive = { version = "1.0.228", checksum_sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" }
+
+[rust.families.allowed_age_exceptions]
+serde_derive = "1.0.228"
+"#,
+        )
+        .expect("transitive age exception target should parse");
+
+        let exceptions = targets.release_age_exceptions();
+        assert_eq!(exceptions.len(), 1);
+        assert_eq!(exceptions[0].spec().to_string(), "serde_derive@1.0.228");
     }
 }

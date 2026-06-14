@@ -22,9 +22,9 @@ use std::process::ExitCode;
 
 use barbican::{
     BarbicanConfig, ConfigLoadError, CratesIoClient, ExactCrateSpec, OffsetDateTime,
-    ReleaseAgeOutcome, ReleaseAgeReport, ReviewedTargets, ReviewedTargetsError,
-    check_release_age_at, format_age, parse_lockfile, parse_manifest_dependencies,
-    parse_manifest_direct_requirements, parse_reviewed_targets_toml,
+    ReleaseAgeOutcome, ReleaseAgeReport, ReviewedReleaseAgeException, ReviewedTargets,
+    ReviewedTargetsError, check_release_age_at, format_age, parse_lockfile,
+    parse_manifest_dependencies, parse_manifest_direct_requirements, parse_reviewed_targets_toml,
     parse_workspace_member_manifest_paths,
 };
 use clap::Parser;
@@ -207,6 +207,7 @@ pub(super) fn parse_specs(
 pub(super) fn finish_release_age_checks<C>(
     specs: &[ExactCrateSpec],
     minimum_days: u64,
+    reviewed_release_age_exceptions: &ReviewedReleaseAgeExceptions,
     client: &C,
     now: OffsetDateTime,
     stdout: &mut dyn Write,
@@ -216,12 +217,42 @@ where
     C: CratesIoClient + ?Sized,
 {
     let mut failed = false;
+    let mut allowed_reports = Vec::new();
+    let mut routine_reports = Vec::new();
 
     for spec in specs {
-        match check_release_age_at(client, spec, now, minimum_days) {
-            Ok(report) if report.is_success() => {
-                writeln!(stdout, "{}", render_release_age_report(&report))
-                    .map_err(CommandError::Io)?;
+        let age_exception = reviewed_release_age_exceptions
+            .honoured()
+            .iter()
+            .find(|exception| exception.spec() == spec);
+        match check_release_age_at(client, spec, now, minimum_days, age_exception) {
+            Ok(report) if matches!(report.outcome(), ReleaseAgeOutcome::Allowed) => {
+                routine_reports.push(report);
+            }
+            Ok(report)
+                if matches!(
+                    report.outcome(),
+                    ReleaseAgeOutcome::AllowedByException { .. }
+                ) =>
+            {
+                allowed_reports.push(report);
+            }
+            Ok(report)
+                if matches!(report.outcome(), ReleaseAgeOutcome::TooFresh)
+                    && reviewed_release_age_exceptions
+                        .missing_for_spec(spec)
+                        .is_some() =>
+            {
+                let exception = reviewed_release_age_exceptions
+                    .missing_for_spec(spec)
+                    .expect("guard confirms missing exception");
+                writeln!(
+                    stderr,
+                    "{}",
+                    render_missing_release_age_exception_review_record(exception)
+                )
+                .map_err(CommandError::Io)?;
+                failed = true;
             }
             Ok(report) => {
                 writeln!(stderr, "{}", render_release_age_report(&report))
@@ -235,7 +266,29 @@ where
         }
     }
 
+    for report in routine_reports {
+        writeln!(stdout, "{}", render_release_age_report(&report)).map_err(CommandError::Io)?;
+    }
+
+    if !allowed_reports.is_empty() {
+        writeln!(stdout, "Allowed policy exceptions:").map_err(CommandError::Io)?;
+        for report in allowed_reports {
+            writeln!(stdout, "  - {}", render_release_age_report(&report))
+                .map_err(CommandError::Io)?;
+        }
+    }
+
     Ok(exit_code_from_policy_failures(failed))
+}
+
+pub(super) fn render_missing_release_age_exception_review_record(
+    exception: &ReviewedReleaseAgeException,
+) -> String {
+    format!(
+        "FAIL allowed release-age exception review record missing for {}: {}",
+        exception.spec(),
+        exception.review_record()
+    )
 }
 
 pub(super) fn render_release_age_report(report: &ReleaseAgeReport) -> String {
@@ -246,15 +299,34 @@ pub(super) fn render_release_age_report(report: &ReleaseAgeReport) -> String {
             report.published_at_raw(),
             format_age(report.age_seconds()),
         ),
-        ReleaseAgeOutcome::Yanked => {
-            format!("FAIL {}: version is yanked on crates.io", report.spec())
-        }
-        ReleaseAgeOutcome::TooFresh => format!(
-            "FAIL {}: published {} ({} old), below the {}-day minimum",
+        ReleaseAgeOutcome::AllowedByException {
+            family,
+            review_record,
+        } => format!(
+            "ALLOW {}: published {} ({} old), below the {}-day minimum; release-age exception allowed by reviewed family {family} ({review_record})",
             report.spec(),
             report.published_at_raw(),
             format_age(report.age_seconds()),
             report.minimum_days(),
+        ),
+        ReleaseAgeOutcome::Yanked => {
+            format!("FAIL {}: version is yanked on crates.io", report.spec())
+        }
+        ReleaseAgeOutcome::TooFresh => format!(
+            "FAIL {}: published {} ({} old), below the {}-day minimum; record a reviewed release-age exception in reviewed-targets.toml if this candidate is intentionally accepted",
+            report.spec(),
+            report.published_at_raw(),
+            format_age(report.age_seconds()),
+            report.minimum_days(),
+        ),
+        ReleaseAgeOutcome::ExceptionArtefactMismatch {
+            family,
+            review_record,
+            expected,
+            found,
+        } => format!(
+            "FAIL {}: release-age exception artefact mismatch for reviewed family {family} ({review_record}): expected sha256 {expected}, found {found}",
+            report.spec(),
         ),
     }
 }
@@ -566,6 +638,58 @@ pub(super) fn load_reviewed_targets(
     })?;
 
     Ok(Some(reviewed_targets))
+}
+
+pub(super) fn load_reviewed_release_age_exceptions(
+    current_dir: &Path,
+    path: &Path,
+) -> Result<ReviewedReleaseAgeExceptions, CommandError> {
+    let Some(reviewed_targets) = load_reviewed_targets(current_dir, path)? else {
+        return Ok(ReviewedReleaseAgeExceptions::default());
+    };
+
+    Ok(collect_reviewed_release_age_exceptions(
+        &reviewed_targets,
+        current_dir,
+    ))
+}
+
+pub(super) fn collect_reviewed_release_age_exceptions(
+    reviewed_targets: &ReviewedTargets,
+    current_dir: &Path,
+) -> ReviewedReleaseAgeExceptions {
+    let mut exceptions = ReviewedReleaseAgeExceptions::default();
+
+    for exception in reviewed_targets.release_age_exceptions() {
+        if review_record_exists(current_dir, exception.review_record()) {
+            exceptions.honoured.push(exception);
+        } else {
+            exceptions.missing_review_records.push(exception);
+        }
+    }
+
+    exceptions
+}
+
+#[derive(Debug, Clone, Default)]
+pub(super) struct ReviewedReleaseAgeExceptions {
+    honoured: Vec<ReviewedReleaseAgeException>,
+    missing_review_records: Vec<ReviewedReleaseAgeException>,
+}
+
+impl ReviewedReleaseAgeExceptions {
+    pub(super) fn honoured(&self) -> &[ReviewedReleaseAgeException] {
+        &self.honoured
+    }
+
+    pub(super) fn missing_for_spec(
+        &self,
+        spec: &ExactCrateSpec,
+    ) -> Option<&ReviewedReleaseAgeException> {
+        self.missing_review_records
+            .iter()
+            .find(|exception| exception.spec() == spec)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

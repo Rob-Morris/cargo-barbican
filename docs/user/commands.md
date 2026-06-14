@@ -174,6 +174,20 @@ tarball checksum:
 serde = { version = "1.0.228", checksum_sha256 = "..." }
 ```
 
+Reviewed families can also carry exact release-age exceptions:
+
+```toml
+[rust.families.allowed_age_exceptions]
+serde = "1.0.228"
+```
+
+The crate must already be present in the same family `resolved` map with
+`checksum_sha256`. Release-age-aware commands honour the exception only when
+the family review record exists and the fetched crates.io checksum matches the
+reviewed checksum. `age`, `age-lock`, `resolve`, and `assess` use crates.io's
+published checksum metadata; `inspect` and `gatehouse candidate` also verify
+downloaded tarball bytes.
+
 Run `pin-check` after editing `reviewed-targets.toml`:
 
 ```bash
@@ -543,6 +557,8 @@ Checks include:
 - configured crates.io checksums match the resolved `Cargo.lock` checksum
   chain
 - allowed execution surfaces reference crates in the same reviewed family
+- allowed release-age exceptions reference crates in the same reviewed family
+  and require structured `checksum_sha256` entries
 
 Standalone `pin-check` skips successfully when no reviewed-target manifest is
 present or no active Rust families are configured. `verify` is stricter and

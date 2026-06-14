@@ -67,6 +67,10 @@ The current intake layer is:
 - the current reviewed-target gate now supports crates.io reviewed-artefact
   reconciliation: record the reviewed tarball digest in `reviewed-targets.toml`
   and verify it against the resolved `Cargo.lock` checksum chain
+- reviewed families can declare exact `allowed_age_exceptions` for
+  checksum-bound too-fresh versions; release-age-aware commands honour them at
+  one shared evaluation seam while yanked releases and checksum mismatches
+  remain blocking
 - comparative command baselines and review ergonomics are now partially
   decoupled from `git`:
   `age-lock` can compare against an explicit baseline lockfile,

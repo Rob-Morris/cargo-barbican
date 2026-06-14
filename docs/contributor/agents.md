@@ -133,6 +133,12 @@ The current intake layer now includes the first pre-add deep-review slice:
 - `assess` renders matched reviewed execution-surface allowances separately and
   excludes them from elevated-risk classification, but fails closed if the
   matching family review record is missing
+- reviewed families can now declare exact `allowed_age_exceptions` for
+  checksum-bound too-fresh crates already present in the same family `resolved`
+  map
+- release-age-aware commands honour those reviewed release-age exceptions at
+  the shared release-age seam, while yanked releases and exception checksum
+  mismatches remain blocking
 - `cargo barbican verify` now reuses the default `pin-check` gate before
   running locked build/test verification
 

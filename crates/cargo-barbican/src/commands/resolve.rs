@@ -10,6 +10,7 @@ use barbican::{
     parse_cargo_metadata, parse_lockfile, select_package_id,
 };
 
+use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
 use super::age_lock::recheck_lockfile_age_against_lockfiles;
@@ -17,7 +18,7 @@ use super::diff_render::render_unified_file_diff;
 use super::scratch_dir::ScratchDir;
 use super::{
     CommandError, fail, finish_release_age_checks, load_config, load_current_lockfile_text,
-    load_current_lockfile_with_text, parse_specs,
+    load_current_lockfile_with_text, load_reviewed_release_age_exceptions, parse_specs,
 };
 
 pub(super) fn run_resolve<C, R>(
@@ -37,10 +38,13 @@ where
 {
     let memoized_client = MemoizingCratesIoClient::new(client);
     let minimum_days = min_age_days.unwrap_or(load_config(current_dir)?.release_age.minimum_days);
+    let reviewed_release_age_exceptions =
+        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
     let parse_result = parse_specs(raw_specs, stderr)?;
     let age_exit = finish_release_age_checks(
         &parse_result.specs,
         minimum_days,
+        &reviewed_release_age_exceptions,
         &memoized_client,
         now,
         stdout,
@@ -139,6 +143,7 @@ where
         "Cargo.lock",
         "pre-update Cargo.lock",
         minimum_days,
+        &reviewed_release_age_exceptions,
         &memoized_client,
         now,
         stdout,

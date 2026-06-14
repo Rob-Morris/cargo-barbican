@@ -4,13 +4,16 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, OffsetDateTime, RustAssessmentClassification, RustInspectReport,
-    inspect_published_crate_at,
+    CratesIoClient, OffsetDateTime, ReleaseAgeOutcome, RustAssessmentClassification,
+    RustInspectReport, evaluate_release_age, inspect_published_crate_at,
 };
 
+use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
+
 use super::{
-    CommandError, exit_code_from_policy_failures, join_display, load_config, parse_specs,
-    render_release_age_report,
+    CommandError, exit_code_from_policy_failures, join_display, load_config,
+    load_reviewed_release_age_exceptions, parse_specs,
+    render_missing_release_age_exception_review_record, render_release_age_report,
 };
 
 pub(super) fn run_inspect<C>(
@@ -26,6 +29,8 @@ where
     C: CratesIoClient + ?Sized,
 {
     let minimum_days = min_age_days.unwrap_or(load_config(current_dir)?.release_age.minimum_days);
+    let reviewed_release_age_exceptions =
+        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
     let parse_result = parse_specs(raw_specs, stderr)?;
     let mut failed = parse_result.failed;
 
@@ -38,6 +43,30 @@ where
                 continue;
             }
         };
+        let age_exception = reviewed_release_age_exceptions
+            .honoured()
+            .iter()
+            .find(|exception| exception.spec() == &spec);
+        let release_age = evaluate_release_age(
+            spec.clone(),
+            release.clone(),
+            now,
+            minimum_days,
+            age_exception,
+        );
+        if matches!(release_age.outcome(), ReleaseAgeOutcome::TooFresh) {
+            if let Some(exception) = reviewed_release_age_exceptions.missing_for_spec(&spec) {
+                writeln!(
+                    stderr,
+                    "{}",
+                    render_missing_release_age_exception_review_record(exception)
+                )
+                .map_err(CommandError::Io)?;
+                failed = true;
+                continue;
+            }
+        }
+
         let tarball = match client.fetch_release_tarball(&spec) {
             Ok(tarball) => tarball,
             Err(error) => {
@@ -46,7 +75,8 @@ where
                 continue;
             }
         };
-        let report = inspect_published_crate_at(spec, release, &tarball, now, minimum_days);
+        let report =
+            inspect_published_crate_at(spec, release, &tarball, now, minimum_days, age_exception);
         let rendered = render_inspect_report(&report);
 
         match report.classification() {

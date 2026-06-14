@@ -4,11 +4,13 @@ use std::process::ExitCode;
 
 use barbican::{CratesIoClient, Lockfile, OffsetDateTime, added_crates_io_specs};
 
+use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
 use super::{
-    CommandError, DEFAULT_BASE_REF, fail, finish_release_age_checks, load_config,
-    load_current_lockfile, load_git_base_lockfile, load_lockfile_from_path,
+    CommandError, DEFAULT_BASE_REF, ReviewedReleaseAgeExceptions, fail, finish_release_age_checks,
+    load_config, load_current_lockfile, load_git_base_lockfile, load_lockfile_from_path,
+    load_reviewed_release_age_exceptions,
 };
 
 pub(super) fn run_age_lock<C, R>(
@@ -28,6 +30,8 @@ where
     R: CommandRunner + ?Sized,
 {
     let minimum_days = min_age_days.unwrap_or(load_config(current_dir)?.release_age.minimum_days);
+    let reviewed_release_age_exceptions =
+        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
     let current = match load_current_lockfile(current_dir, lockfile) {
         Ok(lockfile) => lockfile,
         Err(error) => return fail(stderr, error),
@@ -59,6 +63,7 @@ where
         &lockfile_display,
         &base_label,
         minimum_days,
+        &reviewed_release_age_exceptions,
         client,
         now,
         stdout,
@@ -72,6 +77,7 @@ pub(super) fn recheck_lockfile_age_against_lockfiles<C>(
     lockfile_display: &str,
     base_label: &str,
     minimum_days: u64,
+    reviewed_release_age_exceptions: &ReviewedReleaseAgeExceptions,
     client: &C,
     now: OffsetDateTime,
     stdout: &mut dyn Write,
@@ -96,5 +102,13 @@ where
         return Ok(ExitCode::SUCCESS);
     }
 
-    finish_release_age_checks(&specs, minimum_days, client, now, stdout, stderr)
+    finish_release_age_checks(
+        &specs,
+        minimum_days,
+        reviewed_release_age_exceptions,
+        client,
+        now,
+        stdout,
+        stderr,
+    )
 }

@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.8.0](changelog/v0.8.0.md) | 2026-06-14 | Add reviewed release-age exceptions |
 | [v0.7.0](changelog/v0.7.0.md) | 2026-06-09 | Add policy init adoption scaffold |
 | [v0.6.0](changelog/v0.6.0.md) | 2026-06-07 | Add elevated-risk policy workflow and gatehouse dossiers |
 | [v0.5.0](changelog/v0.5.0.md) | 2026-06-07 | Add explicit baselines and dry-run review previews |

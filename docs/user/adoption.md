@@ -54,6 +54,13 @@ Use structured crates.io `resolved` entries with `checksum_sha256` wherever
 possible so `pin-check` can reconcile the reviewed artefact against
 `Cargo.lock`.
 
+If a reviewed exact crate version is intentionally accepted before the minimum
+release-age window has elapsed, add it under the family's
+`allowed_age_exceptions` only after recording the reason in the review record.
+The crate must already be present in the same family `resolved` map with a
+`checksum_sha256`; cargo-barbican verifies that checksum before honouring the
+exception.
+
 ## 3. Check Reviewed-Target Policy
 
 After adding reviewed families and records:

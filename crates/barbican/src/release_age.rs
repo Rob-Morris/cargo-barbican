@@ -1,12 +1,25 @@
 use time::OffsetDateTime;
 
-use crate::{CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec};
+use crate::{
+    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, ReviewedReleaseAgeException,
+    Sha256Digest,
+};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReleaseAgeOutcome {
     Allowed,
+    AllowedByException {
+        family: String,
+        review_record: String,
+    },
     Yanked,
     TooFresh,
+    ExceptionArtefactMismatch {
+        family: String,
+        review_record: String,
+        expected: Sha256Digest,
+        found: Sha256Digest,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +33,10 @@ pub struct ReleaseAgeReport {
 
 impl ReleaseAgeReport {
     pub fn is_success(&self) -> bool {
-        matches!(self.outcome, ReleaseAgeOutcome::Allowed)
+        matches!(
+            self.outcome,
+            ReleaseAgeOutcome::Allowed | ReleaseAgeOutcome::AllowedByException { .. }
+        )
     }
 
     pub fn spec(&self) -> &ExactCrateSpec {
@@ -39,8 +55,8 @@ impl ReleaseAgeReport {
         self.minimum_days
     }
 
-    pub fn outcome(&self) -> ReleaseAgeOutcome {
-        self.outcome
+    pub fn outcome(&self) -> &ReleaseAgeOutcome {
+        &self.outcome
     }
 }
 
@@ -52,7 +68,7 @@ pub fn check_release_age<C>(
 where
     C: CratesIoClient + ?Sized,
 {
-    check_release_age_at(client, spec, OffsetDateTime::now_utc(), minimum_days)
+    check_release_age_at(client, spec, OffsetDateTime::now_utc(), minimum_days, None)
 }
 
 pub fn check_release_age_at<C>(
@@ -60,6 +76,7 @@ pub fn check_release_age_at<C>(
     spec: &ExactCrateSpec,
     now: OffsetDateTime,
     minimum_days: u64,
+    exception: Option<&ReviewedReleaseAgeException>,
 ) -> Result<ReleaseAgeReport, CratesIoClientError>
 where
     C: CratesIoClient + ?Sized,
@@ -71,6 +88,7 @@ where
         release,
         now,
         minimum_days,
+        exception,
     ))
 }
 
@@ -79,6 +97,7 @@ pub fn evaluate_release_age(
     release: CrateRelease,
     now: OffsetDateTime,
     minimum_days: u64,
+    exception: Option<&ReviewedReleaseAgeException>,
 ) -> ReleaseAgeReport {
     let age_seconds = (now - release.published_at).whole_seconds().max(0);
     let clamped_age_seconds = age_seconds as u64;
@@ -87,7 +106,21 @@ pub fn evaluate_release_age(
     let outcome = if release.yanked {
         ReleaseAgeOutcome::Yanked
     } else if clamped_age_seconds < minimum_age_seconds {
-        ReleaseAgeOutcome::TooFresh
+        match exception.filter(|exception| exception.spec() == &spec) {
+            Some(exception) if exception.checksum_sha256() == &release.checksum_sha256_hex => {
+                ReleaseAgeOutcome::AllowedByException {
+                    family: exception.family().to_owned(),
+                    review_record: exception.review_record().to_owned(),
+                }
+            }
+            Some(exception) => ReleaseAgeOutcome::ExceptionArtefactMismatch {
+                family: exception.family().to_owned(),
+                review_record: exception.review_record().to_owned(),
+                expected: exception.checksum_sha256().clone(),
+                found: release.checksum_sha256_hex.clone(),
+            },
+            None => ReleaseAgeOutcome::TooFresh,
+        }
     } else {
         ReleaseAgeOutcome::Allowed
     };
@@ -124,16 +157,25 @@ pub fn format_age(seconds: i64) -> String {
 mod tests {
     use time::OffsetDateTime;
 
-    use crate::{CrateRelease, ExactCrateSpec, Sha256Digest};
+    use crate::{
+        CrateRelease, ExactCrateSpec, ReviewedReleaseAgeException, Sha256Digest,
+        parse_reviewed_targets_toml,
+    };
 
     use super::{ReleaseAgeOutcome, evaluate_release_age, format_age};
 
     fn release(timestamp: &str, yanked: bool) -> CrateRelease {
+        release_with_checksum(
+            timestamp,
+            yanked,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+    }
+
+    fn release_with_checksum(timestamp: &str, yanked: bool, checksum: &str) -> CrateRelease {
         CrateRelease {
-            checksum_sha256_hex: Sha256Digest::try_from(
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            )
-            .expect("fixture checksum should parse"),
+            checksum_sha256_hex: Sha256Digest::try_from(checksum)
+                .expect("fixture checksum should parse"),
             published_at_raw: timestamp.to_owned(),
             published_at: OffsetDateTime::parse(
                 timestamp,
@@ -147,6 +189,31 @@ mod tests {
     fn now(timestamp: &str) -> OffsetDateTime {
         OffsetDateTime::parse(timestamp, &time::format_description::well_known::Rfc3339)
             .expect("timestamp should parse")
+    }
+
+    fn exception(version: &str, checksum: &str) -> ReviewedReleaseAgeException {
+        let targets = parse_reviewed_targets_toml(&format!(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = {{ version = "{version}", checksum_sha256 = "{checksum}" }}
+
+[rust.families.allowed_age_exceptions]
+serde = "{version}"
+"#
+        ))
+        .expect("exception fixture should parse");
+
+        targets
+            .release_age_exceptions()
+            .into_iter()
+            .next()
+            .expect("exception should exist")
     }
 
     #[test]
@@ -165,10 +232,11 @@ mod tests {
             release("2026-05-01T00:00:00Z", false),
             now("2026-05-10T12:00:00Z"),
             7,
+            None,
         );
 
         assert!(report.is_success());
-        assert_eq!(report.outcome(), ReleaseAgeOutcome::Allowed);
+        assert_eq!(report.outcome(), &ReleaseAgeOutcome::Allowed);
         assert_eq!(report.spec().to_string(), "serde@1.0.228");
         assert_eq!(report.published_at_raw(), "2026-05-01T00:00:00Z");
         assert_eq!(report.minimum_days(), 7);
@@ -184,9 +252,10 @@ mod tests {
             release("2026-05-05T18:00:00Z", false),
             now("2026-05-10T12:00:00Z"),
             7,
+            None,
         );
 
-        assert_eq!(report.outcome(), ReleaseAgeOutcome::TooFresh);
+        assert_eq!(report.outcome(), &ReleaseAgeOutcome::TooFresh);
         assert_eq!(report.spec().to_string(), "serde@1.0.228");
         assert_eq!(report.published_at_raw(), "2026-05-05T18:00:00Z");
         assert_eq!(report.minimum_days(), 7);
@@ -202,9 +271,13 @@ mod tests {
             release("2026-05-01T00:00:00Z", true),
             now("2026-05-10T12:00:00Z"),
             7,
+            Some(&exception(
+                "1.0.228",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            )),
         );
 
-        assert_eq!(report.outcome(), ReleaseAgeOutcome::Yanked);
+        assert_eq!(report.outcome(), &ReleaseAgeOutcome::Yanked);
         assert_eq!(report.spec().to_string(), "serde@1.0.228");
     }
 
@@ -217,10 +290,113 @@ mod tests {
             release("2026-05-10T12:10:00Z", false),
             now("2026-05-10T12:00:00Z"),
             7,
+            None,
         );
 
-        assert_eq!(report.outcome(), ReleaseAgeOutcome::TooFresh);
+        assert_eq!(report.outcome(), &ReleaseAgeOutcome::TooFresh);
         assert_eq!(report.published_at_raw(), "2026-05-10T12:10:00Z");
         assert_eq!(format_age(report.age_seconds()), "0m");
+    }
+
+    #[test]
+    fn too_fresh_release_matching_exception_is_allowed() {
+        let exception = exception(
+            "1.0.228",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+        let report = evaluate_release_age(
+            "serde@1.0.228"
+                .parse::<ExactCrateSpec>()
+                .expect("spec should parse"),
+            release("2026-05-05T18:00:00Z", false),
+            now("2026-05-10T12:00:00Z"),
+            7,
+            Some(&exception),
+        );
+
+        assert!(report.is_success());
+        assert_eq!(
+            report.outcome(),
+            &ReleaseAgeOutcome::AllowedByException {
+                family: "serde-family".to_owned(),
+                review_record: "docs/dependency-reviews/2026-05-27-serde.md".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn too_fresh_release_matching_exception_blocks_on_checksum_mismatch() {
+        let exception = exception(
+            "1.0.228",
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        );
+        let report = evaluate_release_age(
+            "serde@1.0.228"
+                .parse::<ExactCrateSpec>()
+                .expect("spec should parse"),
+            release("2026-05-05T18:00:00Z", false),
+            now("2026-05-10T12:00:00Z"),
+            7,
+            Some(&exception),
+        );
+
+        assert!(!report.is_success());
+        assert_eq!(
+            report.outcome(),
+            &ReleaseAgeOutcome::ExceptionArtefactMismatch {
+                family: "serde-family".to_owned(),
+                review_record: "docs/dependency-reviews/2026-05-27-serde.md".to_owned(),
+                expected: Sha256Digest::try_from(
+                    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                )
+                .expect("checksum should parse"),
+                found: Sha256Digest::try_from(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                )
+                .expect("checksum should parse"),
+            }
+        );
+    }
+
+    #[test]
+    fn exception_for_other_version_does_not_waive_release_age() {
+        let exception = exception(
+            "1.0.227",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+        let report = evaluate_release_age(
+            "serde@1.0.228"
+                .parse::<ExactCrateSpec>()
+                .expect("spec should parse"),
+            release("2026-05-05T18:00:00Z", false),
+            now("2026-05-10T12:00:00Z"),
+            7,
+            Some(&exception),
+        );
+
+        assert_eq!(report.outcome(), &ReleaseAgeOutcome::TooFresh);
+    }
+
+    #[test]
+    fn old_enough_release_ignores_matching_exception() {
+        let exception = exception(
+            "1.0.228",
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        );
+        let report = evaluate_release_age(
+            "serde@1.0.228"
+                .parse::<ExactCrateSpec>()
+                .expect("spec should parse"),
+            release_with_checksum(
+                "2026-05-01T00:00:00Z",
+                false,
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            ),
+            now("2026-05-10T12:00:00Z"),
+            7,
+            Some(&exception),
+        );
+
+        assert_eq!(report.outcome(), &ReleaseAgeOutcome::Allowed);
     }
 }

@@ -185,6 +185,18 @@ The reviewed-target enforcement baseline is:
   rendering them in `Allowed policy exceptions:`
 - `assess` validates the matching family `review_record` exists before trusting
   an applicable allowance
+- review-record checks validate a non-symlink file exists at the configured
+  path; they do not authenticate or parse the record content, so reviewers must
+  inspect reviewed-target changes and their cited records together
+- release-age-aware commands honour matching `allowed_age_exceptions` from the
+  same reviewed family only when the referenced `resolved` target carries
+  `checksum_sha256` and the family `review_record` exists
+- `age`, `age-lock`, `resolve`, and `assess` compare that reviewed digest
+  against crates.io's published checksum metadata; `inspect` and `gatehouse
+  candidate` also verify downloaded tarball bytes through the inspect path
+- applied release-age exceptions are rendered visibly as allowed policy
+  exceptions; yanked releases and exception artefact checksum mismatches remain
+  blocking
 - `verify` reuses that same default reviewed-target gate before executing
   `cargo build --locked` and `cargo test --locked`
 
@@ -209,6 +221,10 @@ Contract notes:
 - `allowed_surfaces` accepts exactly `build-rs`, `proc-macro`, and
   `native-sys`; unknown identifiers, empty lists, and crates absent from the
   same family `resolved` map fail closed
+- `allowed_age_exceptions` accepts exact version strings for crates already
+  present in the same family `resolved` map; the referenced target must use the
+  structured `checksum_sha256` form, and the exception version must match the
+  resolved version exactly
 - `review_record` paths must be relative repo paths with no `..` traversal
 - the current implementation does not claim stronger installed-tree or broader
   non-crates.io artefact parity beyond this gate

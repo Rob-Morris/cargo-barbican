@@ -11,6 +11,9 @@ cargo barbican age [--min-age-days N] <crate@version>...
     (default 7). The default comes from `barbican.toml`
     `[release_age].minimum_days`, falling back to 7 when the file or key is
     absent. `--min-age-days` overrides the config for the current command.
+    A matching reviewed release-age exception in `reviewed-targets.toml` can
+    allow a too-fresh exact version when its review record exists and its
+    reviewed checksum matches the fetched crates.io artefact.
     Pure HTTP GET to the crates.io API.
 
 cargo barbican age-lock [--base-ref REF | --base-lockfile PATH] [--lockfile Cargo.lock] [--min-age-days N]
@@ -20,6 +23,8 @@ cargo barbican age-lock [--base-ref REF | --base-lockfile PATH] [--lockfile Carg
     age. Catches too-fresh transitive selections.
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
+    Reviewed release-age exceptions are honoured through the same shared
+    release-age policy path as `age`.
 
 cargo barbican resolve [--dry-run] [--min-age-days N] <crate@version>...
     1. Run `age` on each spec.
@@ -43,6 +48,8 @@ cargo barbican resolve [--dry-run] [--min-age-days N] <crate@version>...
     than being dereferenced or silently skipped.
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
+    The initial candidate age check and the post-update lockfile recheck both
+    honour the same reviewed release-age exceptions.
 
 cargo barbican assess [--base-ref REF | --base-dir PATH] [--policy-mode strict|elevated-risk] [--lockfile Cargo.lock] [--min-age-days N]
     Diff the current Rust dependency state against a baseline dependency
@@ -61,6 +68,9 @@ cargo barbican assess [--base-ref REF | --base-dir PATH] [--policy-mode strict|e
     - failed inspection of dependency surfaces required by the first slice
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
+    Matching reviewed release-age exceptions are rendered in
+    `Allowed policy exceptions:` and do not contribute to age-violation
+    findings. Yanked crates and exception checksum mismatches remain blocking.
     Enabled `[high_scrutiny]` keys decide which elevated-risk findings are
     active. The default `--policy-mode strict` path is fail-closed: any
     blocking finding, including a required inspection failure, or any enabled
@@ -90,6 +100,9 @@ cargo barbican inspect [--min-age-days N] <crate@version>...
     returns exit 1.
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
+    Matching reviewed release-age exceptions are rendered visibly in the
+    release-age line. They can only allow too-fresh releases; yanked releases
+    and checksum mismatches remain `policy-violating`.
     Matching reviewed execution-surface allowances are rendered in an
     `Allowed policy exceptions:` section and do not contribute to the
     `elevated-risk` classification by themselves. The matching family
@@ -110,6 +123,9 @@ cargo barbican gatehouse candidate [--preserve-sandbox] <crate@version>
     resolves metadata and lockfile state, runs static inspection of the
     published crate tarball, renders Cargo's dependency graph, and audits the
     generated lockfile.
+    Because the dossier uses the same inspection path as `inspect`, reviewed
+    release-age exceptions are rendered visibly in the inspect evidence and
+    checksum mismatches remain blocking.
     The sandbox is removed by default. `--preserve-sandbox` keeps it for
     manual inspection and prints the sandbox path. Any failed required evidence
     step returns exit 1 after rendering the failure in the dossier.
@@ -148,6 +164,9 @@ cargo barbican pin-check [--config reviewed-targets.toml]
       `checksum_sha256` against the resolved `Cargo.lock` checksum chain
     - validates any `allowed_surfaces` entries point at crates in the same
       family `resolved` map
+    - validates any `allowed_age_exceptions` entries point at crates in the
+      same family `resolved` map and that the referenced resolved target
+      carries `checksum_sha256`
     The first slice treats exact `Cargo.lock` parity as the load-bearing
     execution gate. It does not yet verify installed-tree or stronger
     build-input parity.
@@ -157,6 +176,10 @@ cargo barbican pin-check [--config reviewed-targets.toml]
     - execution-surface allowances are declared separately, for example:
       `serde = ["build-rs", "proc-macro"]` under
       `[rust.families.allowed_surfaces]`
+    - release-age exceptions are declared separately, for example:
+      `serde = "1.0.228"` under `[rust.families.allowed_age_exceptions]`;
+      they require the same family's structured `resolved` entry to carry
+      `checksum_sha256`
     - stronger installed-tree or broader non-crates.io artefact parity remains
       out of scope for this slice
 

@@ -6,8 +6,8 @@ use time::OffsetDateTime;
 use crate::reviewed_targets::ExecutionSurfaceKind;
 use crate::{
     CargoManifestDependency, CargoMetadata, CratesIoClient, ExactCrateSpec, HighScrutinyConfig,
-    Lockfile, ReleaseAgeOutcome, ReviewedExecutionSurfaceAllowance, Sha256Digest,
-    changed_crates_io_checksums, check_release_age_at, package_surfaces,
+    Lockfile, ReleaseAgeOutcome, ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException,
+    Sha256Digest, changed_crates_io_checksums, check_release_age_at, package_surfaces,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +39,7 @@ pub enum RustAssessmentFindingCategory {
     NonCratesIoDirectDependencies,
     AgeViolations,
     YankedVersions,
+    ReleaseAgeExceptionArtefactMismatches,
     LockedChecksumDrifts,
     NonCratesIoSourceChanges,
     NativeSysCrates,
@@ -141,6 +142,63 @@ pub struct LockedChecksumDrift {
     current_checksum: Sha256Digest,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReleaseAgeExceptionArtefactMismatch {
+    spec: ExactCrateSpec,
+    family: String,
+    review_record: String,
+    expected: Sha256Digest,
+    found: Sha256Digest,
+}
+
+impl ReleaseAgeExceptionArtefactMismatch {
+    fn new(
+        spec: ExactCrateSpec,
+        family: String,
+        review_record: String,
+        expected: Sha256Digest,
+        found: Sha256Digest,
+    ) -> Self {
+        Self {
+            spec,
+            family,
+            review_record,
+            expected,
+            found,
+        }
+    }
+
+    pub fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
+    pub fn family(&self) -> &str {
+        &self.family
+    }
+
+    pub fn review_record(&self) -> &str {
+        &self.review_record
+    }
+
+    pub fn expected(&self) -> &Sha256Digest {
+        &self.expected
+    }
+
+    pub fn found(&self) -> &Sha256Digest {
+        &self.found
+    }
+}
+
+impl fmt::Display for ReleaseAgeExceptionArtefactMismatch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} release-age exception artefact mismatch for family {} ({}): expected {}, found {}",
+            self.spec, self.family, self.review_record, self.expected, self.found
+        )
+    }
+}
+
 impl LockedChecksumDrift {
     fn new(
         spec: ExactCrateSpec,
@@ -211,12 +269,14 @@ pub struct RustAssessmentReport {
     non_crates_io_direct_dependencies: Vec<CargoManifestDependency>,
     age_violations: Vec<ReleaseAgeViolation>,
     yanked_versions: Vec<ExactCrateSpec>,
+    release_age_exception_mismatches: Vec<ReleaseAgeExceptionArtefactMismatch>,
     locked_checksum_drifts: Vec<LockedChecksumDrift>,
     non_crates_io_source_changes: Vec<NonCratesIoSourceChange>,
     native_sys_crates: Vec<ExactCrateSpec>,
     build_rs_surfaces: Vec<ExactCrateSpec>,
     proc_macro_surfaces: Vec<ExactCrateSpec>,
     allowed_execution_surfaces: Vec<ReviewedExecutionSurfaceAllowance>,
+    allowed_release_age_exceptions: Vec<ReviewedReleaseAgeException>,
     inspection_failures: Vec<InspectionFailure>,
     findings: Vec<RustAssessmentFinding>,
 }
@@ -260,6 +320,10 @@ impl RustAssessmentReport {
         &self.yanked_versions
     }
 
+    pub fn release_age_exception_mismatches(&self) -> &[ReleaseAgeExceptionArtefactMismatch] {
+        &self.release_age_exception_mismatches
+    }
+
     pub fn locked_checksum_drifts(&self) -> &[LockedChecksumDrift] {
         &self.locked_checksum_drifts
     }
@@ -282,6 +346,10 @@ impl RustAssessmentReport {
 
     pub fn allowed_execution_surfaces(&self) -> &[ReviewedExecutionSurfaceAllowance] {
         &self.allowed_execution_surfaces
+    }
+
+    pub fn allowed_release_age_exceptions(&self) -> &[ReviewedReleaseAgeException] {
+        &self.allowed_release_age_exceptions
     }
 
     pub fn inspection_failures(&self) -> &[InspectionFailure] {
@@ -316,6 +384,7 @@ where
         minimum_days,
         high_scrutiny,
         &[],
+        &[],
         OffsetDateTime::now_utc(),
     )
 }
@@ -326,7 +395,8 @@ where
 /// filesystem I/O. The returned classification is computed with matching
 /// reviewed execution-surface allowances already applied; callers that trust
 /// that classification must verify every `allowed_execution_surfaces()` entry
-/// is backed by an existing review record.
+/// and `allowed_release_age_exceptions()` entry is backed by an existing review
+/// record.
 pub fn assess_rust_update_at<C>(
     client: &C,
     current_lockfile: &Lockfile,
@@ -337,6 +407,7 @@ pub fn assess_rust_update_at<C>(
     minimum_days: u64,
     high_scrutiny: &HighScrutinyConfig,
     reviewed_execution_surface_allowances: &[ReviewedExecutionSurfaceAllowance],
+    reviewed_release_age_exceptions: &[ReviewedReleaseAgeException],
     now: OffsetDateTime,
 ) -> RustAssessmentReport
 where
@@ -379,6 +450,7 @@ where
 
     let mut age_violations = Vec::new();
     let mut yanked_versions = Vec::new();
+    let mut release_age_exception_mismatches = Vec::new();
     let mut locked_checksum_drifts = changed_crates_io_checksums(current_lockfile, base_lockfile)
         .into_iter()
         .map(|change| {
@@ -394,6 +466,7 @@ where
     let mut build_rs_surfaces = Vec::new();
     let mut proc_macro_surfaces = Vec::new();
     let mut allowed_execution_surfaces = Vec::new();
+    let mut allowed_release_age_exceptions = Vec::new();
     let mut inspection_failures = Vec::new();
 
     for package in &added_packages {
@@ -405,14 +478,36 @@ where
                 package.source.clone().unwrap_or_else(|| "none".to_owned()),
             ));
         } else {
-            match check_release_age_at(client, &spec, now, minimum_days) {
+            let age_exception = reviewed_release_age_exceptions
+                .iter()
+                .find(|exception| exception.spec() == &spec);
+            match check_release_age_at(client, &spec, now, minimum_days, age_exception) {
                 Ok(report) => match report.outcome() {
                     ReleaseAgeOutcome::Allowed => {}
+                    ReleaseAgeOutcome::AllowedByException { .. } => {
+                        let exception =
+                            age_exception.expect("matching exception produced allowed outcome");
+                        allowed_release_age_exceptions.push(exception.clone());
+                    }
                     ReleaseAgeOutcome::TooFresh => {
                         age_violations
                             .push(ReleaseAgeViolation::new(spec.clone(), report.age_seconds()));
                     }
                     ReleaseAgeOutcome::Yanked => yanked_versions.push(spec.clone()),
+                    ReleaseAgeOutcome::ExceptionArtefactMismatch {
+                        family,
+                        review_record,
+                        expected,
+                        found,
+                    } => release_age_exception_mismatches.push(
+                        ReleaseAgeExceptionArtefactMismatch::new(
+                            spec.clone(),
+                            family.clone(),
+                            review_record.clone(),
+                            expected.clone(),
+                            found.clone(),
+                        ),
+                    ),
                 },
                 Err(error) => {
                     inspection_failures
@@ -461,12 +556,14 @@ where
     non_crates_io_direct_dependencies.sort();
     age_violations.sort();
     yanked_versions.sort();
+    release_age_exception_mismatches.sort();
     locked_checksum_drifts.sort();
     non_crates_io_source_changes.sort();
     native_sys_crates.sort();
     build_rs_surfaces.sort();
     proc_macro_surfaces.sort();
     allowed_execution_surfaces.sort();
+    allowed_release_age_exceptions.sort();
     inspection_failures.sort();
 
     let mut findings = Vec::new();
@@ -479,6 +576,11 @@ where
     if !yanked_versions.is_empty() {
         findings.push(RustAssessmentFinding::blocking(
             RustAssessmentFindingCategory::YankedVersions,
+        ));
+    }
+    if !release_age_exception_mismatches.is_empty() {
+        findings.push(RustAssessmentFinding::blocking(
+            RustAssessmentFindingCategory::ReleaseAgeExceptionArtefactMismatches,
         ));
     }
     if !locked_checksum_drifts.is_empty() {
@@ -531,12 +633,14 @@ where
         non_crates_io_direct_dependencies,
         age_violations,
         yanked_versions,
+        release_age_exception_mismatches,
         locked_checksum_drifts,
         non_crates_io_source_changes,
         native_sys_crates,
         build_rs_surfaces,
         proc_macro_surfaces,
         allowed_execution_surfaces,
+        allowed_release_age_exceptions,
         inspection_failures,
         findings,
     }
@@ -699,6 +803,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             7,
             &HighScrutinyConfig::default(),
             &[],
+            &[],
             now(),
         );
 
@@ -756,6 +861,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             ),
             7,
             &HighScrutinyConfig::default(),
+            &[],
             &[],
             now(),
         );
@@ -815,6 +921,7 @@ checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
             7,
             &HighScrutinyConfig::default(),
             &[],
+            &[],
             now(),
         );
 
@@ -862,6 +969,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             &parse_metadata(r#"{"packages":[],"workspace_members":[],"resolve":null}"#),
             7,
             &HighScrutinyConfig::default(),
+            &[],
             &[],
             now(),
         );
@@ -921,6 +1029,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
                 ..HighScrutinyConfig::default()
             },
             &allowances,
+            &[],
             now(),
         );
 
@@ -970,6 +1079,7 @@ version = "0.1.0"
             ),
             7,
             &HighScrutinyConfig::default(),
+            &[],
             &[],
             now(),
         );
@@ -1022,6 +1132,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             ),
             7,
             &HighScrutinyConfig::default(),
+            &[],
             &[],
             now(),
         );
@@ -1076,6 +1187,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
                 new_direct_dependencies: false,
                 ..HighScrutinyConfig::default()
             },
+            &[],
             &[],
             now(),
         );
@@ -1135,6 +1247,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
                 new_direct_dependencies: false,
                 ..HighScrutinyConfig::default()
             },
+            &[],
             &[],
             now(),
         );
@@ -1203,6 +1316,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
                 ..HighScrutinyConfig::default()
             },
             &allowances,
+            &[],
             now(),
         );
 

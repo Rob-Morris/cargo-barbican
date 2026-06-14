@@ -10,7 +10,10 @@ use time::OffsetDateTime;
 use toml::Value;
 
 use crate::assessment::RustAssessmentClassification;
-use crate::{CrateRelease, ExactCrateSpec, ReleaseAgeReport, evaluate_release_age};
+use crate::{
+    CrateRelease, ExactCrateSpec, ReleaseAgeReport, ReviewedReleaseAgeException,
+    evaluate_release_age,
+};
 
 const GZIP_HEADER_LEN: usize = 10;
 const GZIP_FOOTER_LEN: usize = 8;
@@ -191,6 +194,7 @@ pub fn inspect_published_crate(
         tarball_bytes,
         OffsetDateTime::now_utc(),
         minimum_days,
+        None,
     )
 }
 
@@ -200,9 +204,10 @@ pub fn inspect_published_crate_at(
     tarball_bytes: &[u8],
     now: OffsetDateTime,
     minimum_days: u64,
+    exception: Option<&ReviewedReleaseAgeException>,
 ) -> RustInspectReport {
     let published_checksum_sha256_hex = release.checksum_sha256_hex.to_string();
-    let release_age = evaluate_release_age(spec.clone(), release, now, minimum_days);
+    let release_age = evaluate_release_age(spec.clone(), release, now, minimum_days, exception);
     let local_checksum_sha256_hex = sha256_hex(tarball_bytes);
     let checksum_matches = local_checksum_sha256_hex == published_checksum_sha256_hex;
 
@@ -701,6 +706,7 @@ mod tests {
             time::OffsetDateTime::parse("2026-05-26T00:00:00Z", &Rfc3339)
                 .expect("timestamp should parse"),
             7,
+            None,
         )
     }
 
@@ -806,6 +812,7 @@ mod tests {
             time::OffsetDateTime::parse("2026-05-26T00:00:00Z", &Rfc3339)
                 .expect("timestamp should parse"),
             7,
+            None,
         );
 
         assert_eq!(

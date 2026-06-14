@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, OffsetDateTime, ReviewedExecutionSurfaceAllowance,
+    CratesIoClient, OffsetDateTime, ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException,
     RustAssessmentClassification, RustAssessmentFinding, RustAssessmentFindingCategory,
     RustAssessmentFindingSeverity, RustAssessmentReport, parse_cargo_metadata,
 };
@@ -13,9 +13,10 @@ use crate::cli::{AssessPolicyMode, REVIEWED_TARGETS_CONFIG_FILE};
 use crate::command_runner::CommandRunner;
 
 use super::{
-    CommandError, DEFAULT_BASE_REF, fail, join_display, load_base_manifest_dependencies,
-    load_config, load_current_lockfile, load_git_base_lockfile, load_lockfile_from_path,
-    load_manifest_dependencies_from_root, load_reviewed_targets, review_record_exists,
+    CommandError, DEFAULT_BASE_REF, collect_reviewed_release_age_exceptions, fail, join_display,
+    load_base_manifest_dependencies, load_config, load_current_lockfile, load_git_base_lockfile,
+    load_lockfile_from_path, load_manifest_dependencies_from_root, load_reviewed_targets,
+    render_missing_release_age_exception_review_record, review_record_exists,
 };
 
 pub(super) fn run_assess<C, R>(
@@ -37,10 +38,18 @@ where
 {
     let config = load_config(current_dir)?;
     let minimum_days = min_age_days.unwrap_or(config.release_age.minimum_days);
-    let reviewed_execution_surface_allowances =
-        load_reviewed_targets(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?
-            .map(|reviewed_targets| reviewed_targets.execution_surface_allowances())
-            .unwrap_or_default();
+    let reviewed_targets =
+        load_reviewed_targets(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
+    let reviewed_execution_surface_allowances = reviewed_targets
+        .as_ref()
+        .map(|reviewed_targets| reviewed_targets.execution_surface_allowances())
+        .unwrap_or_default();
+    let reviewed_release_age_exceptions = reviewed_targets
+        .as_ref()
+        .map(|reviewed_targets| {
+            collect_reviewed_release_age_exceptions(reviewed_targets, current_dir)
+        })
+        .unwrap_or_default();
     let base_root = base_dir.map(|base_dir| current_dir.join(base_dir));
     let current_lockfile = match load_current_lockfile(current_dir, lockfile) {
         Ok(lockfile) => lockfile,
@@ -99,6 +108,7 @@ where
         minimum_days,
         &config.high_scrutiny,
         &reviewed_execution_surface_allowances,
+        reviewed_release_age_exceptions.honoured(),
         now,
     );
 
@@ -114,6 +124,17 @@ where
                 allowed_surface.spec(),
                 allowed_surface.review_record()
             ),
+        );
+    }
+
+    if let Some(exception) = report
+        .age_violations()
+        .iter()
+        .find_map(|violation| reviewed_release_age_exceptions.missing_for_spec(violation.spec()))
+    {
+        return fail(
+            stderr,
+            render_missing_release_age_exception_review_record(exception),
         );
     }
 
@@ -187,6 +208,11 @@ fn render_assessment_report(
     render_assessment_line(stdout, "yanked versions", report.yanked_versions())?;
     render_assessment_line(
         stdout,
+        "release-age exception artefact mismatches",
+        report.release_age_exception_mismatches(),
+    )?;
+    render_assessment_line(
+        stdout,
         "lockfile checksum drifts",
         report.locked_checksum_drifts(),
     )?;
@@ -221,7 +247,11 @@ fn render_assessment_report(
         report,
         RustAssessmentFindingSeverity::Elevated,
     )?;
-    render_allowed_policy_exceptions(stdout, report.allowed_execution_surfaces())?;
+    render_allowed_policy_exceptions(
+        stdout,
+        report.allowed_execution_surfaces(),
+        report.allowed_release_age_exceptions(),
+    )?;
 
     if report.findings().is_empty() {
         writeln!(stdout, "No policy findings detected.").map_err(CommandError::Io)?;
@@ -233,14 +263,18 @@ fn render_assessment_report(
 fn render_allowed_policy_exceptions(
     stdout: &mut dyn Write,
     allowed_surfaces: &[ReviewedExecutionSurfaceAllowance],
+    allowed_age_exceptions: &[ReviewedReleaseAgeException],
 ) -> Result<(), CommandError> {
-    if allowed_surfaces.is_empty() {
+    if allowed_surfaces.is_empty() && allowed_age_exceptions.is_empty() {
         return Ok(());
     }
 
     writeln!(stdout, "Allowed policy exceptions:").map_err(CommandError::Io)?;
     for allowed_surface in allowed_surfaces {
         writeln!(stdout, "  - {allowed_surface}").map_err(CommandError::Io)?;
+    }
+    for allowed_exception in allowed_age_exceptions {
+        writeln!(stdout, "  - {allowed_exception}").map_err(CommandError::Io)?;
     }
     writeln!(stdout).map_err(CommandError::Io)
 }
@@ -311,6 +345,10 @@ fn render_finding_summary(report: &RustAssessmentReport, finding: RustAssessment
         RustAssessmentFindingCategory::YankedVersions => format!(
             "newly selected yanked crate versions: {}",
             join_display(report.yanked_versions(), ", ")
+        ),
+        RustAssessmentFindingCategory::ReleaseAgeExceptionArtefactMismatches => format!(
+            "reviewed release-age exception artefact checksums did not match crates.io: {}",
+            join_display(report.release_age_exception_mismatches(), ", ")
         ),
         RustAssessmentFindingCategory::LockedChecksumDrifts => format!(
             "locked crates.io checksums changed for existing selections: {}",
