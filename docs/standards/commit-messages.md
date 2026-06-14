@@ -142,8 +142,10 @@ The hook rejects:
 - versioned subjects whose crate-manifest version and changelog bundle are not coherent
 
 On non-`main` branches, it also permits amending the current versioned commit
-for the same `vX.Y.Z` bundle without forcing an additional version bump, as
-long as the bundle remains coherent at that commit.
+for the same `vX.Y.Z` bundle without forcing an additional version bump or a
+re-staged changelog, as long as the bundle remains coherent at that commit.
+This makes a body-only reword of the current release commit pass without
+`--no-verify`.
 
 ## Related
 

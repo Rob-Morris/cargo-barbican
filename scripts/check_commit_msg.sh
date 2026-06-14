@@ -149,8 +149,8 @@ if [ -n "$parsed" ]; then
     exit 1
   fi
 
-  if [ "$changelog_staged" -ne 1 ]; then
-    printf >&2 '%s\n' "commit-msg: versioned subjects require staged changelog updates"
+  if [ "$changelog_staged" -ne 1 ] && [ "$head_matches_version" -ne 1 ]; then
+    printf >&2 '%s\n' "commit-msg: versioned subjects require staged changelog updates; only non-main branches may amend the current v$version commit without them"
     exit 1
   fi
 

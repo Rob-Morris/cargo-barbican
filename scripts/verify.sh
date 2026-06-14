@@ -58,6 +58,10 @@ off_main() {
   [ -n "$BRANCH" ] && [ "$BRANCH" != "main" ]
 }
 
+if [ "$MODE" != skip ]; then
+  sh scripts/tests/check_commit_msg_test.sh
+fi
+
 case "$MODE" in
   barbican)
     cargo run --locked --bin cargo-barbican -- audit

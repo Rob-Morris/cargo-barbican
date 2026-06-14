@@ -13,6 +13,8 @@ This repo ships opt-in distributed Git hooks:
   - [`scripts/verify.sh`](../../scripts/verify.sh)
   - [`scripts/check_pre_commit_canary.sh`](../../scripts/check_pre_commit_canary.sh)
   - [`scripts/check_commit_msg.sh`](../../scripts/check_commit_msg.sh)
+- behaviour tests for the shell checks:
+  - [`scripts/tests/check_commit_msg_test.sh`](../../scripts/tests/check_commit_msg_test.sh)
 
 Enable them locally with:
 
@@ -84,6 +86,10 @@ The default path dogfoods cargo-barbican by running:
 cargo run --locked --bin cargo-barbican -- audit
 cargo run --locked --bin cargo-barbican -- verify
 ```
+
+Outside `--skip`, it first runs the policy-script behaviour tests under
+[`scripts/tests/`](../../scripts/tests/) so the commit-subject gate stays
+covered.
 
 Because `verify` is the CI enforcement gate, it fails closed when the repo has
 not adopted `reviewed-targets.toml`. Off `main` only, contributors may use one
