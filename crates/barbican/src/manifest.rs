@@ -20,6 +20,10 @@ impl CargoDependencySourceKind {
     pub fn is_non_crates_io(self) -> bool {
         matches!(self, Self::Git | Self::Path | Self::AlternateRegistry)
     }
+
+    pub fn requires_exact_pin(self) -> bool {
+        matches!(self, Self::Registry | Self::AlternateRegistry)
+    }
 }
 
 impl fmt::Display for CargoDependencySourceKind {
@@ -67,6 +71,27 @@ pub struct CargoManifestDirectRequirement {
     name: String,
     source_kind: CargoDependencySourceKind,
     version_requirement: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CargoManifestPackage {
+    manifest_path: String,
+    name: String,
+    version: String,
+}
+
+impl CargoManifestPackage {
+    pub fn manifest_path(&self) -> &str {
+        &self.manifest_path
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
 }
 
 impl CargoManifestDirectRequirement {
@@ -136,22 +161,8 @@ pub fn parse_workspace_member_manifest_paths(
     text: &str,
 ) -> Result<Vec<String>, CargoManifestError> {
     let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
-    let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
-    let Some(workspace_value) = root_table.get("workspace") else {
+    let Some(members) = workspace_members(manifest_path, &root)? else {
         return Ok(Vec::new());
-    };
-    let Some(workspace_table) = workspace_value.as_table() else {
-        return Err(CargoManifestError::InvalidWorkspaceSection {
-            manifest_path: manifest_path.to_owned(),
-        });
-    };
-    let Some(members_value) = workspace_table.get("members") else {
-        return Ok(Vec::new());
-    };
-    let Some(members) = members_value.as_array() else {
-        return Err(CargoManifestError::InvalidWorkspaceMembers {
-            manifest_path: manifest_path.to_owned(),
-        });
     };
 
     members
@@ -170,6 +181,187 @@ pub fn parse_workspace_member_manifest_paths(
             })),
         })
         .collect()
+}
+
+pub fn parse_workspace_member_glob_roots(
+    manifest_path: &str,
+    text: &str,
+) -> Result<Vec<String>, CargoManifestError> {
+    let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    let Some(members) = workspace_members(manifest_path, &root)? else {
+        return Ok(Vec::new());
+    };
+
+    members
+        .iter()
+        .filter_map(|member| match member.as_str() {
+            Some(path) if contains_glob_metacharacter(path) => {
+                Some(workspace_member_glob_root(manifest_path, path))
+            }
+            Some(_) => None,
+            None => Some(Err(CargoManifestError::InvalidWorkspaceMembers {
+                manifest_path: manifest_path.to_owned(),
+            })),
+        })
+        .collect()
+}
+
+fn workspace_members<'a>(
+    manifest_path: &str,
+    root: &'a Value,
+) -> Result<Option<&'a Vec<Value>>, CargoManifestError> {
+    let Some(workspace_table) = workspace_table(manifest_path, root)? else {
+        return Ok(None);
+    };
+    let Some(members_value) = workspace_table.get("members") else {
+        return Ok(None);
+    };
+    let Some(members) = members_value.as_array() else {
+        return Err(CargoManifestError::InvalidWorkspaceMembers {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+
+    Ok(Some(members))
+}
+
+fn workspace_table<'a>(
+    manifest_path: &str,
+    root: &'a Value,
+) -> Result<Option<&'a toml::map::Map<String, Value>>, CargoManifestError> {
+    let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
+    let Some(workspace_value) = root_table.get("workspace") else {
+        return Ok(None);
+    };
+    let Some(workspace_table) = workspace_value.as_table() else {
+        return Err(CargoManifestError::InvalidWorkspaceSection {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+
+    Ok(Some(workspace_table))
+}
+
+fn workspace_member_glob_root(
+    manifest_path: &str,
+    path: &str,
+) -> Result<String, CargoManifestError> {
+    let mut root = Vec::new();
+    for component in Path::new(path).components() {
+        let Component::Normal(value) = component else {
+            return Err(CargoManifestError::InvalidWorkspaceMemberPath {
+                manifest_path: manifest_path.to_owned(),
+                member: path.to_owned(),
+            });
+        };
+        let value = value.to_string_lossy();
+        if contains_glob_metacharacter(&value) {
+            break;
+        }
+        root.push(value.into_owned());
+    }
+
+    if root.is_empty() {
+        Ok(".".to_owned())
+    } else {
+        Ok(root.join("/"))
+    }
+}
+
+pub fn parse_workspace_dependency_requirements(
+    manifest_path: &str,
+    text: &str,
+) -> Result<BTreeSet<CargoManifestDirectRequirement>, CargoManifestError> {
+    let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    let Some(workspace_table) = workspace_table(manifest_path, &root)? else {
+        return Ok(BTreeSet::new());
+    };
+
+    let mut dependencies = BTreeSet::new();
+    collect_direct_requirement_section(
+        manifest_path,
+        "workspace.dependencies",
+        workspace_table.get("dependencies"),
+        &mut dependencies,
+    )?;
+
+    Ok(dependencies)
+}
+
+pub fn parse_workspace_package_version(
+    manifest_path: &str,
+    text: &str,
+) -> Result<Option<String>, CargoManifestError> {
+    let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    let Some(workspace_table) = workspace_table(manifest_path, &root)? else {
+        return Ok(None);
+    };
+    let Some(package_value) = workspace_table.get("package") else {
+        return Ok(None);
+    };
+    let Some(package_table) = package_value.as_table() else {
+        return Err(CargoManifestError::InvalidWorkspacePackageSection {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+    let Some(version_value) = package_table.get("version") else {
+        return Ok(None);
+    };
+    let Some(version) = version_value.as_str() else {
+        return Err(CargoManifestError::InvalidWorkspacePackageVersion {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+
+    Ok(Some(version.to_owned()))
+}
+
+pub fn parse_manifest_package_identity(
+    manifest_path: &str,
+    text: &str,
+    workspace_package_version: Option<&str>,
+) -> Result<Option<CargoManifestPackage>, CargoManifestError> {
+    let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
+    let Some(package_value) = root_table.get("package") else {
+        return Ok(None);
+    };
+    let Some(package_table) = package_value.as_table() else {
+        return Err(CargoManifestError::InvalidPackageSection {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+    let Some(name_value) = package_table.get("name") else {
+        return Ok(None);
+    };
+    let Some(name) = name_value.as_str() else {
+        return Err(CargoManifestError::InvalidPackageName {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+    let Some(version_value) = package_table.get("version") else {
+        return Ok(None);
+    };
+    let version = match version_value {
+        Value::String(version) => version.as_str(),
+        Value::Table(table) if workspace_dependency_value(table)? => {
+            let Some(version) = workspace_package_version else {
+                return Ok(None);
+            };
+            version
+        }
+        _ => {
+            return Err(CargoManifestError::InvalidPackageVersion {
+                manifest_path: manifest_path.to_owned(),
+            });
+        }
+    };
+
+    Ok(Some(CargoManifestPackage {
+        manifest_path: manifest_path.to_owned(),
+        name: name.to_owned(),
+        version: version.to_owned(),
+    }))
 }
 
 fn contains_glob_metacharacter(path: &str) -> bool {
@@ -336,6 +528,16 @@ pub enum CargoManifestError {
         manifest_path: String,
         section: String,
     },
+    #[error("{manifest_path}: package section must be a table")]
+    InvalidPackageSection { manifest_path: String },
+    #[error("{manifest_path}: package name must be a string")]
+    InvalidPackageName { manifest_path: String },
+    #[error("{manifest_path}: package version must be a string")]
+    InvalidPackageVersion { manifest_path: String },
+    #[error("{manifest_path}: workspace package section must be a table")]
+    InvalidWorkspacePackageSection { manifest_path: String },
+    #[error("{manifest_path}: workspace package version must be a string")]
+    InvalidWorkspacePackageVersion { manifest_path: String },
     #[error("{manifest_path}: workspace section must be a table")]
     InvalidWorkspaceSection { manifest_path: String },
     #[error("{manifest_path}: workspace members must be an array of strings")]
@@ -355,7 +557,9 @@ pub enum CargoManifestError {
 mod tests {
     use super::{
         CargoDependencySourceKind, CargoManifestError, parse_manifest_dependencies,
-        parse_manifest_direct_requirements, parse_workspace_member_manifest_paths,
+        parse_manifest_direct_requirements, parse_manifest_package_identity,
+        parse_workspace_dependency_requirements, parse_workspace_member_glob_roots,
+        parse_workspace_member_manifest_paths, parse_workspace_package_version,
     };
 
     #[test]
@@ -520,6 +724,114 @@ members = ["crates/*", "app", "libs/core"]
         .expect("workspace should parse");
 
         assert_eq!(members, vec!["app/Cargo.toml", "libs/core/Cargo.toml"]);
+    }
+
+    #[test]
+    fn parses_workspace_member_glob_roots() {
+        let roots = parse_workspace_member_glob_roots(
+            "Cargo.toml",
+            r#"
+[workspace]
+members = ["crates/*", "libs/*/core", "app"]
+"#,
+        )
+        .expect("workspace should parse");
+
+        assert_eq!(roots, vec!["crates", "libs"]);
+    }
+
+    #[test]
+    fn parses_workspace_dependency_requirements() {
+        let dependencies = parse_workspace_dependency_requirements(
+            "Cargo.toml",
+            r#"
+[workspace.dependencies]
+serde = "=1.0.228"
+local = { path = "crates/local" }
+alt = { version = "=0.2.0", registry = "internal" }
+"#,
+        )
+        .expect("workspace dependencies should parse");
+
+        let rendered = dependencies
+            .iter()
+            .map(|dependency| {
+                format!(
+                    "{}:{}:{}:{}:{:?}",
+                    dependency.manifest_path(),
+                    dependency.section(),
+                    dependency.name(),
+                    dependency.source_kind(),
+                    dependency.version_requirement()
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rendered,
+            vec![
+                r#"Cargo.toml:workspace.dependencies:alt:alternate-registry:Some("=0.2.0")"#,
+                r#"Cargo.toml:workspace.dependencies:local:path:None"#,
+                r#"Cargo.toml:workspace.dependencies:serde:registry:Some("=1.0.228")"#,
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_manifest_package_name() {
+        let package = parse_manifest_package_identity(
+            "crates/app/Cargo.toml",
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+"#,
+            None,
+        )
+        .expect("manifest should parse");
+
+        let package = package.expect("package identity should exist");
+        assert_eq!(package.manifest_path(), "crates/app/Cargo.toml");
+        assert_eq!(package.name(), "app");
+        assert_eq!(package.version(), "0.1.0");
+
+        let virtual_manifest = parse_manifest_package_identity(
+            "Cargo.toml",
+            r#"
+[workspace]
+members = ["crates/*"]
+"#,
+            None,
+        )
+        .expect("manifest should parse");
+
+        assert_eq!(virtual_manifest, None);
+    }
+
+    #[test]
+    fn parses_workspace_inherited_package_versions() {
+        let workspace_version = parse_workspace_package_version(
+            "Cargo.toml",
+            r#"
+[workspace.package]
+version = "0.8.0"
+"#,
+        )
+        .expect("workspace package should parse");
+        let package = parse_manifest_package_identity(
+            "crates/app/Cargo.toml",
+            r#"
+[package]
+name = "app"
+version = { workspace = true }
+"#,
+            workspace_version.as_deref(),
+        )
+        .expect("manifest should parse")
+        .expect("package identity should exist");
+
+        assert_eq!(package.name(), "app");
+        assert_eq!(package.version(), "0.8.0");
     }
 
     #[test]

@@ -132,6 +132,20 @@ verification, such as descriptor-relative operations and no-follow resolution
 primitives where available (`openat2(RESOLVE_NO_SYMLINKS)` / `O_NOFOLLOW` on
 Unix-like systems), plus an equivalent Windows strategy.
 
+### Cross-Command Symlink Containment (Non-Sequenced)
+
+Workspace-member and review-record discovery currently use lexical path guards,
+but some filesystem reads still follow symlinks. A symlinked search root,
+symlinked member directory, or intermediate symlink inside a `review_record`
+path can read or probe files outside the repo when cargo-barbican is run on an
+untrusted checkout.
+
+This is pre-existing and repo-wide: `review`, `pin-check`, `assess`, and
+`inventory` all depend on the same discovery model. The intended hardening is
+to canonicalise the repo root once and assert every walked or read path remains
+within it before using the path. That closes the workspace-member discovery and
+intermediate-review-record symlink cases together.
+
 ### Reviewed-Target Source-Kind Enforcement (Non-Sequenced)
 
 Version-only reviewed targets are currently retained for backwards-compatible

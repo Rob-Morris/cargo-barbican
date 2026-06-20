@@ -27,6 +27,20 @@ impl ExactCrateSpec {
     }
 }
 
+pub fn parse_exact_version_requirement(
+    crate_name: &str,
+    requirement: &str,
+) -> Result<String, ExactVersionRequirementError> {
+    let Some(version) = requirement.strip_prefix('=') else {
+        return Err(ExactVersionRequirementError::MissingEquals);
+    };
+
+    ExactCrateSpec::from_parts(crate_name, version)
+        .map_err(ExactVersionRequirementError::InvalidVersion)?;
+
+    Ok(version.to_owned())
+}
+
 impl fmt::Display for ExactCrateSpec {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}@{}", self.crate_name, self.version)
@@ -104,9 +118,20 @@ pub enum ExactCrateSpecError {
     VersionRange(String),
 }
 
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum ExactVersionRequirementError {
+    #[error("exact version requirements must include a leading '='")]
+    MissingEquals,
+    #[error("invalid exact version requirement: {0}")]
+    InvalidVersion(#[source] ExactCrateSpecError),
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{ExactCrateSpec, ExactCrateSpecError};
+    use crate::{
+        ExactCrateSpec, ExactCrateSpecError, ExactVersionRequirementError,
+        parse_exact_version_requirement,
+    };
 
     #[test]
     fn parses_valid_exact_specs() {
@@ -188,5 +213,28 @@ mod tests {
 
             assert_eq!(error, ExactCrateSpecError::VersionRange(spec.to_owned()));
         }
+    }
+
+    #[test]
+    fn parses_exact_version_requirements() {
+        assert_eq!(
+            parse_exact_version_requirement("serde", "=1.0.228").expect("requirement should parse"),
+            "1.0.228"
+        );
+    }
+
+    #[test]
+    fn exact_version_requirements_distinguish_missing_equals_from_invalid_version() {
+        assert_eq!(
+            parse_exact_version_requirement("serde", "^1.0.228")
+                .expect_err("requirement should fail"),
+            ExactVersionRequirementError::MissingEquals
+        );
+
+        assert!(matches!(
+            parse_exact_version_requirement("serde", "=^1.0.228")
+                .expect_err("requirement should fail"),
+            ExactVersionRequirementError::InvalidVersion(ExactCrateSpecError::VersionRange(_))
+        ));
     }
 }

@@ -65,6 +65,7 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: PolicyCommand,
     },
+    Inventory,
     PinCheck {
         #[arg(long, default_value = REVIEWED_TARGETS_CONFIG_FILE)]
         config: PathBuf,

@@ -22,6 +22,7 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican resolve` | Base action | Update existing locked dependencies to exact versions. |
 | `cargo barbican assess` | Base assessment | Classify a dependency diff. |
 | `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption. |
+| `cargo barbican inventory` | Base audit | Report dependency inventory and reviewed-policy coverage. |
 | `cargo barbican pin-check` | Base policy gate | Enforce reviewed-target policy. |
 | `cargo barbican review` | Base review aid | Print a policy-focused review diff. |
 | `cargo barbican audit` | Base delegated gate | Run delegated advisory and source-policy checks. |
@@ -44,6 +45,18 @@ and run `pin-check` / `verify`.
 
 `policy init` does not certify existing dependencies. It only creates missing
 policy files and reports scaffold issues.
+
+Inspect the current dependency set, observational findings, and policy
+coverage gaps:
+
+```bash
+cargo barbican inventory
+```
+
+`inventory` is read-only. It reports direct dependencies, resolved
+`Cargo.lock` entries, exact-pin status, reviewed-target coverage, missing review
+records, non-crates.io sources, and uncovered crates.io packages. The current
+slice is offline and reports live graph execution surfaces as not collected.
 
 ### Before Adding A New Dependency
 
@@ -199,6 +212,15 @@ exist, direct requirements match when configured, resolved versions match
 `Cargo.lock`, checksums match when configured, and allowed execution surfaces
 refer to crates in the same reviewed family.
 
+Use `inventory` when you need an audit view rather than an enforcing gate:
+
+```bash
+cargo barbican inventory
+```
+
+It distinguishes a repo with no reviewed-target policy yet from a configured
+policy with uncovered dependencies or missing review records.
+
 ### Comparing Against Non-Git Baselines
 
 Most day-to-day use compares against `HEAD`. For generated, vendored, or
@@ -262,6 +284,7 @@ feature flags, registry URLs, or git/path specs as candidate specs.
 | `resolve` | Yes | Updates `Cargo.lock` through Cargo. |
 | `resolve --dry-run` | No | Uses a temporary workspace and prints a preview. |
 | `assess` | No | Reads manifests, lockfiles, policy files, and inspection evidence. |
+| `inventory` | No | Reads manifests, lockfile, and reviewed-target policy to report findings and coverage gaps. |
 | `pin-check` | No | Local-only reviewed-target enforcement. |
 | `review` | No | Prints review-focused diffs. |
 | `audit` | No intended repo mutation | Delegated tools may update their own caches. |
@@ -529,6 +552,34 @@ The output reports each scaffold item as created, already present, or blocked.
 On success it points to the manual adoption guide. Init is intentionally not a
 review command: it does not add reviewed families, write review records, or
 certify existing dependencies.
+
+### `cargo barbican inventory`
+
+Prints a read-only dependency inventory and reviewed-policy coverage audit for
+the current workspace.
+
+```bash
+cargo barbican inventory
+```
+
+The first slice is offline and local-only. It reads:
+
+- `Cargo.lock`
+- workspace `Cargo.toml` manifests
+- root `[workspace.dependencies]` used by `{ workspace = true }`
+- `reviewed-targets.toml` when present
+- checked-in review-record paths
+
+The report includes rollups, direct dependency exact-pin status, resolved
+crates.io packages and checksums, non-crates.io sources, reviewed-family
+coverage, declared allowed execution surfaces, missing review records, and
+uncovered resolved crates. Live graph execution surfaces are reported as not
+collected until the later metadata-backed slice lands.
+
+Missing `reviewed-targets.toml` is not an error. Malformed policy, malformed
+workspace manifests, and missing or malformed `Cargo.lock` fail closed.
+Reported observational findings and policy coverage gaps do not change the
+exit code; this command is an audit view, not an enforcement gate.
 
 ### `cargo barbican pin-check`
 

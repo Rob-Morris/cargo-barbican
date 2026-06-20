@@ -86,11 +86,8 @@ impl ReviewedDirectDependencyCheck {
     pub fn is_success(&self) -> bool {
         !self.observed.is_empty()
             && self.observed.iter().all(|entry| {
-                matches!(
-                    entry.source_kind(),
-                    CargoDependencySourceKind::Registry
-                        | CargoDependencySourceKind::AlternateRegistry
-                ) && entry.version_requirement() == Some(self.expected_requirement.as_str())
+                entry.source_kind().requires_exact_pin()
+                    && entry.version_requirement() == Some(self.expected_requirement.as_str())
             })
     }
 }

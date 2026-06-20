@@ -5,6 +5,7 @@ mod audit;
 mod diff_render;
 mod gatehouse;
 mod inspect;
+mod inventory;
 mod pin_check;
 mod policy;
 mod resolve;
@@ -25,7 +26,7 @@ use barbican::{
     ReleaseAgeOutcome, ReleaseAgeReport, ReviewedReleaseAgeException, ReviewedTargets,
     ReviewedTargetsError, check_release_age_at, format_age, parse_lockfile,
     parse_manifest_dependencies, parse_manifest_direct_requirements, parse_reviewed_targets_toml,
-    parse_workspace_member_manifest_paths,
+    parse_workspace_member_glob_roots, parse_workspace_member_manifest_paths,
 };
 use clap::Parser;
 
@@ -170,6 +171,7 @@ where
             gatehouse::run_gatehouse(command, current_dir, client, runner, now, stdout, stderr)
         }
         Command::Policy { command } => policy::run_policy(command, current_dir, stdout),
+        Command::Inventory => inventory::run_inventory(current_dir, stdout),
         Command::PinCheck { config } => pin_check::run_pin_check(&config, current_dir, stdout),
         Command::Review { base_dir } => {
             review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)
@@ -514,19 +516,27 @@ pub(super) fn load_manifest_dependencies_from_root(
 pub(super) fn load_current_manifest_direct_requirements(
     current_dir: &Path,
 ) -> Result<Vec<barbican::CargoManifestDirectRequirement>, CommandError> {
+    parse_manifest_requirements(&load_manifest_texts_from_root(current_dir)?)
+}
+
+pub(super) fn parse_manifest_requirements(
+    manifest_texts: &[(String, String)],
+) -> Result<Vec<barbican::CargoManifestDirectRequirement>, CommandError> {
     let mut dependencies = Vec::new();
 
-    for (relative_display, text) in load_manifest_texts_from_root(current_dir)? {
+    for (relative_display, text) in manifest_texts {
         dependencies.extend(parse_manifest_direct_requirement_text(
-            &relative_display,
-            &text,
+            relative_display,
+            text,
         )?);
     }
 
     Ok(dependencies)
 }
 
-fn load_manifest_texts_from_root(root_dir: &Path) -> Result<Vec<(String, String)>, CommandError> {
+pub(super) fn load_manifest_texts_from_root(
+    root_dir: &Path,
+) -> Result<Vec<(String, String)>, CommandError> {
     let manifest_paths = workspace_manifest_paths(root_dir)?;
     let mut manifests = Vec::new();
 
@@ -756,16 +766,46 @@ pub(super) fn workspace_manifest_paths(current_dir: &Path) -> Result<Vec<PathBuf
         paths.insert(PathBuf::from(member));
     }
 
-    let crates_dir = current_dir.join("crates");
-
-    if crates_dir.is_dir() {
-        collect_relative_files_matching(&crates_dir, current_dir, &mut paths, &mut |path| {
-            path.file_name().is_some_and(|name| name == "Cargo.toml")
-        })
-        .map_err(CommandError::Io)?;
+    let mut search_roots = parse_workspace_member_glob_roots("Cargo.toml", &root_manifest_text)
+        .map_err(|source| CommandError::ManifestParse {
+            path: "Cargo.toml".to_owned(),
+            source,
+        })?
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<BTreeSet<_>>();
+    search_roots.insert(PathBuf::from("crates"));
+    for relative_root in minimal_search_roots(search_roots) {
+        let root = current_dir.join(relative_root);
+        if root.is_dir() {
+            collect_relative_files_matching(&root, current_dir, &mut paths, &mut |path| {
+                path.file_name().is_some_and(|name| name == "Cargo.toml")
+            })
+            .map_err(CommandError::Io)?;
+        }
     }
 
     Ok(paths.into_iter().collect())
+}
+
+fn minimal_search_roots(roots: BTreeSet<PathBuf>) -> Vec<PathBuf> {
+    if roots.iter().any(|root| root == Path::new(".")) {
+        return vec![PathBuf::from(".")];
+    }
+
+    let mut selected = Vec::new();
+
+    for root in roots {
+        if selected
+            .iter()
+            .any(|selected_root: &PathBuf| root.starts_with(selected_root))
+        {
+            continue;
+        }
+        selected.push(root);
+    }
+
+    selected
 }
 
 pub(super) fn review_paths(current_dir: &Path) -> Result<Vec<PathBuf>, CommandError> {
@@ -798,6 +838,12 @@ where
         let path = entry.path();
 
         if entry.file_type()?.is_dir() {
+            if path
+                .file_name()
+                .is_some_and(|name| name == ".git" || name == "target")
+            {
+                continue;
+            }
             collect_relative_files_matching(&path, repo_root, paths, include_file)?;
             continue;
         }
@@ -838,10 +884,12 @@ fn git_show_reports_missing_path_at_ref(error: &RunnerError, path: &str, base_re
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::fs;
+    use std::path::PathBuf;
 
     use super::scratch_dir::ScratchDir;
-    use super::{review_record_exists, validate_crates_io_base_url};
+    use super::{minimal_search_roots, review_record_exists, validate_crates_io_base_url};
 
     #[test]
     fn accepts_https_crates_io_base_urls() {
@@ -877,6 +925,26 @@ mod tests {
         ] {
             validate_crates_io_base_url(url).expect_err("base URL should fail");
         }
+    }
+
+    #[test]
+    fn minimal_search_roots_collapses_nested_and_top_level_roots() {
+        assert_eq!(
+            minimal_search_roots(BTreeSet::from([
+                PathBuf::from("libs"),
+                PathBuf::from("libs/core"),
+                PathBuf::from("tools"),
+            ])),
+            vec![PathBuf::from("libs"), PathBuf::from("tools")]
+        );
+        assert_eq!(
+            minimal_search_roots(BTreeSet::from([
+                PathBuf::from("."),
+                PathBuf::from("crates"),
+                PathBuf::from("libs"),
+            ])),
+            vec![PathBuf::from(".")]
+        );
     }
 
     #[cfg(unix)]

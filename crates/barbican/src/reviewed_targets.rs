@@ -5,7 +5,9 @@ use std::path::Component;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{ExactCrateSpec, Sha256Digest};
+use crate::{
+    ExactCrateSpec, ExactVersionRequirementError, Sha256Digest, parse_exact_version_requirement,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReviewedTargets {
@@ -119,12 +121,12 @@ pub enum ExecutionSurfaceKind {
 }
 
 impl ExecutionSurfaceKind {
-    fn parse(value: &str) -> Result<Self, ()> {
+    fn parse(value: &str) -> Option<Self> {
         match value {
-            "build-rs" => Ok(Self::BuildRs),
-            "proc-macro" => Ok(Self::ProcMacro),
-            "native-sys" => Ok(Self::NativeSys),
-            _ => Err(()),
+            "build-rs" => Some(Self::BuildRs),
+            "proc-macro" => Some(Self::ProcMacro),
+            "native-sys" => Some(Self::NativeSys),
+            _ => None,
         }
     }
 }
@@ -247,8 +249,15 @@ pub(crate) struct ObservedResolvedTarget {
 pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, ReviewedTargetsError> {
     let raw: RawReviewedTargets = toml::from_str(text).map_err(ReviewedTargetsError::Parse)?;
     let mut rust_families = Vec::with_capacity(raw.rust.families.len());
+    let mut family_names = BTreeSet::new();
 
     for family in raw.rust.families {
+        if !family_names.insert(family.name.clone()) {
+            return Err(ReviewedTargetsError::DuplicateFamilyName {
+                family: family.name,
+            });
+        }
+
         if review_record_path_is_unsafe(&family.review_record) {
             return Err(ReviewedTargetsError::UnsafeReviewRecordPath {
                 family: family.name,
@@ -263,21 +272,24 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
         }
 
         for (crate_name, requirement) in &family.direct {
-            let Some(version) = requirement.strip_prefix('=') else {
-                return Err(ReviewedTargetsError::DirectRequirementNotExact {
-                    family: family.name.clone(),
-                    crate_name: crate_name.clone(),
-                    requirement: requirement.clone(),
-                });
-            };
-            ExactCrateSpec::from_parts(crate_name, version).map_err(|source| {
-                ReviewedTargetsError::InvalidDirectRequirement {
-                    family: family.name.clone(),
-                    crate_name: crate_name.clone(),
-                    requirement: requirement.clone(),
-                    source,
+            match parse_exact_version_requirement(crate_name, requirement) {
+                Ok(_) => {}
+                Err(ExactVersionRequirementError::MissingEquals) => {
+                    return Err(ReviewedTargetsError::DirectRequirementNotExact {
+                        family: family.name.clone(),
+                        crate_name: crate_name.clone(),
+                        requirement: requirement.clone(),
+                    });
                 }
-            })?;
+                Err(ExactVersionRequirementError::InvalidVersion(source)) => {
+                    return Err(ReviewedTargetsError::InvalidDirectRequirement {
+                        family: family.name.clone(),
+                        crate_name: crate_name.clone(),
+                        requirement: requirement.clone(),
+                        source,
+                    });
+                }
+            }
         }
 
         let mut resolved = BTreeMap::new();
@@ -337,7 +349,7 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
 
             let mut surfaces = BTreeSet::new();
             for raw_surface in raw_surfaces {
-                let surface = ExecutionSurfaceKind::parse(&raw_surface).map_err(|()| {
+                let surface = ExecutionSurfaceKind::parse(&raw_surface).ok_or_else(|| {
                     ReviewedTargetsError::InvalidAllowedSurface {
                         family: family.name.clone(),
                         crate_name: crate_name.clone(),
@@ -401,6 +413,8 @@ pub enum ReviewedTargetsError {
     Parse(#[source] toml::de::Error),
     #[error("family {family} has no resolved Cargo.lock targets")]
     EmptyResolvedSet { family: String },
+    #[error("reviewed family names must be unique: {family}")]
+    DuplicateFamilyName { family: String },
     #[error(
         "family {family} direct requirement for {crate_name} must be exact and include a leading '=': {requirement}"
     )]
@@ -648,6 +662,31 @@ serde = "1.0.228"
     }
 
     #[test]
+    fn rejects_invalid_exact_direct_requirements() {
+        let error = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=^1.0.228"
+
+[rust.families.resolved]
+serde = "1.0.228"
+"#,
+        )
+        .expect_err("invalid exact direct requirement should fail");
+
+        assert!(matches!(
+            error,
+            ReviewedTargetsError::InvalidDirectRequirement { .. }
+        ));
+    }
+
+    #[test]
     fn rejects_families_without_resolved_targets() {
         let error = parse_reviewed_targets_toml(
             r#"
@@ -663,6 +702,35 @@ review_record = "docs/dependency-reviews/2026-05-27-serde.md"
         assert!(matches!(
             error,
             ReviewedTargetsError::EmptyResolvedSet { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_duplicate_family_names() {
+        let error = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/serde-a.md"
+
+[rust.families.resolved]
+serde = "1.0.228"
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/serde-b.md"
+
+[rust.families.resolved]
+serde_json = "1.0.145"
+"#,
+        )
+        .expect_err("duplicate family names should fail");
+
+        assert!(matches!(
+            error,
+            ReviewedTargetsError::DuplicateFamilyName { family } if family == "serde-family"
         ));
     }
 

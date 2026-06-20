@@ -162,6 +162,35 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 - adoption-guidance oriented: successful output points operators to the manual
   adoption guide before `pin-check` / `verify`
 
+`cargo barbican inventory` is currently:
+
+- a read-only whole-repo dependency inventory and reviewed-policy coverage
+  audit
+- offline in the first slice: it reads `Cargo.lock`, workspace manifests, root
+  `[workspace.dependencies]`, optional `reviewed-targets.toml`, and checked-in
+  review-record facts
+- pure at the library seam: `barbican` builds an `Inventory` model from parsed
+  inputs, while `cargo-barbican` owns filesystem reads and rendering
+- adoption-friendly: absent `reviewed-targets.toml` is reported as no policy
+  configured rather than failing
+- fail-closed on malformed required inputs: missing or malformed `Cargo.lock`,
+  malformed manifests, and malformed reviewed-target policy stop the command
+- gap-oriented rather than enforcing: non-exact direct pins and non-crates.io
+  sources are reported as observational findings, while missing review records
+  and uncovered resolved crates are reported as policy coverage gaps; neither
+  changes the exit code
+- scoped to Cargo's ordinary crates.io source identity: source replacement or
+  mirror configurations that rewrite the lockfile source string are outside the
+  supported coverage model for this slice and may be reported as
+  non-crates.io sources
+- approximate about workspace membership in this offline slice: member
+  discovery uses local manifest paths and directory walks rather than Cargo's
+  exact glob-depth and `[workspace] exclude` semantics, so nested or excluded
+  non-member manifests under walked roots can appear in the inventory; precise
+  member resolution belongs to the metadata-backed slice
+- explicit about slice boundaries: live graph execution surfaces are reported
+  as not collected until the metadata-backed slice lands
+
 The reviewed-target enforcement baseline is:
 
 - repo-root `reviewed-targets.toml` is the machine-enforced source of truth
@@ -218,6 +247,12 @@ Contract notes:
   network during enforcement
 - when a structured `checksum_sha256` is present, `pin-check` fails closed on
   checksum drift even if the resolved version still matches
+- inventory coverage is version-level: a resolved crate is considered covered
+  when its name and version appear in a reviewed family; checksum drift remains
+  the `pin-check` / `verify` gate
+- inventory treats review-record backing as a separate policy signal: a
+  resolved crate can be version-covered by a family whose review record is
+  missing, and that missing record is reported as its own gap
 - `allowed_surfaces` accepts exactly `build-rs`, `proc-macro`, and
   `native-sys`; unknown identifiers, empty lists, and crates absent from the
   same family `resolved` map fail closed

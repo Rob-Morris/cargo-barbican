@@ -85,6 +85,7 @@ current implemented surface is:
 - `cargo barbican inspect`
 - `cargo barbican gatehouse candidate`
 - `cargo barbican policy init`
+- `cargo barbican inventory`
 - `cargo barbican pin-check`
 - `cargo barbican review`
 - `cargo barbican audit`
@@ -120,6 +121,9 @@ The current intake layer now includes the first pre-add deep-review slice:
 - `cargo barbican policy init` exists as the deterministic policy scaffold
   command for consumer adoption; it creates missing explicit policy files but
   does not review or certify existing dependencies
+- `cargo barbican inventory` exists as the first read-only dependency
+  inventory and policy-coverage audit; the current slice is offline and reports
+  live execution surfaces as not collected
 - `cargo barbican pin-check` now exists as the first reviewed-target
   enforcement surface over repo-root `reviewed-targets.toml`
 - `pin-check` now validates that every active reviewed family points at a real

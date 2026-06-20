@@ -150,6 +150,29 @@ cargo barbican policy init
     The command prints an action report and next-step guidance pointing to
     the manual adoption guide.
 
+cargo barbican inventory
+    Print a read-only, whole-repo dependency inventory and policy-coverage
+    audit. The first slice is offline and local-only. It:
+    - reads `Cargo.lock` as the resolved inventory source
+    - reads workspace `Cargo.toml` manifests, including root
+      `[workspace.dependencies]` used by `{ workspace = true }` member
+      dependencies
+    - reports direct dependency exact-pin status and whether a requirement was
+      inherited from the workspace root
+    - buckets non-crates.io sources separately from ordinary uncovered
+      crates.io packages
+    - reads `reviewed-targets.toml` when present and reports reviewed-family
+      coverage, declared allowed execution surfaces, and missing review records
+      as policy coverage gaps
+    - reports live graph execution surfaces as `not collected` in this offline
+      slice
+    Missing `reviewed-targets.toml` is not an error; the report states that no
+    reviewed-target policy is configured yet. Malformed `reviewed-targets.toml`,
+    malformed workspace manifests, and missing or malformed `Cargo.lock` fail
+    closed because inventory facts cannot be established.
+    Observational findings and policy coverage gaps are informational, and the
+    command returns exit 0 when it can render the report.
+
 cargo barbican pin-check [--config reviewed-targets.toml]
     Check active reviewed Rust families against the current workspace manifests
     and `Cargo.lock`.

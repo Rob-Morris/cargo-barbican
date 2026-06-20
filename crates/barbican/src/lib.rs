@@ -8,6 +8,7 @@ pub mod assessment;
 pub mod config;
 pub mod crates_io;
 pub mod inspect;
+pub mod inventory;
 pub mod lockfile;
 pub mod manifest;
 pub mod metadata;
@@ -33,14 +34,21 @@ pub use crates_io::{
 pub use inspect::{
     CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate, inspect_published_crate_at,
 };
+pub use inventory::{
+    Inventory, InventoryDeclaredSurface, InventoryDirectDependency, InventoryDirectRequirements,
+    InventoryGap, InventoryNonCratesIoSource, InventoryResolvedCrate, InventoryReviewedFamily,
+    InventoryRollup, ReviewRecordFact, WorkspacePackageIdentity, build_inventory,
+};
 pub use lockfile::{
     CRATES_IO_SOURCE, LockedChecksumChange, LockedPackage, Lockfile, LockfileError,
     added_crates_io_specs, changed_crates_io_checksums, parse_lockfile,
 };
 pub use manifest::{
     CargoDependencySourceKind, CargoManifestDependency, CargoManifestDirectRequirement,
-    CargoManifestError, parse_manifest_dependencies, parse_manifest_direct_requirements,
-    parse_workspace_member_manifest_paths,
+    CargoManifestError, CargoManifestPackage, parse_manifest_dependencies,
+    parse_manifest_direct_requirements, parse_manifest_package_identity,
+    parse_workspace_dependency_requirements, parse_workspace_member_glob_roots,
+    parse_workspace_member_manifest_paths, parse_workspace_package_version,
 };
 pub use metadata::{
     CargoMetadata, CargoMetadataError, MetadataPackageSurfaces, package_surfaces,
@@ -60,5 +68,8 @@ pub use reviewed_targets::{
     parse_reviewed_targets_toml,
 };
 pub use sha256::{Sha256Digest, Sha256DigestError};
-pub use spec::{ExactCrateSpec, ExactCrateSpecError};
+pub use spec::{
+    ExactCrateSpec, ExactCrateSpecError, ExactVersionRequirementError,
+    parse_exact_version_requirement,
+};
 pub use time::OffsetDateTime;
