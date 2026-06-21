@@ -19,8 +19,39 @@ impl CratesIoClient for FakeCratesIoClient {
     }
 }
 
-#[derive(Default)]
-struct FakeCommandRunner;
+struct FakeCommandRunner {
+    frozen_metadata_result: Result<String, String>,
+    frozen_metadata_calls: AtomicU64,
+}
+
+impl Default for FakeCommandRunner {
+    fn default() -> Self {
+        Self {
+            frozen_metadata_result: Ok(default_metadata_json().to_owned()),
+            frozen_metadata_calls: AtomicU64::new(0),
+        }
+    }
+}
+
+impl FakeCommandRunner {
+    fn with_frozen_metadata(metadata: impl Into<String>) -> Self {
+        Self {
+            frozen_metadata_result: Ok(metadata.into()),
+            frozen_metadata_calls: AtomicU64::new(0),
+        }
+    }
+
+    fn with_frozen_metadata_error(message: impl Into<String>) -> Self {
+        Self {
+            frozen_metadata_result: Err(message.into()),
+            frozen_metadata_calls: AtomicU64::new(0),
+        }
+    }
+
+    fn frozen_metadata_calls(&self) -> u64 {
+        self.frozen_metadata_calls.load(Ordering::Relaxed)
+    }
+}
 
 impl CommandRunner for FakeCommandRunner {
     fn git_show(&self, _current_dir: &Path, object: &str) -> Result<String, RunnerError> {
@@ -29,6 +60,11 @@ impl CommandRunner for FakeCommandRunner {
 
     fn cargo_metadata(&self, _current_dir: &Path) -> Result<String, RunnerError> {
         Err(runner_error("unexpected cargo metadata"))
+    }
+
+    fn cargo_metadata_frozen(&self, _current_dir: &Path) -> Result<String, RunnerError> {
+        self.frozen_metadata_calls.fetch_add(1, Ordering::Relaxed);
+        self.frozen_metadata_result.clone().map_err(runner_error)
     }
 
     fn cargo_update_precise(
@@ -104,7 +140,8 @@ serde = ["proc-macro"]
     )
     .expect("reviewed targets should write");
 
-    let (exit_code, stdout, stderr) = run_inventory(&temp_dir);
+    let runner = FakeCommandRunner::with_frozen_metadata(surface_metadata_json());
+    let (exit_code, stdout, stderr) = run_inventory_with_runner(&temp_dir, &runner);
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(stderr.is_empty());
@@ -113,7 +150,11 @@ serde = ["proc-macro"]
     assert!(stdout.contains("serde crates/app/Cargo.toml:dependencies =1.0.228 [exact inherited; source=workspace; effective-source=registry]"));
     assert!(stdout.contains("alt crates/app/Cargo.toml:dependencies 1 [not exact; source=alternate-registry; effective-source=alternate-registry]"));
     assert!(stdout.contains("local crates/app/Cargo.toml:dependencies (no version) [not applicable; source=path; effective-source=path]"));
-    assert!(stdout.contains("live graph surfaces: not collected in this offline slice"));
+    assert!(stdout.contains("live graph surface status: collected via cargo metadata --frozen"));
+    assert!(stdout.contains("serde@1.0.228 proc-macro (declared)"));
+    assert!(stdout.contains("loose@0.1.0 build-rs (undeclared)"));
+    assert!(stdout.contains("local@0.1.0 native-sys (undeclared)"));
+    assert!(!stdout.contains("app@0.1.0 build-rs"));
     assert!(stdout.contains("serde@1.0.228 proc-macro allowed by serde-family"));
     assert!(stdout.contains(
         "serde-family: 1 direct, 1 resolved, docs/dependency-reviews/serde.md (record missing)"
@@ -136,12 +177,27 @@ serde = ["proc-macro"]
     assert!(!observational.contains("non-crates.io dependency source for explicit-app@0.1.0"));
     assert!(!observational.contains("missing review record for family serde-family"));
     assert!(!observational.contains("resolved crates.io package is not covered"));
+    assert!(!observational.contains("live execution surface is not declared"));
     assert!(policy.contains(
         "missing review record for family serde-family: docs/dependency-reviews/serde.md"
     ));
     assert!(
         policy.contains(
             "resolved crates.io package is not covered by any reviewed family: loose@0.1.0"
+        )
+    );
+    assert!(policy.contains(
+        "live execution surface is not declared in reviewed policy: loose@0.1.0 build-rs"
+    ));
+    assert!(policy.contains(
+        "live execution surface is not declared in reviewed policy: local@0.1.0 native-sys"
+    ));
+    assert!(!policy.contains(
+        "live execution surface is not declared in reviewed policy: serde@1.0.228 proc-macro"
+    ));
+    assert!(
+        !policy.contains(
+            "live execution surface is not declared in reviewed policy: app@0.1.0 build-rs"
         )
     );
     assert!(!policy.contains("direct dependency loose"));
@@ -156,11 +212,13 @@ fn inventory_without_reviewed_targets_reports_no_policy() {
     let temp_dir = fresh_temp_dir();
     write_inventory_fixture(&temp_dir);
 
-    let (exit_code, stdout, stderr) = run_inventory(&temp_dir);
+    let runner = FakeCommandRunner::with_frozen_metadata(surface_metadata_json());
+    let (exit_code, stdout, stderr) = run_inventory_with_runner(&temp_dir, &runner);
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(stderr.is_empty());
     assert!(stdout.contains("reviewed-targets.toml: not configured"));
+    assert!(stdout.contains("live graph surface status: collected via cargo metadata --frozen"));
     assert!(stdout.contains("no policy configured yet; resolved crates are not classified as slipped-through policy gaps"));
     let observational =
         section_between(&stdout, "Observational findings:", "Policy coverage gaps:");
@@ -176,6 +234,20 @@ fn inventory_without_reviewed_targets_reports_no_policy() {
     assert!(observational.contains(
         "non-crates.io dependency source for app@0.1.0: git+https://example.invalid/app"
     ));
+    assert!(observational.contains(
+        "live execution surface is not declared in reviewed policy: serde@1.0.228 proc-macro"
+    ));
+    assert!(observational.contains(
+        "live execution surface is not declared in reviewed policy: loose@0.1.0 build-rs"
+    ));
+    assert!(observational.contains(
+        "live execution surface is not declared in reviewed policy: local@0.1.0 native-sys"
+    ));
+    assert!(
+        !observational.contains(
+            "live execution surface is not declared in reviewed policy: app@0.1.0 build-rs"
+        )
+    );
     assert!(!observational.contains("non-crates.io dependency source for explicit-app@0.1.0"));
     assert!(stdout.contains("Policy coverage gaps:\n  none\n"));
 }
@@ -193,6 +265,11 @@ fn inventory_reports_configured_empty_policy_without_gaps() {
     assert!(stdout.contains("reviewed-targets.toml: configured"));
     assert!(stdout.contains("reviewed-targets.toml has no active Rust families"));
     assert!(stdout.contains("declared allowed surfaces: none"));
+    assert!(stdout.contains("live graph surface status: collected via cargo metadata --frozen"));
+    assert!(stdout.contains("live graph surfaces: collected"));
+    assert!(stdout.contains(
+        "live graph surface findings: no undeclared build.rs / proc-macro / native-sys surfaces detected"
+    ));
     assert!(stdout.contains("Observational findings:\n  none\n"));
     assert!(stdout.contains("Policy coverage gaps:\n  none\n"));
     assert!(
@@ -285,6 +362,81 @@ fn inventory_escapes_control_characters_in_rendered_fields() {
 }
 
 #[test]
+fn inventory_renders_offline_report_when_frozen_metadata_fails() {
+    let temp_dir = fresh_temp_dir();
+    write_inventory_fixture(&temp_dir);
+    let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
+    let client = FakeCratesIoClient;
+    let runner = FakeCommandRunner::with_frozen_metadata_error(
+        "the lock file needs to be updated but --frozen was passed\u{9b}[2K",
+    );
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+    let stdout = String::from_utf8(stdout).expect("stdout should be utf8");
+    let stderr = String::from_utf8(stderr).expect("stderr should be utf8");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert_eq!(runner.frozen_metadata_calls(), 1);
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("Dependency inventory:"));
+    assert!(
+        stdout.contains(
+            "live graph surfaces: NOT COLLECTED - investigate before trusting this report"
+        )
+    );
+    assert!(stdout.contains(
+        "live graph surface status: not collected; live graph surface collection failed: the lock file needs to be updated but --frozen was passed\\x9b[2K"
+    ));
+    assert!(stdout.contains(
+        "live graph surface remediation: resolve the reported graph or metadata issue, then rerun inventory"
+    ));
+    assert!(stdout.contains("Direct dependencies:"));
+    assert!(stdout.contains("Policy coverage gaps:"));
+    assert!(
+        stdout.contains(
+            "Resolve live graph surface collection before trusting this inventory report."
+        )
+    );
+}
+
+#[test]
+fn inventory_not_collected_state_prevents_clean_next_action() {
+    let temp_dir = fresh_temp_dir();
+    write_workspace_only_fixture(&temp_dir);
+    fs::write(temp_dir.join("reviewed-targets.toml"), "[rust]\n").expect("policy should write");
+
+    let runner = FakeCommandRunner::with_frozen_metadata_error("invalid metadata package: évil");
+    let (exit_code, stdout, stderr) = run_inventory_with_runner(&temp_dir, &runner);
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("reviewed-targets.toml: configured"));
+    assert!(stdout.contains("Observational findings:\n  none\n"));
+    assert!(stdout.contains("Policy coverage gaps:\n  none\n"));
+    assert!(
+        stdout.contains(
+            "live graph surfaces: NOT COLLECTED - investigate before trusting this report"
+        )
+    );
+    assert!(stdout.contains(
+        "live graph surface status: not collected; live graph surface collection failed: invalid metadata package: évil"
+    ));
+    assert!(
+        stdout.contains(
+            "Resolve live graph surface collection before trusting this inventory report."
+        )
+    );
+    assert!(
+        !stdout.contains(
+            "Run `cargo barbican pin-check` or `cargo barbican verify` to enforce policy."
+        )
+    );
+}
+
+#[test]
 fn inventory_fails_on_malformed_reviewed_targets() {
     let temp_dir = fresh_temp_dir();
     write_inventory_fixture(&temp_dir);
@@ -292,7 +444,7 @@ fn inventory_fails_on_malformed_reviewed_targets() {
 
     let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
     let client = FakeCratesIoClient;
-    let runner = FakeCommandRunner;
+    let runner = FakeCommandRunner::default();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -315,7 +467,7 @@ fn inventory_fails_when_lockfile_is_missing() {
 
     let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
     let client = FakeCratesIoClient;
-    let runner = FakeCommandRunner;
+    let runner = FakeCommandRunner::default();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -328,20 +480,77 @@ fn inventory_fails_when_lockfile_is_missing() {
 }
 
 fn run_inventory(temp_dir: &Path) -> (ExitCode, String, String) {
+    let runner = FakeCommandRunner::default();
+
+    run_inventory_with_runner(temp_dir, &runner)
+}
+
+fn run_inventory_with_runner(
+    temp_dir: &Path,
+    runner: &FakeCommandRunner,
+) -> (ExitCode, String, String) {
     let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
     let client = FakeCratesIoClient;
-    let runner = FakeCommandRunner;
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
-    let exit_code = run_cli_with_runner(cli, temp_dir, &client, &runner, &mut stdout, &mut stderr)
+    let exit_code = run_cli_with_runner(cli, temp_dir, &client, runner, &mut stdout, &mut stderr)
         .expect("command should run");
+    assert_eq!(runner.frozen_metadata_calls(), 1);
 
     (
         exit_code,
         String::from_utf8(stdout).expect("stdout should be utf8"),
         String::from_utf8(stderr).expect("stderr should be utf8"),
     )
+}
+
+fn default_metadata_json() -> &'static str {
+    r#"{
+  "packages": [],
+  "workspace_members": [],
+  "resolve": {"nodes": []}
+}"#
+}
+
+fn surface_metadata_json() -> &'static str {
+    r#"{
+  "packages": [
+    {
+      "name": "app",
+      "id": "path+file:///workspace/crates/app#app@0.1.0",
+      "version": "0.1.0",
+      "targets": [{"kind": ["custom-build"]}]
+    },
+    {
+      "name": "explicit-app",
+      "id": "path+file:///workspace/app#explicit-app@0.1.0",
+      "version": "0.1.0",
+      "targets": []
+    },
+    {
+      "name": "serde",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "version": "1.0.228",
+      "targets": [{"kind": ["proc-macro"]}]
+    },
+    {
+      "name": "loose",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#loose@0.1.0",
+      "version": "0.1.0",
+      "targets": [{"kind": ["custom-build"]}]
+    },
+    {
+      "name": "local",
+      "id": "path+file:///workspace/crates/local#local@0.1.0",
+      "version": "0.1.0",
+      "links": "local",
+      "targets": []
+    }
+  ],
+  "workspace_members": ["path+file:///workspace/crates/app#app@0.1.0"],
+  "resolve": {"nodes": []}
+}"#
 }
 
 fn write_inventory_fixture(root: &Path) {

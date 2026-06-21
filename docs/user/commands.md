@@ -55,8 +55,11 @@ cargo barbican inventory
 
 `inventory` is read-only. It reports direct dependencies, resolved
 `Cargo.lock` entries, exact-pin status, reviewed-target coverage, missing review
-records, non-crates.io sources, and uncovered crates.io packages. The current
-slice is offline and reports live graph execution surfaces as not collected.
+records, non-crates.io sources, uncovered crates.io packages, and live graph
+execution surfaces collected with `cargo metadata --frozen`. Live surfaces are
+cross-referenced against declared `allowed_surfaces`; if metadata collection
+fails, inventory still renders the offline sections and marks live graph
+surfaces as not collected.
 
 ### Before Adding A New Dependency
 
@@ -562,22 +565,27 @@ the current workspace.
 cargo barbican inventory
 ```
 
-The first slice is offline and local-only. It reads:
+The command is local-only and read-only. It reads:
 
 - `Cargo.lock`
 - workspace `Cargo.toml` manifests
 - root `[workspace.dependencies]` used by `{ workspace = true }`
 - `reviewed-targets.toml` when present
 - checked-in review-record paths
+- `cargo metadata --format-version 1 --frozen` output for live graph execution
+  surfaces
 
 The report includes rollups, direct dependency exact-pin status, resolved
 crates.io packages and checksums, non-crates.io sources, reviewed-family
 coverage, declared allowed execution surfaces, missing review records, and
-uncovered resolved crates. Live graph execution surfaces are reported as not
-collected until the later metadata-backed slice lands.
+uncovered resolved crates. Live graph execution surfaces are reported as
+declared when they match checked-in `allowed_surfaces` policy and undeclared
+otherwise.
 
 Missing `reviewed-targets.toml` is not an error. Malformed policy, malformed
 workspace manifests, and missing or malformed `Cargo.lock` fail closed.
+If `cargo metadata --frozen` cannot collect the graph surfaces, inventory still
+renders the offline sections and marks live graph surfaces as not collected.
 Reported observational findings and policy coverage gaps do not change the
 exit code; this command is an audit view, not an enforcement gate.
 

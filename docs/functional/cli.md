@@ -152,11 +152,13 @@ cargo barbican policy init
 
 cargo barbican inventory
     Print a read-only, whole-repo dependency inventory and policy-coverage
-    audit. The first slice is offline and local-only. It:
+    audit. It:
     - reads `Cargo.lock` as the resolved inventory source
     - reads workspace `Cargo.toml` manifests, including root
       `[workspace.dependencies]` used by `{ workspace = true }` member
       dependencies
+    - runs `cargo metadata --format-version 1 --frozen` once to collect live
+      graph execution surfaces without resolving or rewriting the lockfile
     - reports direct dependency exact-pin status and whether a requirement was
       inherited from the workspace root
     - buckets non-crates.io sources separately from ordinary uncovered
@@ -164,12 +166,14 @@ cargo barbican inventory
     - reads `reviewed-targets.toml` when present and reports reviewed-family
       coverage, declared allowed execution surfaces, and missing review records
       as policy coverage gaps
-    - reports live graph execution surfaces as `not collected` in this offline
-      slice
+    - reports live graph execution surfaces as declared or undeclared against
+      the checked-in `allowed_surfaces` policy
     Missing `reviewed-targets.toml` is not an error; the report states that no
     reviewed-target policy is configured yet. Malformed `reviewed-targets.toml`,
     malformed workspace manifests, and missing or malformed `Cargo.lock` fail
     closed because inventory facts cannot be established.
+    If frozen cargo metadata cannot be collected, the command still renders the
+    offline inventory sections and marks live graph surfaces as not collected.
     Observational findings and policy coverage gaps are informational, and the
     command returns exit 0 when it can render the report.
 

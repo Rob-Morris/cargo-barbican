@@ -171,7 +171,7 @@ where
             gatehouse::run_gatehouse(command, current_dir, client, runner, now, stdout, stderr)
         }
         Command::Policy { command } => policy::run_policy(command, current_dir, stdout),
-        Command::Inventory => inventory::run_inventory(current_dir, stdout),
+        Command::Inventory => inventory::run_inventory(current_dir, runner, stdout),
         Command::PinCheck { config } => pin_check::run_pin_check(&config, current_dir, stdout),
         Command::Review { base_dir } => {
             review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)

@@ -8,19 +8,21 @@ use std::collections::BTreeSet;
 use barbican::{
     CargoManifestDirectRequirement, CargoManifestError, CargoManifestPackage, Inventory,
     InventoryDirectRequirements, InventoryGap, ReviewRecordFact, WorkspacePackageIdentity,
-    build_inventory, parse_manifest_package_identity, parse_workspace_dependency_requirements,
-    parse_workspace_package_version,
+    build_graph_surfaces, build_inventory, parse_cargo_metadata, parse_manifest_package_identity,
+    parse_workspace_dependency_requirements, parse_workspace_package_version,
 };
 
 use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
+use crate::command_runner::CommandRunner;
 
 use super::{
     CommandError, check_review_record_paths, load_current_lockfile, load_manifest_texts_from_root,
     load_reviewed_targets, parse_manifest_requirements,
 };
 
-pub(super) fn run_inventory(
+pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
     current_dir: &Path,
+    runner: &R,
     stdout: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
     let lockfile = load_current_lockfile(current_dir, Path::new("Cargo.lock"))?;
@@ -45,6 +47,7 @@ pub(super) fn run_inventory(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let surface_collection = collect_graph_surfaces(current_dir, runner);
 
     let inventory = build_inventory(
         &lockfile,
@@ -52,10 +55,73 @@ pub(super) fn run_inventory(
         &workspace_packages,
         reviewed_targets.as_ref(),
         &review_record_facts,
+        surface_collection.surfaces(),
     );
 
-    render_inventory(stdout, &inventory)?;
+    let surface_report = build_surface_report(&inventory, &surface_collection);
+    render_inventory(stdout, &inventory, surface_report)?;
     Ok(ExitCode::SUCCESS)
+}
+
+enum SurfaceCollection {
+    Collected(barbican::GraphSurfaces),
+    NotCollected(String),
+}
+
+impl SurfaceCollection {
+    fn surfaces(&self) -> Option<&barbican::GraphSurfaces> {
+        match self {
+            Self::Collected(surfaces) => Some(surfaces),
+            Self::NotCollected(_) => None,
+        }
+    }
+}
+
+fn collect_graph_surfaces<R: CommandRunner + ?Sized>(
+    current_dir: &Path,
+    runner: &R,
+) -> SurfaceCollection {
+    match try_collect_graph_surfaces(current_dir, runner) {
+        Ok(surfaces) => SurfaceCollection::Collected(surfaces),
+        Err(reason) => SurfaceCollection::NotCollected(reason),
+    }
+}
+
+fn try_collect_graph_surfaces<R: CommandRunner + ?Sized>(
+    current_dir: &Path,
+    runner: &R,
+) -> Result<barbican::GraphSurfaces, String> {
+    let metadata_json = runner
+        .cargo_metadata_frozen(current_dir)
+        .map_err(|error| error.to_string())?;
+    let metadata = parse_cargo_metadata(&metadata_json).map_err(|error| error.to_string())?;
+
+    build_graph_surfaces(&metadata).map_err(|error| error.to_string())
+}
+
+enum SurfaceReport<'a> {
+    Collected(&'a [barbican::InventoryLiveSurface]),
+    NotCollected(&'a str),
+}
+
+impl SurfaceReport<'_> {
+    fn is_not_collected(&self) -> bool {
+        matches!(self, Self::NotCollected(_))
+    }
+}
+
+fn build_surface_report<'a>(
+    inventory: &'a Inventory,
+    surface_collection: &'a SurfaceCollection,
+) -> SurfaceReport<'a> {
+    match surface_collection {
+        SurfaceCollection::Collected(_) => SurfaceReport::Collected(
+            inventory
+                .live_surfaces()
+                .expect("build_inventory receives surfaces when metadata is collected"),
+        ),
+        SurfaceCollection::NotCollected(reason) => SurfaceReport::NotCollected(reason),
+    }
 }
 
 fn parse_workspace_requirements(
@@ -109,8 +175,13 @@ fn manifest_parse_error(path: &str, source: CargoManifestError) -> CommandError 
     }
 }
 
-fn render_inventory(stdout: &mut dyn Write, inventory: &Inventory) -> Result<(), CommandError> {
+fn render_inventory(
+    stdout: &mut dyn Write,
+    inventory: &Inventory,
+    surface_report: SurfaceReport<'_>,
+) -> Result<(), CommandError> {
     let rollup = inventory.rollup();
+    let surfaces_not_collected = surface_report.is_not_collected();
     writeln!(stdout, "Dependency inventory:").map_err(CommandError::Io)?;
     writeln!(
         stdout,
@@ -150,6 +221,15 @@ fn render_inventory(stdout: &mut dyn Write, inventory: &Inventory) -> Result<(),
         rollup.policy_coverage_gaps
     )
     .map_err(CommandError::Io)?;
+    if surfaces_not_collected {
+        writeln!(
+            stdout,
+            "  live graph surfaces: NOT COLLECTED - investigate before trusting this report"
+        )
+        .map_err(CommandError::Io)?;
+    } else {
+        writeln!(stdout, "  live graph surfaces: collected").map_err(CommandError::Io)?;
+    }
 
     writeln!(stdout).map_err(CommandError::Io)?;
     writeln!(stdout, "Repository policy files:").map_err(CommandError::Io)?;
@@ -229,11 +309,52 @@ fn render_inventory(stdout: &mut dyn Write, inventory: &Inventory) -> Result<(),
 
     writeln!(stdout).map_err(CommandError::Io)?;
     writeln!(stdout, "Execution surfaces:").map_err(CommandError::Io)?;
-    writeln!(
-        stdout,
-        "  live graph surfaces: not collected in this offline slice"
-    )
-    .map_err(CommandError::Io)?;
+    match surface_report {
+        SurfaceReport::Collected(live_surfaces) => {
+            writeln!(
+                stdout,
+                "  live graph surface status: collected via cargo metadata --frozen"
+            )
+            .map_err(CommandError::Io)?;
+            if live_surfaces.is_empty() {
+                writeln!(
+                    stdout,
+                    "  live graph surface findings: no undeclared build.rs / proc-macro / native-sys surfaces detected"
+                )
+                .map_err(CommandError::Io)?;
+            } else {
+                writeln!(stdout, "  live graph surface findings:").map_err(CommandError::Io)?;
+                for surface in live_surfaces {
+                    let status = if surface.declared() {
+                        "declared"
+                    } else {
+                        "undeclared"
+                    };
+                    writeln!(
+                        stdout,
+                        "  - {} {} ({})",
+                        surface.spec(),
+                        surface.surface(),
+                        status
+                    )
+                    .map_err(CommandError::Io)?;
+                }
+            }
+        }
+        SurfaceReport::NotCollected(reason) => {
+            writeln!(
+                stdout,
+                "  live graph surface status: not collected; live graph surface collection failed: {}",
+                escape_render_field(reason)
+            )
+            .map_err(CommandError::Io)?;
+            writeln!(
+                stdout,
+                "  live graph surface remediation: resolve the reported graph or metadata issue, then rerun inventory"
+            )
+            .map_err(CommandError::Io)?;
+        }
+    }
     if inventory.declared_surfaces().is_empty() {
         writeln!(stdout, "  declared allowed surfaces: none").map_err(CommandError::Io)?;
     } else {
@@ -306,7 +427,13 @@ fn render_inventory(stdout: &mut dyn Write, inventory: &Inventory) -> Result<(),
 
     writeln!(stdout).map_err(CommandError::Io)?;
     writeln!(stdout, "Suggested next actions:").map_err(CommandError::Io)?;
-    if !inventory.policy_configured() {
+    if surfaces_not_collected {
+        writeln!(
+            stdout,
+            "  - Resolve live graph surface collection before trusting this inventory report."
+        )
+        .map_err(CommandError::Io)?;
+    } else if !inventory.policy_configured() {
         writeln!(
             stdout,
             "  - Run `cargo barbican policy init` to create the reviewed-target scaffold."
@@ -378,6 +505,9 @@ fn render_gap(gap: &InventoryGap) -> String {
                 escape_render_field(source.as_deref().unwrap_or("(none)"))
             )
         }
+        InventoryGap::UndeclaredExecutionSurface { spec, surface, .. } => {
+            format!("live execution surface is not declared in reviewed policy: {spec} {surface}")
+        }
     }
 }
 
@@ -389,7 +519,7 @@ fn escape_render_field(value: &str) -> String {
             '\r' => escaped.push_str("\\r"),
             '\t' => escaped.push_str("\\t"),
             '\u{1b}' => escaped.push_str("\\x1b"),
-            '\u{0}'..='\u{1f}' | '\u{7f}' => {
+            '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' => {
                 write!(&mut escaped, "\\x{:02x}", character as u32)
                     .expect("writing to a String cannot fail");
             }

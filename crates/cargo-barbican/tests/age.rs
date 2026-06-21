@@ -243,6 +243,13 @@ impl CommandRunner for FakeCommandRunner {
         self.cargo_metadata_result.clone().map_err(runner_exit)
     }
 
+    fn cargo_metadata_frozen(
+        &self,
+        _current_dir: &Path,
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        Err(runner_exit("unexpected frozen cargo metadata".to_owned()))
+    }
+
     fn cargo_update_precise(
         &self,
         current_dir: &Path,

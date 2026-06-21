@@ -7,6 +7,7 @@ use std::{env, ffi::OsStr};
 pub trait CommandRunner {
     fn git_show(&self, current_dir: &Path, object: &str) -> Result<String, RunnerError>;
     fn cargo_metadata(&self, current_dir: &Path) -> Result<String, RunnerError>;
+    fn cargo_metadata_frozen(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn cargo_update_precise(
         &self,
         current_dir: &Path,
@@ -66,6 +67,13 @@ impl CommandRunner for RealCommandRunner {
 
     fn cargo_metadata(&self, current_dir: &Path) -> Result<String, RunnerError> {
         run_cargo_command(current_dir, ["metadata", "--format-version", "1"])
+    }
+
+    fn cargo_metadata_frozen(&self, current_dir: &Path) -> Result<String, RunnerError> {
+        run_cargo_command(
+            current_dir,
+            ["metadata", "--format-version", "1", "--frozen"],
+        )
     }
 
     fn cargo_update_precise(

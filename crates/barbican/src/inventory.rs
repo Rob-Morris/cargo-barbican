@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::metadata::metadata_packages;
 use crate::{
     CargoDependencySourceKind, CargoManifestDirectRequirement, ExactCrateSpec,
-    ExecutionSurfaceKind, Lockfile, ReviewedTargets, Sha256Digest, parse_exact_version_requirement,
+    ExecutionSurfaceKind, Lockfile, MetadataPackageSurfaces, ReviewedTargets, Sha256Digest,
+    parse_exact_version_requirement,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +15,7 @@ pub struct Inventory {
     non_crates_io_sources: Vec<InventoryNonCratesIoSource>,
     reviewed_families: Vec<InventoryReviewedFamily>,
     declared_surfaces: Vec<InventoryDeclaredSurface>,
+    live_surfaces: Option<Vec<InventoryLiveSurface>>,
     gaps: Vec<InventoryGap>,
 }
 
@@ -39,6 +42,10 @@ impl Inventory {
 
     pub fn declared_surfaces(&self) -> &[InventoryDeclaredSurface] {
         &self.declared_surfaces
+    }
+
+    pub fn live_surfaces(&self) -> Option<&[InventoryLiveSurface]> {
+        self.live_surfaces.as_deref()
     }
 
     pub fn gaps(&self) -> &[InventoryGap] {
@@ -229,6 +236,27 @@ impl InventoryDeclaredSurface {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryLiveSurface {
+    spec: ExactCrateSpec,
+    surface: ExecutionSurfaceKind,
+    declared: bool,
+}
+
+impl InventoryLiveSurface {
+    pub fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
+    pub fn surface(&self) -> ExecutionSurfaceKind {
+        self.surface
+    }
+
+    pub fn declared(&self) -> bool {
+        self.declared
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InventoryGap {
     MissingReviewRecord {
         family: String,
@@ -249,14 +277,22 @@ pub enum InventoryGap {
         version: String,
         source: Option<String>,
     },
+    UndeclaredExecutionSurface {
+        spec: ExactCrateSpec,
+        surface: ExecutionSurfaceKind,
+        policy_configured: bool,
+    },
 }
 
 impl InventoryGap {
     pub fn is_policy_relative(&self) -> bool {
-        matches!(
-            self,
-            Self::MissingReviewRecord { .. } | Self::UncoveredResolvedCrate { .. }
-        )
+        match self {
+            Self::MissingReviewRecord { .. } | Self::UncoveredResolvedCrate { .. } => true,
+            Self::UndeclaredExecutionSurface {
+                policy_configured, ..
+            } => *policy_configured,
+            Self::NonExactDirectPin { .. } | Self::NonCratesIoSource { .. } => false,
+        }
     }
 }
 
@@ -299,6 +335,17 @@ impl ReviewRecordFact {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphSurfaces {
+    surfaces: BTreeMap<ExactCrateSpec, MetadataPackageSurfaces>,
+}
+
+impl GraphSurfaces {
+    pub fn surfaces(&self) -> impl Iterator<Item = (&ExactCrateSpec, &MetadataPackageSurfaces)> {
+        self.surfaces.iter()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct InventoryDirectRequirements<'a> {
     manifest: &'a [CargoManifestDirectRequirement],
@@ -335,6 +382,7 @@ pub fn build_inventory(
     workspace_packages: &BTreeSet<WorkspacePackageIdentity>,
     reviewed_targets: Option<&ReviewedTargets>,
     review_record_facts: &[ReviewRecordFact],
+    surfaces: Option<&GraphSurfaces>,
 ) -> Inventory {
     let workspace_requirements_by_name = direct_requirements
         .workspace
@@ -400,6 +448,7 @@ pub fn build_inventory(
     let mut covered_specs = BTreeSet::new();
     let mut reviewed_families = Vec::new();
     let mut declared_surfaces = Vec::new();
+    let mut declared_surface_keys = BTreeSet::new();
 
     if let Some(reviewed_targets) = reviewed_targets {
         for family in reviewed_targets.rust_families() {
@@ -436,6 +485,9 @@ pub fn build_inventory(
                     surface: allowance.surface(),
                 }),
         );
+    }
+    for surface in &declared_surfaces {
+        declared_surface_keys.insert((surface.spec.clone(), surface.surface));
     }
 
     let mut resolved_crates_io = Vec::new();
@@ -479,6 +531,36 @@ pub fn build_inventory(
             .then_with(|| left.surface.cmp(&right.surface))
             .then_with(|| left.family.cmp(&right.family))
     });
+    let live_surfaces = surfaces.map(|surfaces| {
+        let mut live_surfaces = Vec::new();
+        for (spec, package_surfaces) in surfaces.surfaces() {
+            let mut surface_kinds = package_surfaces.surface_kinds();
+            if spec.is_native_sys() && !surface_kinds.contains(&ExecutionSurfaceKind::NativeSys) {
+                surface_kinds.push(ExecutionSurfaceKind::NativeSys);
+            }
+            for surface in surface_kinds {
+                let declared = declared_surface_keys.contains(&(spec.clone(), surface));
+                if !declared {
+                    gaps.push(InventoryGap::UndeclaredExecutionSurface {
+                        spec: spec.clone(),
+                        surface,
+                        policy_configured: reviewed_targets.is_some(),
+                    });
+                }
+                live_surfaces.push(InventoryLiveSurface {
+                    spec: spec.clone(),
+                    surface,
+                    declared,
+                });
+            }
+        }
+        live_surfaces.sort_by(|left, right| {
+            left.spec
+                .cmp(&right.spec)
+                .then_with(|| left.surface.cmp(&right.surface))
+        });
+        live_surfaces
+    });
 
     Inventory {
         policy_configured: reviewed_targets.is_some(),
@@ -487,8 +569,30 @@ pub fn build_inventory(
         non_crates_io_sources,
         reviewed_families,
         declared_surfaces,
+        live_surfaces,
         gaps,
     }
+}
+
+pub fn build_graph_surfaces(
+    metadata: &crate::CargoMetadata,
+) -> Result<GraphSurfaces, crate::ExactCrateSpecError> {
+    let mut surfaces = BTreeMap::new();
+    for package in metadata_packages(metadata) {
+        if package.is_workspace_member {
+            continue;
+        }
+
+        let spec = ExactCrateSpec::from_parts(package.name, package.version)?;
+        surfaces
+            .entry(spec)
+            .and_modify(|existing: &mut MetadataPackageSurfaces| {
+                existing.union_with(&package.surfaces);
+            })
+            .or_insert(package.surfaces);
+    }
+
+    Ok(GraphSurfaces { surfaces })
 }
 
 fn non_crates_io_source_from_package(package: &crate::LockedPackage) -> InventoryNonCratesIoSource {
@@ -505,8 +609,8 @@ mod tests {
 
     use crate::{
         InventoryDirectRequirements, InventoryGap, ReviewRecordFact, WorkspacePackageIdentity,
-        build_inventory, parse_lockfile, parse_manifest_direct_requirements,
-        parse_reviewed_targets_toml,
+        build_graph_surfaces, build_inventory, parse_cargo_metadata, parse_lockfile,
+        parse_manifest_direct_requirements, parse_reviewed_targets_toml,
     };
 
     #[test]
@@ -571,6 +675,7 @@ covered = { version = "1.0.0", checksum_sha256 = "0123456789abcdef0123456789abcd
                 "docs/dependency-reviews/covered.md".to_owned(),
                 false,
             )],
+            None,
         );
 
         assert_eq!(inventory.rollup().direct_dependencies, 3);
@@ -642,6 +747,7 @@ serde = "=1.0.228"
             &BTreeSet::new(),
             None,
             &[],
+            None,
         );
 
         let dependency = inventory
@@ -696,6 +802,7 @@ path-crate = { path = "crates/path-crate" }
             &BTreeSet::new(),
             None,
             &[],
+            None,
         );
 
         assert!(inventory.gaps().iter().any(|gap| {
@@ -744,6 +851,7 @@ source = "git+https://example.invalid/git-crate"
             &workspace_packages,
             None,
             &[],
+            None,
         );
 
         assert!(!inventory.non_crates_io_sources().iter().any(|source| {
@@ -777,5 +885,353 @@ source = "git+https://example.invalid/git-crate"
         assert!(inventory.gaps().iter().any(|gap| {
             matches!(gap, InventoryGap::NonCratesIoSource { name, version, source } if name == "git-crate" && version == "0.1.0" && source.as_deref() == Some("git+https://example.invalid/git-crate"))
         }));
+    }
+
+    #[test]
+    fn builds_graph_surfaces_in_one_package_pass() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "build-crate",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#build-crate@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["custom-build"]}]
+    },
+    {
+      "name": "derive-crate",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#derive-crate@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["proc-macro"]}]
+    },
+    {
+      "name": "native-crate",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#native-crate@1.0.0",
+      "version": "1.0.0",
+      "links": "native",
+      "targets": []
+    },
+    {
+      "name": "foo",
+      "id": "path+file:///workspace/foo#foo@0.1.0",
+      "version": "0.1.0",
+      "targets": []
+    },
+    {
+      "name": "workspace-build",
+      "id": "path+file:///workspace/workspace-build#workspace-build@0.1.0",
+      "version": "0.1.0",
+      "targets": [{"kind": ["custom-build"]}]
+    },
+    {
+      "name": "foo",
+      "id": "git+https://example.invalid/foo#foo@0.1.0",
+      "version": "0.1.0",
+      "targets": [{"kind": ["custom-build"]}]
+    },
+    {
+      "name": "shadow",
+      "id": "git+https://example.invalid/shadow-a#shadow@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["custom-build"]}]
+    },
+    {
+      "name": "shadow",
+      "id": "git+https://example.invalid/shadow-b#shadow@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["proc-macro"]}]
+    }
+  ],
+  "workspace_members": [
+    "path+file:///workspace/foo#foo@0.1.0",
+    "path+file:///workspace/workspace-build#workspace-build@0.1.0"
+  ],
+  "resolve": {"nodes": []}
+}"#,
+        )
+        .expect("metadata should parse");
+
+        let surfaces = build_graph_surfaces(&metadata).expect("surfaces should build");
+        let observed = surfaces
+            .surfaces()
+            .map(|(spec, surfaces)| {
+                (
+                    spec.to_string(),
+                    surfaces.has_build_rs,
+                    surfaces.is_proc_macro,
+                    surfaces.has_native_links,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            !observed
+                .iter()
+                .any(|(spec, ..)| spec == "workspace-build@0.1.0")
+        );
+        assert_eq!(
+            observed,
+            vec![
+                ("build-crate@1.0.0".to_owned(), true, false, false),
+                ("derive-crate@1.0.0".to_owned(), false, true, false),
+                ("foo@0.1.0".to_owned(), true, false, false),
+                ("native-crate@1.0.0".to_owned(), false, false, true),
+                ("shadow@1.0.0".to_owned(), true, true, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn live_execution_surfaces_are_cross_referenced_against_declarations() {
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "covered"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+[[package]]
+name = "uncovered"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
+
+[[package]]
+name = "native"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2222222222222222222222222222222222222222222222222222222222222222"
+
+[[package]]
+name = "foo"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3333333333333333333333333333333333333333333333333333333333333333"
+
+[[package]]
+name = "multi"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5555555555555555555555555555555555555555555555555555555555555555"
+
+[[package]]
+name = "ffi-sys"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6666666666666666666666666666666666666666666666666666666666666666"
+"#,
+        )
+        .expect("lockfile should parse");
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "covered-family"
+review_record = "docs/dependency-reviews/covered.md"
+
+[rust.families.direct]
+covered = "=1.0.0"
+
+[rust.families.resolved]
+covered = { version = "1.0.0", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+
+[rust.families.allowed_surfaces]
+covered = ["build-rs"]
+
+[[rust.families]]
+name = "versioned-family"
+review_record = "docs/dependency-reviews/versioned.md"
+
+[rust.families.direct]
+foo = "=1.0.0"
+
+[rust.families.resolved]
+foo = { version = "1.0.0", checksum_sha256 = "4444444444444444444444444444444444444444444444444444444444444444" }
+
+[rust.families.allowed_surfaces]
+foo = ["build-rs"]
+
+[[rust.families]]
+name = "multi-family"
+review_record = "docs/dependency-reviews/multi.md"
+
+[rust.families.direct]
+multi = "=1.0.0"
+
+[rust.families.resolved]
+multi = { version = "1.0.0", checksum_sha256 = "5555555555555555555555555555555555555555555555555555555555555555" }
+
+[rust.families.allowed_surfaces]
+multi = ["build-rs"]
+"#,
+        )
+        .expect("reviewed targets should parse");
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "covered",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#covered@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["custom-build"]}]
+    },
+    {
+      "name": "uncovered",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#uncovered@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["proc-macro"]}]
+    },
+    {
+      "name": "native",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#native@1.0.0",
+      "version": "1.0.0",
+      "links": "native",
+      "targets": []
+    },
+    {
+      "name": "foo",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#foo@2.0.0",
+      "version": "2.0.0",
+      "targets": [{"kind": ["custom-build"]}]
+    },
+    {
+      "name": "multi",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#multi@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["custom-build"]}, {"kind": ["proc-macro"]}]
+    },
+    {
+      "name": "ffi-sys",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#ffi-sys@1.0.0",
+      "version": "1.0.0",
+      "targets": []
+    }
+  ],
+  "workspace_members": [],
+  "resolve": {"nodes": []}
+}"#,
+        )
+        .expect("metadata should parse");
+        let graph_surfaces = build_graph_surfaces(&metadata).expect("surfaces should build");
+
+        let inventory = build_inventory(
+            &lockfile,
+            InventoryDirectRequirements::new(&[], &[]),
+            &BTreeSet::new(),
+            Some(&reviewed_targets),
+            &[
+                ReviewRecordFact::new(
+                    "covered-family".to_owned(),
+                    "docs/dependency-reviews/covered.md".to_owned(),
+                    true,
+                ),
+                ReviewRecordFact::new(
+                    "versioned-family".to_owned(),
+                    "docs/dependency-reviews/versioned.md".to_owned(),
+                    true,
+                ),
+                ReviewRecordFact::new(
+                    "multi-family".to_owned(),
+                    "docs/dependency-reviews/multi.md".to_owned(),
+                    true,
+                ),
+            ],
+            Some(&graph_surfaces),
+        );
+
+        let live_surfaces = inventory.live_surfaces().expect("surfaces collected");
+        assert!(live_surfaces.iter().any(|surface| {
+            surface.spec().to_string() == "covered@1.0.0" && surface.declared()
+        }));
+        assert!(live_surfaces.iter().any(|surface| {
+            surface.spec().to_string() == "uncovered@1.0.0" && !surface.declared()
+        }));
+        assert!(live_surfaces.iter().any(|surface| {
+            surface.spec().to_string() == "native@1.0.0"
+                && surface.surface() == crate::ExecutionSurfaceKind::NativeSys
+                && !surface.declared()
+        }));
+        assert!(live_surfaces.iter().any(|surface| {
+            surface.spec().to_string() == "foo@2.0.0"
+                && surface.surface() == crate::ExecutionSurfaceKind::BuildRs
+                && !surface.declared()
+        }));
+        assert!(live_surfaces.iter().any(|surface| {
+            surface.spec().to_string() == "multi@1.0.0"
+                && surface.surface() == crate::ExecutionSurfaceKind::BuildRs
+                && surface.declared()
+        }));
+        assert!(live_surfaces.iter().any(|surface| {
+            surface.spec().to_string() == "multi@1.0.0"
+                && surface.surface() == crate::ExecutionSurfaceKind::ProcMacro
+                && !surface.declared()
+        }));
+        assert!(live_surfaces.iter().any(|surface| {
+            surface.spec().to_string() == "ffi-sys@1.0.0"
+                && surface.surface() == crate::ExecutionSurfaceKind::NativeSys
+                && !surface.declared()
+        }));
+        assert!(!inventory.gaps().iter().any(|gap| {
+            matches!(gap, InventoryGap::UndeclaredExecutionSurface { spec, .. }
+                if spec.to_string() == "covered@1.0.0")
+        }));
+        assert!(inventory.gaps().iter().any(|gap| {
+            matches!(gap, InventoryGap::UndeclaredExecutionSurface { spec, surface, policy_configured }
+                if spec.to_string() == "uncovered@1.0.0"
+                    && *surface == crate::ExecutionSurfaceKind::ProcMacro
+                    && *policy_configured)
+        }));
+        assert!(inventory.gaps().iter().any(|gap| {
+            matches!(gap, InventoryGap::UndeclaredExecutionSurface { spec, surface, policy_configured }
+                if spec.to_string() == "native@1.0.0"
+                    && *surface == crate::ExecutionSurfaceKind::NativeSys
+                    && *policy_configured)
+        }));
+        assert!(inventory.gaps().iter().any(|gap| {
+            matches!(gap, InventoryGap::UndeclaredExecutionSurface { spec, surface, policy_configured }
+                if spec.to_string() == "foo@2.0.0"
+                    && *surface == crate::ExecutionSurfaceKind::BuildRs
+                    && *policy_configured)
+        }));
+        assert!(!inventory.gaps().iter().any(|gap| {
+            matches!(gap, InventoryGap::UndeclaredExecutionSurface { spec, surface, .. }
+                if spec.to_string() == "multi@1.0.0"
+                    && *surface == crate::ExecutionSurfaceKind::BuildRs)
+        }));
+        assert!(inventory.gaps().iter().any(|gap| {
+            matches!(gap, InventoryGap::UndeclaredExecutionSurface { spec, surface, policy_configured }
+                if spec.to_string() == "multi@1.0.0"
+                    && *surface == crate::ExecutionSurfaceKind::ProcMacro
+                    && *policy_configured)
+        }));
+        assert!(inventory.gaps().iter().any(|gap| {
+            matches!(gap, InventoryGap::UndeclaredExecutionSurface { spec, surface, policy_configured }
+                if spec.to_string() == "ffi-sys@1.0.0"
+                    && *surface == crate::ExecutionSurfaceKind::NativeSys
+                    && *policy_configured)
+        }));
+    }
+
+    #[test]
+    fn build_graph_surfaces_rejects_invalid_metadata_specs() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#invalid@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["custom-build"]}]
+    }
+  ],
+  "workspace_members": [],
+  "resolve": {"nodes": []}
+}"#,
+        )
+        .expect("metadata should parse");
+
+        assert!(build_graph_surfaces(&metadata).is_err());
     }
 }

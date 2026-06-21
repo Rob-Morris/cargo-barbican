@@ -166,9 +166,10 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 
 - a read-only whole-repo dependency inventory and reviewed-policy coverage
   audit
-- offline in the first slice: it reads `Cargo.lock`, workspace manifests, root
-  `[workspace.dependencies]`, optional `reviewed-targets.toml`, and checked-in
-  review-record facts
+- local and read-only: it reads `Cargo.lock`, workspace manifests, root
+  `[workspace.dependencies]`, optional `reviewed-targets.toml`, checked-in
+  review-record facts, and `cargo metadata --format-version 1 --frozen` output
+  for live graph execution surfaces
 - pure at the library seam: `barbican` builds an `Inventory` model from parsed
   inputs, while `cargo-barbican` owns filesystem reads and rendering
 - adoption-friendly: absent `reviewed-targets.toml` is reported as no policy
@@ -177,19 +178,22 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   malformed manifests, and malformed reviewed-target policy stop the command
 - gap-oriented rather than enforcing: non-exact direct pins and non-crates.io
   sources are reported as observational findings, while missing review records
-  and uncovered resolved crates are reported as policy coverage gaps; neither
-  changes the exit code
+  and uncovered resolved crates are reported as policy coverage gaps; live
+  execution surfaces not declared in `allowed_surfaces` are observational when
+  no policy is configured and policy coverage gaps when policy is configured;
+  none of these changes the exit code
 - scoped to Cargo's ordinary crates.io source identity: source replacement or
   mirror configurations that rewrite the lockfile source string are outside the
   supported coverage model for this slice and may be reported as
   non-crates.io sources
-- approximate about workspace membership in this offline slice: member
+- approximate about workspace membership in this manifest-discovery slice: member
   discovery uses local manifest paths and directory walks rather than Cargo's
   exact glob-depth and `[workspace] exclude` semantics, so nested or excluded
   non-member manifests under walked roots can appear in the inventory; precise
-  member resolution belongs to the metadata-backed slice
-- explicit about slice boundaries: live graph execution surfaces are reported
-  as not collected until the metadata-backed slice lands
+  member resolution belongs to a future metadata-backed member-discovery slice
+- explicit about surface collection failure: if `cargo metadata --frozen` fails
+  because the graph is unresolved or metadata cannot be parsed, inventory still
+  renders the offline report and marks live graph surfaces as not collected
 
 The reviewed-target enforcement baseline is:
 
@@ -209,6 +213,8 @@ The reviewed-target enforcement baseline is:
   exact direct manifest requirements
 - `pin-check` validates `allowed_surfaces` manifest integrity, but does not
   inspect live metadata surfaces
+- `inventory` reports live metadata surfaces and cross-references them against
+  `allowed_surfaces`, but does not enforce the result
 - `assess` suppresses matching reviewed `build-rs`, `proc-macro`, and
   `native-sys` execution-surface signals from elevated-risk findings, while
   rendering them in `Allowed policy exceptions:`

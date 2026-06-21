@@ -35,9 +35,10 @@ pub use inspect::{
     CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate, inspect_published_crate_at,
 };
 pub use inventory::{
-    Inventory, InventoryDeclaredSurface, InventoryDirectDependency, InventoryDirectRequirements,
-    InventoryGap, InventoryNonCratesIoSource, InventoryResolvedCrate, InventoryReviewedFamily,
-    InventoryRollup, ReviewRecordFact, WorkspacePackageIdentity, build_inventory,
+    GraphSurfaces, Inventory, InventoryDeclaredSurface, InventoryDirectDependency,
+    InventoryDirectRequirements, InventoryGap, InventoryLiveSurface, InventoryNonCratesIoSource,
+    InventoryResolvedCrate, InventoryReviewedFamily, InventoryRollup, ReviewRecordFact,
+    WorkspacePackageIdentity, build_graph_surfaces, build_inventory,
 };
 pub use lockfile::{
     CRATES_IO_SOURCE, LockedChecksumChange, LockedPackage, Lockfile, LockfileError,

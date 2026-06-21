@@ -3,13 +3,19 @@ use std::collections::{BTreeSet, HashSet};
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::ExactCrateSpec;
+use crate::{ExactCrateSpec, ExecutionSurfaceKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CargoMetadata {
     packages: Vec<MetadataPackage>,
     workspace_members: Vec<String>,
     resolve: Option<MetadataResolve>,
+}
+
+impl CargoMetadata {
+    fn workspace_member_ids(&self) -> HashSet<&str> {
+        self.workspace_members.iter().map(String::as_str).collect()
+    }
 }
 
 pub fn parse_cargo_metadata(text: &str) -> Result<CargoMetadata, CargoMetadataError> {
@@ -76,11 +82,7 @@ pub fn select_package_id(
         .resolve
         .as_ref()
         .ok_or(CargoMetadataError::MissingResolveGraph)?;
-    let workspace_members: HashSet<&str> = metadata
-        .workspace_members
-        .iter()
-        .map(String::as_str)
-        .collect();
+    let workspace_members = metadata.workspace_member_ids();
     let direct_refs: BTreeSet<String> = resolve
         .nodes
         .iter()
@@ -119,17 +121,37 @@ pub fn package_surfaces(
             version: spec.version().to_owned(),
         })?;
 
-    Ok(MetadataPackageSurfaces {
-        has_build_rs: package
-            .targets
-            .iter()
-            .any(|target| target.kind.iter().any(|kind| kind == "custom-build")),
-        is_proc_macro: package
-            .targets
-            .iter()
-            .any(|target| target.kind.iter().any(|kind| kind == "proc-macro")),
-        has_native_links: package.links.is_some(),
-    })
+    Ok(MetadataPackageSurfaces::from_package(package))
+}
+
+pub(crate) fn metadata_packages(
+    metadata: &CargoMetadata,
+) -> impl Iterator<Item = MetadataPackageInfo<'_>> {
+    let workspace_members = metadata.workspace_member_ids();
+
+    metadata
+        .packages
+        .iter()
+        .map(move |package| MetadataPackageInfo {
+            name: package.name.as_str(),
+            version: package.version.as_str(),
+            is_workspace_member: workspace_members.contains(package.id.as_str()),
+            surfaces: MetadataPackageSurfaces::from_package(package),
+        })
+}
+
+fn package_has_build_rs(package: &MetadataPackage) -> bool {
+    package
+        .targets
+        .iter()
+        .any(|target| target.kind.iter().any(|kind| kind == "custom-build"))
+}
+
+fn package_is_proc_macro(package: &MetadataPackage) -> bool {
+    package
+        .targets
+        .iter()
+        .any(|target| target.kind.iter().any(|kind| kind == "proc-macro"))
 }
 
 fn dependency_name_matches_package(dependency_name: &str, package_name: &str) -> bool {
@@ -165,6 +187,44 @@ pub struct MetadataPackageSurfaces {
     pub has_build_rs: bool,
     pub is_proc_macro: bool,
     pub has_native_links: bool,
+}
+
+impl MetadataPackageSurfaces {
+    pub(crate) fn union_with(&mut self, other: &Self) {
+        self.has_build_rs |= other.has_build_rs;
+        self.is_proc_macro |= other.is_proc_macro;
+        self.has_native_links |= other.has_native_links;
+    }
+
+    pub(crate) fn surface_kinds(&self) -> Vec<ExecutionSurfaceKind> {
+        let mut kinds = Vec::new();
+        if self.has_build_rs {
+            kinds.push(ExecutionSurfaceKind::BuildRs);
+        }
+        if self.is_proc_macro {
+            kinds.push(ExecutionSurfaceKind::ProcMacro);
+        }
+        if self.has_native_links {
+            kinds.push(ExecutionSurfaceKind::NativeSys);
+        }
+
+        kinds
+    }
+
+    fn from_package(package: &MetadataPackage) -> Self {
+        Self {
+            has_build_rs: package_has_build_rs(package),
+            is_proc_macro: package_is_proc_macro(package),
+            has_native_links: package.links.is_some(),
+        }
+    }
+}
+
+pub(crate) struct MetadataPackageInfo<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) version: &'a str,
+    pub(crate) is_workspace_member: bool,
+    pub(crate) surfaces: MetadataPackageSurfaces,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
