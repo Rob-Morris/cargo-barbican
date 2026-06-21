@@ -110,11 +110,11 @@ fn is_valid_version(version: &str) -> bool {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ExactCrateSpecError {
-    #[error("Expected exact crate@version spec, got: {0}")]
+    #[error("Expected exact crate@version spec, got: {0:?}")]
     InvalidShape(String),
-    #[error("Crate names may contain only ASCII letters, numbers, '_' and '-': {0}")]
+    #[error("Crate names may contain only ASCII letters, numbers, '_' and '-': {0:?}")]
     InvalidCrateName(String),
-    #[error("Version ranges are not allowed in routine checks: {0}")]
+    #[error("Version ranges are not allowed in routine checks: {0:?}")]
     VersionRange(String),
 }
 
@@ -122,7 +122,7 @@ pub enum ExactCrateSpecError {
 pub enum ExactVersionRequirementError {
     #[error("exact version requirements must include a leading '='")]
     MissingEquals,
-    #[error("invalid exact version requirement: {0}")]
+    #[error("invalid exact version requirement: {0:?}")]
     InvalidVersion(#[source] ExactCrateSpecError),
 }
 

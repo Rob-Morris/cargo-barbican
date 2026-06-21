@@ -25,8 +25,9 @@ pub use assessment::{
     RustAssessmentReport, assess_rust_update, assess_rust_update_at,
 };
 pub use config::{
-    BarbicanConfig, ConfigLoadError, DelegatesConfig, HighScrutinyConfig,
-    MAXIMUM_RELEASE_AGE_MINIMUM_DAYS, ReleaseAgeConfig,
+    AdvisoryDelegatesConfig, BarbicanConfig, CargoDenyCheck, CargoDenyDelegatesConfig,
+    ConfigLoadError, DelegatesConfig, HighScrutinyConfig, LockfileAdvisoryScanner,
+    MAXIMUM_RELEASE_AGE_MINIMUM_DAYS, ReleaseAgeConfig, UnmanagedDelegatedPolicyMode,
 };
 pub use crates_io::{
     CrateRelease, CratesIoClient, CratesIoClientError, parse_version_response_body,
@@ -64,9 +65,10 @@ pub use release_age::{
     evaluate_release_age, format_age,
 };
 pub use reviewed_targets::{
-    ExecutionSurfaceKind, ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException,
-    ReviewedResolvedTarget, ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError,
-    parse_reviewed_targets_toml,
+    ExecutionSurfaceKind, IsoDateError, ReviewedAdvisory, ReviewedAdvisoryException,
+    ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException, ReviewedResolvedTarget,
+    ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError, RustSecAdvisoryId,
+    RustSecAdvisoryIdError, parse_reviewed_targets_toml,
 };
 pub use sha256::{Sha256Digest, Sha256DigestError};
 pub use spec::{

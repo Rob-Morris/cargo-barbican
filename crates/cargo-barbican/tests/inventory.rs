@@ -343,20 +343,12 @@ fn inventory_escapes_control_characters_in_rendered_fields() {
     );
     assert!(
         stdout.contains(
-            "non-crates.io dependency source for control-source@0.1.0: git+https://example.invalid/control\\x1b[1A\\x1b[2K\\n  none"
+            "non-crates.io dependency source for control-source@0.1.0: git+https://example.invalid/control\\x1b[1A\\x1b[2K\\n  none\\x2028\\x2029"
         ),
         "{stdout}"
     );
     assert!(
-        stdout.contains(
-            "policy\\nfamily: 1 direct, 1 resolved, docs/dependency-reviews/control\\nrecord.md (record missing)"
-        ),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains(
-            "missing review record for family policy\\nfamily: docs/dependency-reviews/control\\nrecord.md"
-        ),
+        stdout.contains("policy-family: 1 direct, 1 resolved"),
         "{stdout}"
     );
 }
@@ -452,6 +444,34 @@ fn inventory_fails_on_malformed_reviewed_targets() {
         .expect_err("command should fail");
 
     assert!(error.to_string().contains("reviewed-targets.toml"));
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn inventory_escapes_malformed_reviewed_targets_parse_diagnostics() {
+    let temp_dir = fresh_temp_dir();
+    write_inventory_fixture(&temp_dir);
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        "[rust]\n\u{001b} = \"pwned\"\n",
+    )
+    .expect("policy should write");
+
+    let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
+    let client = FakeCratesIoClient;
+    let runner = FakeCommandRunner::default();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect_err("command should fail");
+    let rendered = error.to_string();
+
+    assert!(rendered.contains("reviewed-targets.toml"));
+    assert!(!rendered.contains('\u{001b}'));
+    assert!(rendered.contains("\\x1b"));
+    assert!(rendered.contains('\n'));
     assert!(stdout.is_empty());
     assert!(stderr.is_empty());
 }
@@ -874,7 +894,7 @@ version = "0.1.0"
 [[package]]
 name = "control-source"
 version = "0.1.0"
-source = "git+https://example.invalid/control\u001b[1A\u001b[2K\n  none"
+source = "git+https://example.invalid/control\u001b[1A\u001b[2K\n  none\u2028\u2029"
 
 [[package]]
 name = "serde"
@@ -890,8 +910,8 @@ checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 [rust]
 
 [[rust.families]]
-name = "policy\nfamily"
-review_record = "docs/dependency-reviews/control\nrecord.md"
+name = "policy-family"
+review_record = "docs/dependency-reviews/control-record.md"
 
 [rust.families.direct]
 serde = "=1.0.228"

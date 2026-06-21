@@ -7,7 +7,10 @@ use barbican::{BarbicanConfig, parse_reviewed_targets_toml};
 
 use crate::cli::{PolicyCommand, REVIEWED_TARGETS_CONFIG_FILE};
 
-use super::{CommandError, REVIEW_RECORDS_DIR, exit_code_from_policy_failures};
+use super::{
+    CommandError, REVIEW_RECORDS_DIR, escape_diagnostic_for_terminal,
+    exit_code_from_policy_failures,
+};
 
 pub(crate) const DEFAULT_BARBICAN_CONFIG: &str =
     include_str!("../../../../templates/barbican.toml");
@@ -331,9 +334,10 @@ impl InitReport {
             match &item.status {
                 InitStatus::Blocked(detail) => writeln!(
                     stdout,
-                    "- {}: {} ({detail})",
+                    "- {}: {} ({})",
                     item.path.display(),
                     item.status.as_str(),
+                    escape_diagnostic_for_terminal(detail),
                 )
                 .map_err(CommandError::Io)?,
                 InitStatus::Created | InitStatus::AlreadyPresent => writeln!(

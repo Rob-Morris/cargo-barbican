@@ -607,6 +607,32 @@ fn policy_init_reports_malformed_existing_reviewed_targets_policy() {
 }
 
 #[test]
+fn policy_init_escapes_malformed_reviewed_targets_parse_diagnostics() {
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        "[rust]\n\u{001b} = \"pwned\"\n",
+    )
+    .expect("malformed reviewed targets policy should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("- reviewed-targets.toml: blocked (invalid policy:"));
+    assert!(!rendered.contains('\u{001b}'));
+    assert!(rendered.contains("\\x1b"));
+    assert!(rendered.contains("2 | \\x1b = \"pwned\"\n  | ^"));
+    assert!(stderr.is_empty());
+}
+
+#[test]
 fn policy_init_reports_malformed_config_without_creating_dependent_scaffold() {
     let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
     let client = FakeCratesIoClient::default();
@@ -628,6 +654,58 @@ fn policy_init_reports_malformed_config_without_creating_dependent_scaffold() {
     assert!(rendered.contains("- barbican.toml: blocked (invalid config:"));
     assert!(!temp_dir.join("reviewed-targets.toml").exists());
     assert!(!temp_dir.join("docs/dependency-reviews/README.md").exists());
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn policy_init_escapes_malformed_config_parse_diagnostics() {
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        "[delegates]\n\u{001b} = \"pwned\"\n",
+    )
+    .expect("invalid config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("- barbican.toml: blocked (invalid config:"));
+    assert!(!rendered.contains('\u{001b}'));
+    assert!(rendered.contains("\\x1b"));
+    assert!(rendered.contains("2 | \\x1b = \"pwned\"\n  | ^"));
+    assert!(!temp_dir.join("reviewed-targets.toml").exists());
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn policy_init_escapes_unicode_line_separators_in_parse_diagnostics() {
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        "[rust]\n\u{2028} = \"pwned\"\n",
+    )
+    .expect("malformed reviewed targets policy should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("- reviewed-targets.toml: blocked (invalid policy:"));
+    assert!(!rendered.contains('\u{2028}'));
+    assert!(rendered.contains("\\x2028"));
     assert!(stderr.is_empty());
 }
 
@@ -762,7 +840,7 @@ fn age_preserves_per_spec_failures() {
     assert!(
         String::from_utf8(stderr)
             .expect("stderr should be utf8")
-            .contains("FAIL bad: Expected exact crate@version spec, got: bad")
+            .contains("FAIL bad: Expected exact crate@version spec, got: \"bad\"")
     );
 }
 
@@ -1605,7 +1683,7 @@ serde = "1.0.228"
     assert!(stdout.is_empty());
     assert!(stderr.is_empty());
     assert!(error.to_string().contains(
-        "allowed_age_exceptions entry for serde requires the resolved target to carry checksum_sha256"
+        "allowed_age_exceptions entry for \"serde\" requires the resolved target to carry checksum_sha256"
     ));
 }
 
@@ -1890,7 +1968,7 @@ other = ["build-rs"]
     assert!(stdout.is_empty());
     assert!(stderr.is_empty());
     assert!(error.to_string().contains(
-        "allowed_surfaces entry for other references a crate absent from the same resolved map"
+        "allowed_surfaces entry for \"other\" references a crate absent from the same resolved map"
     ));
 }
 
@@ -3464,7 +3542,7 @@ serde_derive = ["proc-macro"]
     assert!(stdout.is_empty());
     assert!(stderr.is_empty());
     assert!(error.to_string().contains(
-        "allowed_surfaces entry for serde_derive references a crate absent from the same resolved map"
+        "allowed_surfaces entry for \"serde_derive\" references a crate absent from the same resolved map"
     ));
 }
 
@@ -3511,7 +3589,7 @@ serde = "1.0.228"
     assert!(stdout.is_empty());
     assert!(stderr.is_empty());
     assert!(error.to_string().contains(
-        "allowed_age_exceptions entry for serde requires the resolved target to carry checksum_sha256"
+        "allowed_age_exceptions entry for \"serde\" requires the resolved target to carry checksum_sha256"
     ));
 }
 

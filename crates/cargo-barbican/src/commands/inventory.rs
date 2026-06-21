@@ -519,7 +519,7 @@ fn escape_render_field(value: &str) -> String {
             '\r' => escaped.push_str("\\r"),
             '\t' => escaped.push_str("\\t"),
             '\u{1b}' => escaped.push_str("\\x1b"),
-            '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' => {
+            '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' => {
                 write!(&mut escaped, "\\x{:02x}", character as u32)
                     .expect("writing to a String cannot fail");
             }

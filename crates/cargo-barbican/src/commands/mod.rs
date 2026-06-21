@@ -16,6 +16,7 @@ mod verify;
 use std::collections::BTreeSet;
 use std::env;
 use std::fmt;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -1028,44 +1029,130 @@ pub enum CommandError {
 impl fmt::Display for CommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Config(error) => write!(formatter, "{error}"),
+            Self::Config(error) => {
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&error.to_string())
+                )
+            }
             Self::ConfigRead { path, source } => {
-                write!(formatter, "unable to read {path}: {source}")
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!("unable to read {path}: {source}"))
+                )
             }
             Self::GitRead { object, source } => {
-                write!(formatter, "unable to read {object} from git: {source}")
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!(
+                        "unable to read {object} from git: {source}"
+                    ))
+                )
             }
             Self::InvalidEnvironment { name } => {
                 write!(formatter, "environment variable {name} is not valid UTF-8")
             }
             Self::InvalidCratesIoBaseUrl { value } => write!(
                 formatter,
-                "{CRATES_IO_BASE_URL_ENV} must use https://, or http:// loopback for local tests: {value}"
+                "{}",
+                escape_diagnostic_for_terminal(&format!(
+                    "{CRATES_IO_BASE_URL_ENV} must use https://, or http:// loopback for local tests: {value}"
+                ))
             ),
-            Self::LockfileMissing { path } => write!(formatter, "{path}: lockfile not found"),
-            Self::LockfileParse { path, source } => write!(formatter, "{path}: {source}"),
+            Self::LockfileMissing { path } => {
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!("{path}: lockfile not found"))
+                )
+            }
+            Self::LockfileParse { path, source } => {
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!("{path}: {source}"))
+                )
+            }
             Self::LockfileRead { path, source } => {
-                write!(formatter, "unable to read {path}: {source}")
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!("unable to read {path}: {source}"))
+                )
             }
             Self::ManifestParse { path, source } => {
-                write!(formatter, "{path}: {source}")
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!("{path}: {source}"))
+                )
             }
             Self::ManifestRead { path, source } => {
-                write!(formatter, "unable to read {path}: {source}")
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!("unable to read {path}: {source}"))
+                )
             }
-            Self::ReviewedTargetsParse { path, source } => write!(formatter, "{path}: {source}"),
+            Self::ReviewedTargetsParse { path, source } => {
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!("{path}: {source}"))
+                )
+            }
             Self::ReviewedTargetsRead { path, source } => {
-                write!(formatter, "unable to read {path}: {source}")
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!("unable to read {path}: {source}"))
+                )
             }
             Self::ScaffoldIo { path, source } => {
                 write!(
                     formatter,
-                    "unable to update policy scaffold {path}: {source}"
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!(
+                        "unable to update policy scaffold {path}: {source}"
+                    ))
                 )
             }
-            Self::Io(error) => write!(formatter, "{error}"),
+            Self::Io(error) => {
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&error.to_string())
+                )
+            }
         }
     }
+}
+
+pub(super) fn escape_diagnostic_for_terminal(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            // Preserve TOML's multi-line diagnostics while escaping terminal controls.
+            '\n' | '\t' => escaped.push(character),
+            '\r' => escaped.push_str("\\r"),
+            '\u{1b}' => escaped.push_str("\\x1b"),
+            '\u{0000}'..='\u{0008}'
+            | '\u{000b}'..='\u{001f}'
+            | '\u{007f}'
+            | '\u{0080}'..='\u{009f}'
+            | '\u{2028}'
+            | '\u{2029}' => {
+                write!(&mut escaped, "\\x{:02x}", character as u32)
+                    .expect("writing to a String cannot fail");
+            }
+            _ => escaped.push(character),
+        }
+    }
+
+    escaped
 }
 
 impl std::error::Error for CommandError {
