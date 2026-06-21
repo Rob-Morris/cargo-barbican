@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.10.1](changelog/v0.10.1.md) | 2026-06-21 | Harden execution-surface collision detection |
 | [v0.10.0](changelog/v0.10.0.md) | 2026-06-21 | Add live execution-surface inventory |
 | [v0.9.0](changelog/v0.9.0.md) | 2026-06-21 | Add dependency inventory audit |
 | [v0.8.0](changelog/v0.8.0.md) | 2026-06-14 | Add reviewed release-age exceptions |

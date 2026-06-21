@@ -112,16 +112,23 @@ pub fn package_surfaces(
     metadata: &CargoMetadata,
     spec: &ExactCrateSpec,
 ) -> Result<MetadataPackageSurfaces, CargoMetadataError> {
-    let package = metadata
+    let mut packages = metadata
         .packages
         .iter()
-        .find(|package| package.name == spec.crate_name() && package.version == spec.version())
+        .filter(|package| package.name == spec.crate_name() && package.version == spec.version());
+    let first = packages
+        .next()
         .ok_or_else(|| CargoMetadataError::PackageVersionNotFound {
             crate_name: spec.crate_name().to_owned(),
             version: spec.version().to_owned(),
         })?;
 
-    Ok(MetadataPackageSurfaces::from_package(package))
+    let mut surfaces = MetadataPackageSurfaces::from_package(first);
+    for package in packages {
+        surfaces.union_with(&MetadataPackageSurfaces::from_package(package));
+    }
+
+    Ok(surfaces)
 }
 
 pub(crate) fn metadata_packages(
@@ -466,5 +473,100 @@ mod tests {
         assert!(surfaces.has_build_rs);
         assert!(surfaces.is_proc_macro);
         assert!(surfaces.has_native_links);
+    }
+
+    #[test]
+    fn package_surfaces_unions_same_name_version_collisions() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "shadow",
+      "id": "git+https://example.invalid/shadow-a#shadow@1.0.0",
+      "version": "1.0.0",
+      "targets": []
+    },
+    {
+      "name": "shadow",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#shadow@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["custom-build"]}]
+    },
+    {
+      "name": "derive-shadow",
+      "id": "git+https://example.invalid/derive-shadow-a#derive-shadow@1.0.0",
+      "version": "1.0.0",
+      "targets": [{"kind": ["proc-macro"]}]
+    },
+    {
+      "name": "derive-shadow",
+      "id": "path+file:///workspace/derive-shadow#derive-shadow@1.0.0",
+      "version": "1.0.0",
+      "links": "derive-shadow-native",
+      "targets": []
+    }
+  ],
+  "workspace_members": [],
+  "resolve": null
+}"#,
+        )
+        .expect("metadata should parse");
+
+        let build_surfaces = package_surfaces(
+            &metadata,
+            &ExactCrateSpec::from_parts("shadow", "1.0.0").expect("spec should build"),
+        )
+        .expect("surfaces should resolve");
+        let mixed_surfaces = package_surfaces(
+            &metadata,
+            &ExactCrateSpec::from_parts("derive-shadow", "1.0.0").expect("spec should build"),
+        )
+        .expect("surfaces should resolve");
+
+        assert!(build_surfaces.has_build_rs);
+        assert!(!build_surfaces.is_proc_macro);
+        assert!(!build_surfaces.has_native_links);
+        assert!(!mixed_surfaces.has_build_rs);
+        assert!(mixed_surfaces.is_proc_macro);
+        assert!(mixed_surfaces.has_native_links);
+    }
+
+    #[test]
+    fn package_surfaces_preserves_single_match_and_zero_match_behaviour() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "demo",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#demo@1.2.3",
+      "version": "1.2.3",
+      "targets": [{"kind": ["custom-build"]}]
+    }
+  ],
+  "workspace_members": [],
+  "resolve": null
+}"#,
+        )
+        .expect("metadata should parse");
+
+        let surfaces = package_surfaces(
+            &metadata,
+            &ExactCrateSpec::from_parts("demo", "1.2.3").expect("spec should build"),
+        )
+        .expect("surfaces should resolve");
+        let error = package_surfaces(
+            &metadata,
+            &ExactCrateSpec::from_parts("missing", "1.0.0").expect("spec should build"),
+        )
+        .expect_err("missing package should fail");
+
+        assert!(surfaces.has_build_rs);
+        assert!(!surfaces.is_proc_macro);
+        assert!(!surfaces.has_native_links);
+        assert!(matches!(
+            error,
+            CargoMetadataError::PackageVersionNotFound { crate_name, version }
+                if crate_name == "missing" && version == "1.0.0"
+        ));
     }
 }

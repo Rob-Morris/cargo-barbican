@@ -146,22 +146,6 @@ to canonicalise the repo root once and assert every walked or read path remains
 within it before using the path. That closes the workspace-member discovery and
 intermediate-review-record symlink cases together.
 
-### Execution-Surface Source-Collision in Enforcement (Non-Sequenced)
-
-The `package_surfaces` helper in `metadata.rs`, used by the `assess`
-classifier in `assessment.rs`, currently resolves execution surfaces by the
-first matching package name and version. It does not scope by source, union
-same-name/same-version matches, or exclude first-party workspace members.
-
-Inventory's live graph path closes this class by using cargo metadata package
-IDs for workspace-member exclusion and unioning surfaces across source-distinct
-same-name/same-version packages. The enforcement classifier still needs its own
-focused hardening slice. The uncommon-but-constructible risk is that a git or
-path package shadowing a name and version could mask a crates.io package's real
-`build.rs`, proc-macro, or native `links` surface in the classifier. The likely
-fix is either to union surfaces across all matching package IDs, a fail-closed
-OR, or to scope the enforcement lookup to the intended crates.io package.
-
 ### Reviewed-Target Source-Kind Enforcement (Non-Sequenced)
 
 Version-only reviewed targets are currently retained for backwards-compatible

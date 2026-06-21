@@ -1,6 +1,6 @@
 [package]
 name = "cargo-barbican"
-version = "0.10.0"
+version = "0.10.1"
 description = "Cargo subcommand for Rust supply-chain hardening. Invokable as `cargo barbican`."
 edition.workspace = true
 license.workspace = true
