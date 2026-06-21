@@ -23,6 +23,9 @@ docs/.cargo-target/
 # brain local state
 .brain/local/
 
+# local agent session state
+.claude/
+
 # local agent overrides
 AGENTS.local.md
 CLAUDE.local.md
