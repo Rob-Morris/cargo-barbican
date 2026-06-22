@@ -511,7 +511,7 @@ fn render_gap(gap: &InventoryGap) -> String {
     }
 }
 
-fn escape_render_field(value: &str) -> String {
+pub(super) fn escape_render_field(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
         match character {

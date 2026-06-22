@@ -7,6 +7,7 @@ use barbican::{
     check_reviewed_rust_targets,
 };
 
+use super::inventory::escape_render_field;
 use super::{
     CommandError, ReviewRecordCheck, check_review_record_paths, load_current_lockfile,
     load_current_manifest_direct_requirements, load_reviewed_targets,
@@ -79,6 +80,11 @@ fn render_pin_check_report(
         writeln!(stdout, "Pin check: FAIL").map_err(CommandError::Io)?;
     }
     writeln!(stdout, "  manifest: {manifest_path}").map_err(CommandError::Io)?;
+    let review_record_check_for = |name: &str| {
+        review_record_checks
+            .iter()
+            .find(|check| check.family_name() == name)
+    };
 
     for family in report.families() {
         writeln!(
@@ -89,10 +95,7 @@ fn render_pin_check_report(
         )
         .map_err(CommandError::Io)?;
 
-        if let Some(review_record_check) = review_record_checks
-            .iter()
-            .find(|check| check.family_name() == family.name())
-        {
+        if let Some(review_record_check) = review_record_check_for(family.name()) {
             if review_record_check.is_success() {
                 writeln!(
                     stdout,
@@ -157,6 +160,26 @@ fn render_pin_check_report(
                 )
                 .map_err(CommandError::Io)?;
             }
+        }
+    }
+
+    let advisory_exceptions = report
+        .families()
+        .iter()
+        .filter(|family| {
+            review_record_check_for(family.name()).is_some_and(ReviewRecordCheck::is_success)
+        })
+        .flat_map(|family| family.advisory_exceptions_with_matching_resolved_target())
+        .collect::<Vec<_>>();
+    if !advisory_exceptions.is_empty() {
+        writeln!(stdout, "Allowed policy exceptions:").map_err(CommandError::Io)?;
+        for exception in advisory_exceptions {
+            writeln!(
+                stdout,
+                "  - {}",
+                escape_render_field(&exception.to_string())
+            )
+            .map_err(CommandError::Io)?;
         }
     }
 

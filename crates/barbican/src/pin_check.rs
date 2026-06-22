@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::reviewed_targets::ObservedResolvedTarget;
 use crate::{
-    CargoDependencySourceKind, CargoManifestDirectRequirement, Lockfile, ReviewedResolvedTarget,
-    ReviewedTargets, Sha256Digest,
+    CargoDependencySourceKind, CargoManifestDirectRequirement, Lockfile, ReviewedAdvisoryException,
+    ReviewedResolvedTarget, ReviewedTargets, Sha256Digest,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,7 @@ pub struct RustReviewedFamilyReport {
     review_record: String,
     direct_checks: Vec<ReviewedDirectDependencyCheck>,
     resolved_checks: Vec<ReviewedResolvedDependencyCheck>,
+    advisory_exceptions: Vec<ReviewedAdvisoryException>,
 }
 
 impl RustReviewedFamilyReport {
@@ -50,6 +51,23 @@ impl RustReviewedFamilyReport {
 
     pub fn resolved_checks(&self) -> &[ReviewedResolvedDependencyCheck] {
         &self.resolved_checks
+    }
+
+    /// Returns advisory exceptions whose checksum-bound resolved target matched.
+    /// Callers must additionally require review-record success before rendering
+    /// or applying the exception as honoured policy. Callers that suppress
+    /// advisory findings must also enforce the exception's `review_by` expiry.
+    pub fn advisory_exceptions_with_matching_resolved_target(
+        &self,
+    ) -> Vec<&ReviewedAdvisoryException> {
+        self.advisory_exceptions
+            .iter()
+            .filter(|exception| {
+                self.resolved_checks.iter().any(|check| {
+                    check.crate_name() == exception.spec().crate_name() && check.is_success()
+                })
+            })
+            .collect()
     }
 
     pub fn is_success(&self) -> bool {
@@ -221,6 +239,7 @@ pub fn check_reviewed_rust_targets(
                 review_record: family.review_record().to_owned(),
                 direct_checks,
                 resolved_checks,
+                advisory_exceptions: family.advisory_exceptions(),
             }
         })
         .collect();
@@ -295,6 +314,105 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
                 .map(Sha256Digest::as_str),
             Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
         );
+    }
+
+    #[test]
+    fn report_carries_reviewed_advisory_exceptions() {
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+
+[rust.families.allowed_advisories]
+serde = [
+  { id = "RUSTSEC-2026-0001", review_by = "2026-09-21" },
+]
+"#,
+        )
+        .expect("reviewed targets should parse");
+        let manifest_requirements = manifest_requirements("").expect("manifest should parse");
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+"#,
+        )
+        .expect("lockfile should parse");
+
+        let report =
+            check_reviewed_rust_targets(&reviewed_targets, &manifest_requirements, &lockfile);
+
+        assert!(report.is_success());
+        assert_eq!(
+            report.families()[0]
+                .advisory_exceptions_with_matching_resolved_target()
+                .len(),
+            1
+        );
+        assert_eq!(
+            report.families()[0].advisory_exceptions_with_matching_resolved_target()[0].to_string(),
+            "serde@1.0.228 RUSTSEC-2026-0001 accepted by reviewed family serde-family (docs/dependency-reviews/2026-05-27-serde.md), review by 2026-09-21"
+        );
+    }
+
+    #[test]
+    fn report_exposes_only_advisory_exceptions_with_matching_resolved_targets() {
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+syn = { version = "2.0.100", checksum_sha256 = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" }
+
+[rust.families.allowed_advisories]
+serde = [
+  { id = "RUSTSEC-2026-0001", review_by = "2026-09-21" },
+]
+syn = [
+  { id = "RUSTSEC-2026-0002", review_by = "2026-09-21" },
+]
+"#,
+        )
+        .expect("reviewed targets should parse");
+        let manifest_requirements = manifest_requirements("").expect("manifest should parse");
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+[[package]]
+name = "syn"
+version = "2.0.99"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+"#,
+        )
+        .expect("lockfile should parse");
+
+        let report =
+            check_reviewed_rust_targets(&reviewed_targets, &manifest_requirements, &lockfile);
+        let matching = report.families()[0].advisory_exceptions_with_matching_resolved_target();
+
+        assert!(!report.is_success());
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].spec().to_string(), "serde@1.0.228");
     }
 
     #[test]

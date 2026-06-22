@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.12.0](changelog/v0.12.0.md) | 2026-06-22 | Render reviewed advisory exceptions in pin-check |
 | [v0.11.0](changelog/v0.11.0.md) | 2026-06-22 | Add reviewed advisory exception config and parsing |
 | [v0.10.1](changelog/v0.10.1.md) | 2026-06-21 | Harden execution-surface collision detection |
 | [v0.10.0](changelog/v0.10.0.md) | 2026-06-21 | Add live execution-surface inventory |

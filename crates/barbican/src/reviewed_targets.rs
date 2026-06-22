@@ -37,6 +37,11 @@ impl ReviewedTargets {
             .collect()
     }
 
+    /// Returns raw configured advisory exceptions with no resolved-target,
+    /// review-record, or expiry binding applied.
+    ///
+    /// Callers must enforce resolved-target match, review-record success, and
+    /// `review_by` expiry before using these exceptions to suppress findings.
     pub fn advisory_exceptions(&self) -> Vec<ReviewedAdvisoryException> {
         self.rust_families
             .iter()
@@ -128,7 +133,12 @@ impl ReviewedRustFamily {
             .collect()
     }
 
-    fn advisory_exceptions(&self) -> Vec<ReviewedAdvisoryException> {
+    /// Returns raw configured advisory exceptions with no resolved-target,
+    /// review-record, or expiry binding applied.
+    ///
+    /// Callers must enforce resolved-target match, review-record success, and
+    /// `review_by` expiry before using these exceptions to suppress findings.
+    pub fn advisory_exceptions(&self) -> Vec<ReviewedAdvisoryException> {
         self.allowed_advisories
             .iter()
             .flat_map(|(crate_name, advisories)| {
