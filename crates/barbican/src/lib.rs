@@ -4,6 +4,7 @@
 //! crates.io release-age checks, `Cargo.lock` diffing, policy assessment.
 //!
 //! See `docs/architecture/overview.md` in the repo root for the design brief.
+pub mod advisory;
 pub mod assessment;
 pub mod config;
 pub mod crates_io;
@@ -18,6 +19,11 @@ pub mod reviewed_targets;
 pub mod sha256;
 pub mod spec;
 
+pub use advisory::{
+    AdvisoryDisposition, AdvisoryFinding, AdvisoryFindingId, AdvisoryParseError,
+    AdvisoryReconciliationReport, CargoAuditAdvisoryReport, CargoDenyAdvisoryReport,
+    parse_cargo_audit_json, parse_cargo_deny_json_lines, reconcile_advisory_findings,
+};
 pub use assessment::{
     InspectionFailure, LockedChecksumDrift, NonCratesIoSourceChange,
     ReleaseAgeExceptionArtefactMismatch, ReleaseAgeViolation, RustAssessmentClassification,

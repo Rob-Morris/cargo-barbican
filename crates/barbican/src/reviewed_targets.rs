@@ -396,6 +396,8 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
     let raw: RawReviewedTargets = toml::from_str(text).map_err(ReviewedTargetsError::Parse)?;
     let mut rust_families = Vec::with_capacity(raw.rust.families.len());
     let mut family_names = BTreeSet::new();
+    let mut advisory_bindings: BTreeMap<(RustSecAdvisoryId, ExactCrateSpec), String> =
+        BTreeMap::new();
 
     for family in raw.rust.families {
         if reviewed_target_string_is_blank_or_control(&family.name) {
@@ -586,6 +588,18 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
                         advisory_id: id,
                     });
                 }
+                let spec = ExactCrateSpec::from_parts(&crate_name, target.version())
+                    .expect("parse_reviewed_targets_toml validates exact specs");
+                if let Some(existing_family) =
+                    advisory_bindings.insert((id.clone(), spec.clone()), family.name.clone())
+                {
+                    return Err(ReviewedTargetsError::DuplicateAllowedAdvisoryBinding {
+                        advisory_id: id,
+                        spec,
+                        first_family: existing_family,
+                        second_family: family.name.clone(),
+                    });
+                }
                 let review_by = parse_iso_date(&raw_advisory.review_by).map_err(|source| {
                     ReviewedTargetsError::InvalidAllowedAdvisoryReviewBy {
                         family: family.name.clone(),
@@ -761,6 +775,15 @@ pub enum ReviewedTargetsError {
         family: String,
         crate_name: String,
         advisory_id: RustSecAdvisoryId,
+    },
+    #[error(
+        "allowed_advisories binding for {spec} {advisory_id} must be owned by one reviewed family; found {first_family:?} and {second_family:?}"
+    )]
+    DuplicateAllowedAdvisoryBinding {
+        advisory_id: RustSecAdvisoryId,
+        spec: ExactCrateSpec,
+        first_family: String,
+        second_family: String,
     },
     #[error(
         "family {family:?} allowed_advisories entry for {crate_name:?} references a crate absent from the same resolved map"

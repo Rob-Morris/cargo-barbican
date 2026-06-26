@@ -1,0 +1,2 @@
+{"fields":{"level":"WARN","message":"unable to find a config path, falling back to default config","timestamp":"<sanitised>"},"type":"log"}
+{"fields":{"advisories":{"errors":0,"helps":0,"notes":0,"warnings":0}},"type":"summary"}
