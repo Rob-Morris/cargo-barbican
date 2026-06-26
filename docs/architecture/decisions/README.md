@@ -20,4 +20,6 @@ system works today. Decision records explain why it ended up that way.
 
 ## Index
 
-No decision records yet.
+- [DD-001: CLI Command Vocabulary For Resolution, Lockfile Generation, And Updates](dd-001-cli-command-vocabulary.md)
+  — `pick` (discover a version), `resolve` (reclaimed for whole-graph lockfile
+  resolution), and `update` (renamed from `resolve`).
