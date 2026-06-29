@@ -302,11 +302,11 @@ impl CommandRunner for FakeCommandRunner {
             .push((package_id.to_owned(), version.to_owned()));
         let result = self.cargo_update_result.clone().map_err(runner_exit);
 
-        if result.is_ok() {
-            if let Some(lockfile_text) = &self.cargo_update_lockfile_text {
-                fs::write(current_dir.join("Cargo.lock"), lockfile_text)
-                    .map_err(cargo_barbican::RunnerError::Spawn)?;
-            }
+        if result.is_ok()
+            && let Some(lockfile_text) = &self.cargo_update_lockfile_text
+        {
+            fs::write(current_dir.join("Cargo.lock"), lockfile_text)
+                .map_err(cargo_barbican::RunnerError::Spawn)?;
         }
 
         result

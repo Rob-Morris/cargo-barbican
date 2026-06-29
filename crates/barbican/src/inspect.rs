@@ -353,7 +353,7 @@ fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> Tarb
         .map(|file| file.path.as_str())
         .collect::<Vec<_>>();
     if let Some(build_script_path) = manifest.build_script_path.as_deref() {
-        if file_paths.iter().any(|path| *path == build_script_path) {
+        if file_paths.contains(&build_script_path) {
             inspection
                 .build_script_paths
                 .push(build_script_path.to_owned());
@@ -362,7 +362,7 @@ fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> Tarb
                 "declared build script path is missing: {build_script_path}"
             ));
         }
-    } else if file_paths.iter().any(|path| *path == "build.rs") {
+    } else if file_paths.contains(&"build.rs") {
         inspection.build_script_paths.push("build.rs".to_owned());
     }
 
@@ -401,9 +401,14 @@ fn scan_ioc_hits(
         })
         .flat_map(|file| {
             IOC_PATTERNS.iter().filter_map(|(needle, description)| {
-                file.contents
-                    .contains(needle)
-                    .then(|| IocHit::new(file.path.clone(), format!("{description}: {needle}")))
+                if file.contents.contains(needle) {
+                    Some(IocHit::new(
+                        file.path.clone(),
+                        format!("{description}: {needle}"),
+                    ))
+                } else {
+                    None
+                }
             })
         })
         .collect()

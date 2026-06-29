@@ -60,6 +60,7 @@ off_main() {
 
 if [ "$MODE" != skip ]; then
   sh scripts/tests/check_commit_msg_test.sh
+  cargo clippy --workspace --all-targets --locked -- -D warnings
 fi
 
 case "$MODE" in

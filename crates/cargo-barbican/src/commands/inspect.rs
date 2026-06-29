@@ -54,17 +54,17 @@ where
             minimum_days,
             age_exception,
         );
-        if matches!(release_age.outcome(), ReleaseAgeOutcome::TooFresh) {
-            if let Some(exception) = reviewed_release_age_exceptions.missing_for_spec(&spec) {
-                writeln!(
-                    stderr,
-                    "{}",
-                    render_missing_release_age_exception_review_record(exception)
-                )
-                .map_err(CommandError::Io)?;
-                failed = true;
-                continue;
-            }
+        if matches!(release_age.outcome(), ReleaseAgeOutcome::TooFresh)
+            && let Some(exception) = reviewed_release_age_exceptions.missing_for_spec(&spec)
+        {
+            writeln!(
+                stderr,
+                "{}",
+                render_missing_release_age_exception_review_record(exception)
+            )
+            .map_err(CommandError::Io)?;
+            failed = true;
+            continue;
         }
 
         let tarball = match client.fetch_release_tarball(&spec) {

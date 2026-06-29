@@ -154,12 +154,12 @@ where
         minimum_days,
         age_exception,
     );
-    if matches!(release_age.outcome(), ReleaseAgeOutcome::TooFresh) {
-        if let Some(exception) = reviewed_release_age_exceptions.missing_for_spec(spec) {
-            return Err(render_missing_release_age_exception_review_record(
-                exception,
-            ));
-        }
+    if matches!(release_age.outcome(), ReleaseAgeOutcome::TooFresh)
+        && let Some(exception) = reviewed_release_age_exceptions.missing_for_spec(spec)
+    {
+        return Err(render_missing_release_age_exception_review_record(
+            exception,
+        ));
     }
 
     let tarball = client

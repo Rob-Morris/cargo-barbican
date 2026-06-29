@@ -751,11 +751,11 @@ mod tests {
 
     #[test]
     fn parses_cargo_deny_json_advisory_diagnostics() {
-        let report = parse_cargo_deny_json_lines(&format!(
-            r#"{{"type":"diagnostic","fields":{{"code":"advisory","advisory":{{"id":"RUSTSEC-2026-0001"}},"graphs":[{{"Krate":{{"name":"serde","version":"1.0.228"}}}}]}}}}
-{{"type":"summary","fields":{{"advisories":{{"errors":1,"warnings":0,"helps":0,"notes":0}}}}}}
+        let report = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#
-        ))
+        )
         .expect("cargo-deny output should parse");
 
         assert_eq!(report.findings().len(), 1);
