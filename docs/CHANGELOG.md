@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.13.1](changelog/v0.13.1.md) | 2026-06-29 | Harden policy-file reads against symlink disclosure |
 | [v0.13.0](changelog/v0.13.0.md) | 2026-06-29 | Add reviewed advisory reconciliation to audit |
 | [v0.12.1](changelog/v0.12.1.md) | 2026-06-26 | Reject cross-family duplicate advisory bindings |
 | [v0.12.0](changelog/v0.12.0.md) | 2026-06-22 | Render reviewed advisory exceptions in pin-check |

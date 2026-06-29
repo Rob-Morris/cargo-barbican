@@ -2851,6 +2851,96 @@ fn audit_rejects_symlinked_deny_toml_without_reading_target() {
     assert!(stderr.is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn audit_rejects_symlinked_barbican_toml_without_reading_target() {
+    use std::os::unix::fs::symlink;
+
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(temp_dir.join("secret.env"), "SECRET_TOKEN=do-not-print\n")
+        .expect("secret target should write");
+    symlink(temp_dir.join("secret.env"), temp_dir.join("barbican.toml"))
+        .expect("barbican.toml symlink should create");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect_err("symlinked barbican.toml should fail closed");
+
+    let rendered_error = error.to_string();
+    assert!(rendered_error.contains("barbican.toml is a symlink"));
+    assert!(!rendered_error.contains("SECRET_TOKEN"));
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn audit_rejects_symlinked_reviewed_targets_without_reading_target() {
+    use std::os::unix::fs::symlink;
+
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(temp_dir.join("secret.env"), "SECRET_TOKEN=do-not-print\n")
+        .expect("secret target should write");
+    symlink(
+        temp_dir.join("secret.env"),
+        temp_dir.join("reviewed-targets.toml"),
+    )
+    .expect("reviewed-targets.toml symlink should create");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect_err("symlinked reviewed-targets.toml should fail closed");
+
+    let rendered_error = error.to_string();
+    assert!(rendered_error.contains("reviewed-targets.toml is a symlink"));
+    assert!(!rendered_error.contains("SECRET_TOKEN"));
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn audit_loads_regular_barbican_and_reviewed_targets_files() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-deny"
+"#,
+    )
+    .expect("barbican config should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        "[rust]\nfamilies = []\n",
+    )
+    .expect("reviewed targets should write");
+    fs::write(temp_dir.join("Cargo.toml"), "[dependencies]\n").expect("manifest should write");
+    fs::write(temp_dir.join("Cargo.lock"), "version = 4\n").expect("lockfile should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("regular policy files should load");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(
+        String::from_utf8(stdout)
+            .expect("stdout should be utf8")
+            .contains("Audit: PASS")
+    );
+    assert!(stderr.is_empty());
+}
+
 #[test]
 fn audit_reports_cargo_audit_settings_ignore_and_idless_warnings() {
     let cli = Cli::parse_from(["cargo-barbican", "audit"]);

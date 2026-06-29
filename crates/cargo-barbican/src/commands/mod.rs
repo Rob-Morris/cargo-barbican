@@ -367,13 +367,11 @@ where
 }
 
 pub(super) fn load_config(current_dir: &Path) -> Result<BarbicanConfig, CommandError> {
-    let path = current_dir.join(CONFIG_FILE_NAME);
-
-    match fs::read_to_string(&path) {
-        Ok(text) => BarbicanConfig::from_toml_str(&text).map_err(CommandError::Config),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(BarbicanConfig::default()),
+    match read_optional_text_no_symlink(current_dir, Path::new(CONFIG_FILE_NAME)) {
+        Ok(Some(text)) => BarbicanConfig::from_toml_str(&text).map_err(CommandError::Config),
+        Ok(None) => Ok(BarbicanConfig::default()),
         Err(source) => Err(CommandError::ConfigRead {
-            path: path.display().to_string(),
+            path: CONFIG_FILE_NAME.to_owned(),
             source,
         }),
     }
@@ -674,10 +672,9 @@ pub(super) fn load_reviewed_targets(
     current_dir: &Path,
     path: &Path,
 ) -> Result<Option<ReviewedTargets>, CommandError> {
-    let config_path = current_dir.join(path);
-    let text = match fs::read_to_string(&config_path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+    let text = match read_optional_text_no_symlink(current_dir, path) {
+        Ok(Some(text)) => text,
+        Ok(None) => return Ok(None),
         Err(source) => {
             return Err(CommandError::ReviewedTargetsRead {
                 path: path.display().to_string(),
