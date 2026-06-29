@@ -177,7 +177,7 @@ where
         Command::Review { base_dir } => {
             review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)
         }
-        Command::Audit => audit::run_audit(current_dir, runner, stderr),
+        Command::Audit => audit::run_audit(current_dir, runner, now, stdout, stderr),
         Command::Verify => verify::run_verify(current_dir, runner, stdout, stderr),
     }
 }
@@ -342,6 +342,30 @@ pub(super) fn join_display<T: fmt::Display>(values: &[T], separator: &str) -> St
         .join(separator)
 }
 
+pub(super) fn render_allowed_policy_exceptions<I, T>(
+    stdout: &mut dyn Write,
+    exceptions: I,
+) -> Result<(), CommandError>
+where
+    I: IntoIterator<Item = T>,
+    T: fmt::Display,
+{
+    let rendered = exceptions
+        .into_iter()
+        .map(|exception| inventory::escape_render_field(&exception.to_string()))
+        .collect::<Vec<_>>();
+    if rendered.is_empty() {
+        return Ok(());
+    }
+
+    writeln!(stdout, "Allowed policy exceptions:").map_err(CommandError::Io)?;
+    for exception in rendered {
+        writeln!(stdout, "  - {exception}").map_err(CommandError::Io)?;
+    }
+
+    Ok(())
+}
+
 pub(super) fn load_config(current_dir: &Path) -> Result<BarbicanConfig, CommandError> {
     let path = current_dir.join(CONFIG_FILE_NAME);
 
@@ -352,6 +376,26 @@ pub(super) fn load_config(current_dir: &Path) -> Result<BarbicanConfig, CommandE
             path: path.display().to_string(),
             source,
         }),
+    }
+}
+
+pub(super) fn read_optional_text_no_symlink(
+    root_dir: &Path,
+    relative_path: &Path,
+) -> io::Result<Option<String>> {
+    let path = root_dir.join(relative_path);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(io::Error::other(format!(
+            "{} is a symlink; refusing to read optional policy text",
+            relative_path.display()
+        ))),
+        Ok(metadata) if metadata.is_file() => fs::read_to_string(path).map(Some),
+        Ok(_) => Err(io::Error::other(format!(
+            "{} is not a regular file",
+            relative_path.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
     }
 }
 

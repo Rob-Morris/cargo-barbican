@@ -173,7 +173,7 @@ impl BarbicanConfig {
 }
 
 impl CargoDenyCheck {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Advisories => "advisories",
             Self::Bans => "bans",
@@ -184,7 +184,7 @@ impl CargoDenyCheck {
 }
 
 impl LockfileAdvisoryScanner {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::CargoDeny => "cargo-deny",
             Self::CargoAudit => "cargo-audit",

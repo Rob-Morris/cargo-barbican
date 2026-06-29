@@ -9,7 +9,8 @@ use crate::command_runner::CommandRunner;
 use super::diff_render::render_unified_file_diff;
 use super::{
     CommandError, REVIEW_RECORDS_DIR, collect_relative_files_matching, fail,
-    insert_review_root_paths, review_paths, workspace_manifest_paths,
+    insert_review_root_paths, read_optional_text_no_symlink, review_paths,
+    workspace_manifest_paths,
 };
 
 pub(super) fn run_review<R>(
@@ -79,9 +80,9 @@ fn render_non_git_review_diff(
 
     for relative_path in review_file_paths {
         let base_text =
-            read_optional_review_text(base_root, &relative_path).map_err(CommandError::Io)?;
+            read_optional_text_no_symlink(base_root, &relative_path).map_err(CommandError::Io)?;
         let current_text =
-            read_optional_review_text(current_dir, &relative_path).map_err(CommandError::Io)?;
+            read_optional_text_no_symlink(current_dir, &relative_path).map_err(CommandError::Io)?;
 
         if base_text == current_text {
             continue;
@@ -124,14 +125,6 @@ fn collect_review_record_paths(root_dir: &Path, paths: &mut BTreeSet<PathBuf>) -
             review_dir.display()
         ))),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-fn read_optional_review_text(root_dir: &Path, relative_path: &Path) -> io::Result<Option<String>> {
-    match fs::read_to_string(root_dir.join(relative_path)) {
-        Ok(text) => Ok(Some(text)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
 }

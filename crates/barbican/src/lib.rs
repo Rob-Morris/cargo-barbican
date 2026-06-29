@@ -8,6 +8,7 @@ pub mod advisory;
 pub mod assessment;
 pub mod config;
 pub mod crates_io;
+pub mod deny_config;
 pub mod inspect;
 pub mod inventory;
 pub mod lockfile;
@@ -20,9 +21,11 @@ pub mod sha256;
 pub mod spec;
 
 pub use advisory::{
-    AdvisoryDisposition, AdvisoryFinding, AdvisoryFindingId, AdvisoryParseError,
-    AdvisoryReconciliationReport, CargoAuditAdvisoryReport, CargoDenyAdvisoryReport,
-    parse_cargo_audit_json, parse_cargo_deny_json_lines, reconcile_advisory_findings,
+    AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
+    AdvisoryFindingId, AdvisoryParseError, AdvisoryReconciliationReport, CargoAuditAdvisoryReport,
+    CargoDenyAdvisoryReport, CargoDenyNoAdvisoryDiagnostic, CargoDenySummaryCount,
+    evaluate_advisory_audit, parse_cargo_audit_json, parse_cargo_deny_json_lines,
+    reconcile_advisory_findings,
 };
 pub use assessment::{
     InspectionFailure, LockedChecksumDrift, NonCratesIoSourceChange,
@@ -37,6 +40,9 @@ pub use config::{
 };
 pub use crates_io::{
     CrateRelease, CratesIoClient, CratesIoClientError, parse_version_response_body,
+};
+pub use deny_config::{
+    CargoDenyRuntimeConfigError, advisory_ignores_from_toml, generate_cargo_deny_runtime_config,
 };
 pub use inspect::{
     CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate, inspect_published_crate_at,

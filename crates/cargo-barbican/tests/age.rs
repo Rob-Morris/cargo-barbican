@@ -16,7 +16,8 @@ use barbican::{
     parse_version_response_body,
 };
 use cargo_barbican::{
-    Cli, CommandRunner, UreqCratesIoClient, run_cli_with_runner, run_cli_with_runner_at,
+    Cli, CommandOutput, CommandRunner, UreqCratesIoClient, run_cli_with_runner,
+    run_cli_with_runner_at,
 };
 use clap::Parser;
 use miniz_oxide::deflate::compress_to_vec;
@@ -113,7 +114,8 @@ struct FakeCommandRunner {
     cargo_tree_result: Result<String, String>,
     git_diff_result: Result<String, String>,
     cargo_audit_result: Result<String, String>,
-    cargo_deny_result: Result<(), String>,
+    cargo_audit_json_result: Result<CommandOutput, String>,
+    cargo_deny_json_result: Result<CommandOutput, String>,
     cargo_build_result: Result<(), String>,
     cargo_test_result: Result<(), String>,
     cargo_updates: RefCell<Vec<(String, String)>>,
@@ -121,7 +123,9 @@ struct FakeCommandRunner {
     cargo_tree_calls: RefCell<Vec<PathBuf>>,
     git_diff_paths: RefCell<Vec<PathBuf>>,
     audit_calls: RefCell<Vec<PathBuf>>,
-    deny_calls: RefCell<usize>,
+    audit_json_calls: RefCell<Vec<(PathBuf, PathBuf)>>,
+    deny_json_calls: RefCell<Vec<(PathBuf, PathBuf, Vec<barbican::CargoDenyCheck>)>>,
+    deny_json_config_texts: RefCell<Vec<String>>,
     build_calls: RefCell<usize>,
     test_calls: RefCell<usize>,
 }
@@ -137,7 +141,14 @@ impl Default for FakeCommandRunner {
             cargo_tree_result: Ok(String::new()),
             git_diff_result: Ok(String::new()),
             cargo_audit_result: Ok(String::new()),
-            cargo_deny_result: Ok(()),
+            cargo_audit_json_result: Ok(CommandOutput {
+                stdout: clean_cargo_audit_json().to_owned(),
+                stderr: String::new(),
+            }),
+            cargo_deny_json_result: Ok(CommandOutput {
+                stdout: String::new(),
+                stderr: clean_cargo_deny_jsonl().to_owned(),
+            }),
             cargo_build_result: Ok(()),
             cargo_test_result: Ok(()),
             cargo_updates: RefCell::new(Vec::new()),
@@ -145,7 +156,9 @@ impl Default for FakeCommandRunner {
             cargo_tree_calls: RefCell::new(Vec::new()),
             git_diff_paths: RefCell::new(Vec::new()),
             audit_calls: RefCell::new(Vec::new()),
-            deny_calls: RefCell::new(0),
+            audit_json_calls: RefCell::new(Vec::new()),
+            deny_json_calls: RefCell::new(Vec::new()),
+            deny_json_config_texts: RefCell::new(Vec::new()),
             build_calls: RefCell::new(0),
             test_calls: RefCell::new(0),
         }
@@ -205,6 +218,22 @@ impl FakeCommandRunner {
         self
     }
 
+    fn with_cargo_audit_json(mut self, stdout: &str) -> Self {
+        self.cargo_audit_json_result = Ok(CommandOutput {
+            stdout: stdout.to_owned(),
+            stderr: String::new(),
+        });
+        self
+    }
+
+    fn with_cargo_deny_json(mut self, stderr: &str) -> Self {
+        self.cargo_deny_json_result = Ok(CommandOutput {
+            stdout: String::new(),
+            stderr: stderr.to_owned(),
+        });
+        self
+    }
+
     fn recorded_updates(&self) -> Vec<(String, String)> {
         self.cargo_updates.borrow().clone()
     }
@@ -219,6 +248,18 @@ impl FakeCommandRunner {
 
     fn recorded_audit_calls(&self) -> Vec<PathBuf> {
         self.audit_calls.borrow().clone()
+    }
+
+    fn recorded_audit_json_calls(&self) -> Vec<(PathBuf, PathBuf)> {
+        self.audit_json_calls.borrow().clone()
+    }
+
+    fn recorded_deny_json_calls(&self) -> Vec<(PathBuf, PathBuf, Vec<barbican::CargoDenyCheck>)> {
+        self.deny_json_calls.borrow().clone()
+    }
+
+    fn recorded_deny_json_config_texts(&self) -> Vec<String> {
+        self.deny_json_config_texts.borrow().clone()
     }
 
     fn recorded_diff_paths(&self) -> Vec<PathBuf> {
@@ -314,9 +355,32 @@ impl CommandRunner for FakeCommandRunner {
         self.cargo_audit_result.clone().map_err(runner_exit)
     }
 
-    fn cargo_deny(&self, _current_dir: &Path) -> Result<(), cargo_barbican::RunnerError> {
-        *self.deny_calls.borrow_mut() += 1;
-        self.cargo_deny_result.clone().map_err(runner_exit)
+    fn cargo_audit_json(
+        &self,
+        controlled_cwd: &Path,
+        lockfile_path: &Path,
+    ) -> Result<CommandOutput, cargo_barbican::RunnerError> {
+        self.audit_json_calls
+            .borrow_mut()
+            .push((controlled_cwd.to_path_buf(), lockfile_path.to_path_buf()));
+        self.cargo_audit_json_result.clone().map_err(runner_exit)
+    }
+
+    fn cargo_deny_json(
+        &self,
+        current_dir: &Path,
+        config_path: &Path,
+        checks: &[barbican::CargoDenyCheck],
+    ) -> Result<CommandOutput, cargo_barbican::RunnerError> {
+        self.deny_json_calls.borrow_mut().push((
+            current_dir.to_path_buf(),
+            config_path.to_path_buf(),
+            checks.to_vec(),
+        ));
+        self.deny_json_config_texts
+            .borrow_mut()
+            .push(fs::read_to_string(config_path).unwrap_or_else(|error| error.to_string()));
+        self.cargo_deny_json_result.clone().map_err(runner_exit)
     }
 
     fn cargo_build_locked(&self, _current_dir: &Path) -> Result<(), cargo_barbican::RunnerError> {
@@ -2425,7 +2489,7 @@ fn review_reports_missing_non_git_base_directory() {
 }
 
 #[test]
-fn audit_runs_both_delegated_checks() {
+fn audit_runs_cargo_deny_json_by_default() {
     let cli = Cli::parse_from(["cargo-barbican", "audit"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
@@ -2437,15 +2501,25 @@ fn audit_runs_both_delegated_checks() {
         .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
-    assert_eq!(runner.audit_calls.borrow().len(), 1);
-    assert_eq!(*runner.deny_calls.borrow(), 1);
+    assert!(runner.recorded_audit_calls().is_empty());
+    assert_eq!(runner.recorded_audit_json_calls().len(), 0);
+    let deny_calls = runner.recorded_deny_json_calls();
+    assert_eq!(deny_calls.len(), 1);
+    assert_eq!(
+        deny_calls[0].2,
+        vec![
+            barbican::CargoDenyCheck::Advisories,
+            barbican::CargoDenyCheck::Bans,
+            barbican::CargoDenyCheck::Sources,
+        ]
+    );
 }
 
 #[test]
 fn audit_reports_failures() {
     let cli = Cli::parse_from(["cargo-barbican", "audit"]);
     let client = FakeCratesIoClient::default();
-    let runner = FakeCommandRunner::default().with_cargo_audit_error("boom");
+    let runner = FakeCommandRunner::default().with_cargo_deny_json("not-json");
     let temp_dir = fresh_temp_dir();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -2454,12 +2528,385 @@ fn audit_reports_failures() {
         .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::from(1));
-    assert_eq!(runner.audit_calls.borrow().len(), 1);
-    assert_eq!(*runner.deny_calls.borrow(), 0);
+    assert!(runner.recorded_audit_calls().is_empty());
+    assert_eq!(runner.recorded_deny_json_calls().len(), 1);
     assert!(
         String::from_utf8(stderr)
             .expect("stderr should be utf8")
-            .contains("FAIL cargo audit: boom")
+            .contains("FAIL cargo deny structured output:")
+    );
+}
+
+#[test]
+fn audit_accepts_reviewed_advisory_with_cargo_deny_scanner() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
+    let temp_dir = fresh_temp_dir();
+    write_advisory_audit_fixture(&temp_dir, None, "2026-09-21");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: PASS"));
+    assert!(rendered.contains("Allowed policy exceptions:"));
+    assert!(rendered.contains("serde@1.0.228 RUSTSEC-2026-0001 accepted by reviewed family"));
+    assert_eq!(runner.recorded_deny_json_calls().len(), 1);
+    assert!(runner.recorded_audit_json_calls().is_empty());
+}
+
+#[test]
+fn audit_fails_unreviewed_advisory_with_cargo_deny_scanner() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
+    let temp_dir = fresh_temp_dir();
+    fs::write(temp_dir.join("barbican.toml"), "").expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(rendered.contains("FAIL RUSTSEC-2026-0001 serde@1.0.228: unreviewed advisory finding"));
+    assert!(!rendered.contains("Allowed policy exceptions:"));
+}
+
+#[test]
+fn audit_fails_expired_reviewed_advisory_with_cargo_deny_scanner() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
+    let temp_dir = fresh_temp_dir();
+    write_advisory_audit_fixture(&temp_dir, None, "2000-01-01");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(rendered.contains("reviewed advisory exception expired"));
+}
+
+#[test]
+fn audit_accepts_reviewed_advisory_with_cargo_audit_scanner() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_audit_json(&cargo_audit_advisory_json());
+    let temp_dir = fresh_temp_dir();
+    write_advisory_audit_fixture(
+        &temp_dir,
+        Some(r#"lockfile_scanner = "cargo-audit""#),
+        "2026-09-21",
+    );
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: PASS"));
+    assert!(rendered.contains("Allowed policy exceptions:"));
+    assert_eq!(runner.recorded_deny_json_calls().len(), 1);
+    assert_eq!(runner.recorded_audit_json_calls().len(), 1);
+    assert_ne!(runner.recorded_audit_json_calls()[0].0, temp_dir);
+}
+
+#[test]
+fn audit_accepts_reviewed_advisory_with_both_scanners() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_deny_json(&cargo_deny_advisory_jsonl())
+        .with_cargo_audit_json(&cargo_audit_advisory_json());
+    let temp_dir = fresh_temp_dir();
+    write_advisory_audit_fixture(
+        &temp_dir,
+        Some(r#"lockfile_scanner = "both""#),
+        "2026-09-21",
+    );
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert_eq!(rendered.matches("accepted by reviewed family").count(), 1);
+    assert_eq!(runner.recorded_deny_json_calls().len(), 1);
+    assert_eq!(runner.recorded_audit_json_calls().len(), 1);
+}
+
+#[test]
+fn audit_generated_deny_config_neutralises_native_advisory_ignore() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("deny.toml"),
+        r#"[advisories]
+ignore = ["RUSTSEC-2026-0001"]
+unmaintained = "allow"
+"#,
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let generated = runner.recorded_deny_json_config_texts();
+    assert_eq!(generated.len(), 1);
+    assert!(generated[0].contains("ignore = []"));
+    assert!(!generated[0].contains("RUSTSEC-2026-0001"));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Native delegated advisory ignores:"));
+    assert!(rendered.contains("WARN deny.toml ignores RUSTSEC-2026-0001"));
+}
+
+#[test]
+fn audit_uses_controlled_cwd_to_neutralise_cargo_audit_config() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    fs::create_dir_all(temp_dir.join(".cargo")).expect("cargo config dir should exist");
+    fs::write(
+        temp_dir.join(".cargo/audit.toml"),
+        r#"[advisories]
+ignore = ["RUSTSEC-2026-0001"]
+"#,
+    )
+    .expect("cargo audit config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let audit_calls = runner.recorded_audit_json_calls();
+    assert_eq!(audit_calls.len(), 1);
+    assert_ne!(audit_calls[0].0, temp_dir);
+    assert_eq!(audit_calls[0].1, temp_dir.join("Cargo.lock"));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("WARN .cargo/audit.toml ignores RUSTSEC-2026-0001"));
+}
+
+#[test]
+fn audit_runs_cargo_deny_checks_when_cargo_audit_scans_advisories() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_bans_error_jsonl());
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    assert_eq!(runner.recorded_deny_json_calls().len(), 1);
+    assert_eq!(runner.recorded_audit_json_calls().len(), 1);
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("FAIL cargo-deny diagnostic without advisory id"));
+    assert!(rendered.contains("FAIL cargo-deny bans check reported 1 error(s)"));
+}
+
+#[test]
+fn audit_fails_native_delegated_ignore_when_policy_is_deny() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates]
+unmanaged_delegated_policy = "deny"
+"#,
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("deny.toml"),
+        r#"[advisories]
+ignore = ["RUSTSEC-2026-0001"]
+"#,
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(rendered.contains("Native delegated advisory ignores:"));
+    assert!(rendered.contains("FAIL deny.toml ignores RUSTSEC-2026-0001"));
+}
+
+#[cfg(unix)]
+#[test]
+fn audit_rejects_symlinked_deny_toml_without_reading_target() {
+    use std::os::unix::fs::symlink;
+
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    fs::write(temp_dir.join("secret.env"), "SECRET_TOKEN=do-not-print\n")
+        .expect("secret target should write");
+    symlink(temp_dir.join("secret.env"), temp_dir.join("deny.toml"))
+        .expect("deny.toml symlink should create");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect_err("symlinked deny.toml should fail closed");
+
+    let rendered_error = error.to_string();
+    assert!(rendered_error.contains("deny.toml is a symlink"));
+    assert!(!rendered_error.contains("SECRET_TOKEN"));
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn audit_reports_cargo_audit_settings_ignore_and_idless_warnings() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner =
+        FakeCommandRunner::default().with_cargo_audit_json(&cargo_audit_ignored_and_idless_json());
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(
+        rendered
+            .contains("FAIL cargo-audit runtime settings.ignore still contains RUSTSEC-2026-0001")
+    );
+    assert!(rendered.contains("FAIL cargo-audit reported 1 warning(s) without advisory ids"));
+}
+
+#[test]
+fn audit_fails_closed_on_cargo_audit_parse_errors() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_audit_json("not-json");
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL cargo audit structured output:")
     );
 }
 
@@ -4533,6 +4980,93 @@ fn metadata_with_packages(packages: &[(&str, &str, &str)]) -> String {
         .join(",");
 
     format!(r#"{{"packages":[{packages_json}],"workspace_members":[],"resolve":null}}"#)
+}
+
+fn clean_cargo_deny_jsonl() -> &'static str {
+    r#"{"type":"summary","fields":{"advisories":{"errors":0,"warnings":0,"helps":0,"notes":0},"bans":{"errors":0,"warnings":0,"helps":0,"notes":0},"sources":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
+"#
+}
+
+fn clean_cargo_audit_json() -> &'static str {
+    r#"{
+  "vulnerabilities": { "found": false, "count": 0, "list": [] },
+  "settings": { "ignore": [] },
+  "warnings": {}
+}"#
+}
+
+fn cargo_deny_advisory_jsonl() -> String {
+    r#"{"type":"diagnostic","fields":{"severity":"error","code":"vulnerability","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0},"bans":{"errors":0,"warnings":0,"helps":0,"notes":0},"sources":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
+"#
+    .to_owned()
+}
+
+fn cargo_deny_bans_error_jsonl() -> String {
+    r#"{"type":"diagnostic","fields":{"severity":"error","code":"banned"}}
+{"type":"summary","fields":{"advisories":{"errors":0,"warnings":0,"helps":0,"notes":0},"bans":{"errors":1,"warnings":0,"helps":0,"notes":0},"sources":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
+"#
+    .to_owned()
+}
+
+fn cargo_audit_advisory_json() -> String {
+    r#"{
+  "vulnerabilities": {
+    "found": true,
+    "count": 1,
+    "list": [
+      {
+        "advisory": { "id": "RUSTSEC-2026-0001" },
+        "package": { "name": "serde", "version": "1.0.228" }
+      }
+    ]
+  },
+  "settings": { "ignore": [] },
+  "warnings": {}
+}"#
+    .to_owned()
+}
+
+fn cargo_audit_ignored_and_idless_json() -> String {
+    r#"{
+  "vulnerabilities": { "found": false, "count": 0, "list": [] },
+  "settings": { "ignore": ["RUSTSEC-2026-0001"] },
+  "warnings": {
+    "yanked": [
+      {
+        "package": { "name": "serde", "version": "1.0.228" }
+      }
+    ]
+  }
+}"#
+    .to_owned()
+}
+
+fn write_advisory_audit_fixture(temp_dir: &Path, advisory_config: Option<&str>, review_by: &str) {
+    let checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[(
+            "serde",
+            "1.0.228",
+            Some("registry+https://github.com/rust-lang/crates.io-index"),
+            Some(checksum),
+        )]),
+    )
+    .expect("lockfile should write");
+    if let Some(advisory_config) = advisory_config {
+        fs::write(
+            temp_dir.join("barbican.toml"),
+            format!("[delegates.advisories]\n{advisory_config}\n"),
+        )
+        .expect("config should write");
+    }
+    write_advisory_exception_policy(temp_dir, "serde", "1.0.228", checksum, review_by, true);
 }
 
 fn fresh_temp_dir() -> PathBuf {

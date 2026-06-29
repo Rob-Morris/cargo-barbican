@@ -3,7 +3,10 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 use time::OffsetDateTime;
 
-use crate::{ExactCrateSpec, ExactCrateSpecError, ReviewedAdvisoryException, RustSecAdvisoryId};
+use crate::{
+    CargoDenyCheck, ExactCrateSpec, ExactCrateSpecError, LockfileAdvisoryScanner,
+    ReviewedAdvisoryException, RustSecAdvisoryId,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AdvisoryFinding {
@@ -57,11 +60,87 @@ impl std::fmt::Display for AdvisoryFindingId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CargoDenyAdvisoryReport {
     findings: Vec<AdvisoryFinding>,
+    summary_counts: Vec<CargoDenySummaryCount>,
+    no_advisory_diagnostics: Vec<CargoDenyNoAdvisoryDiagnostic>,
 }
 
 impl CargoDenyAdvisoryReport {
     pub fn findings(&self) -> &[AdvisoryFinding] {
         &self.findings
+    }
+
+    pub fn summary_counts(&self) -> &[CargoDenySummaryCount] {
+        &self.summary_counts
+    }
+
+    pub fn non_advisory_error_counts(&self) -> Vec<&CargoDenySummaryCount> {
+        self.summary_counts
+            .iter()
+            .filter(|count| {
+                count.check() != CargoDenyCheck::Advisories.as_str() && count.errors() > 0
+            })
+            .collect()
+    }
+
+    pub fn no_advisory_diagnostics(&self) -> &[CargoDenyNoAdvisoryDiagnostic] {
+        &self.no_advisory_diagnostics
+    }
+
+    fn summary_count_for(&self, check: CargoDenyCheck) -> Option<&CargoDenySummaryCount> {
+        self.summary_counts
+            .iter()
+            .find(|count| count.check() == check.as_str())
+    }
+
+    fn has_unenumerated_advisory_errors(&self) -> bool {
+        self.summary_count_for(CargoDenyCheck::Advisories)
+            .is_some_and(|count| count.errors() > 0)
+            && self.findings.is_empty()
+            && self
+                .no_advisory_diagnostics
+                .iter()
+                .all(CargoDenyNoAdvisoryDiagnostic::is_known_benign)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CargoDenySummaryCount {
+    check: String,
+    errors: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CargoDenyNoAdvisoryDiagnostic {
+    line: usize,
+    severity: Option<String>,
+    code: Option<String>,
+}
+
+impl CargoDenyNoAdvisoryDiagnostic {
+    pub fn line(&self) -> usize {
+        self.line
+    }
+
+    pub fn severity(&self) -> Option<&str> {
+        self.severity.as_deref()
+    }
+
+    pub fn code(&self) -> Option<&str> {
+        self.code.as_deref()
+    }
+
+    fn is_known_benign(&self) -> bool {
+        matches!(self.severity(), Some("warning" | "note" | "help"))
+    }
+}
+
+impl CargoDenySummaryCount {
+    pub fn check(&self) -> &str {
+        &self.check
+    }
+
+    pub fn errors(&self) -> u64 {
+        self.errors
     }
 }
 
@@ -69,6 +148,7 @@ impl CargoDenyAdvisoryReport {
 pub struct CargoAuditAdvisoryReport {
     findings: Vec<AdvisoryFinding>,
     settings_ignore: Vec<String>,
+    idless_warnings: usize,
 }
 
 impl CargoAuditAdvisoryReport {
@@ -79,12 +159,18 @@ impl CargoAuditAdvisoryReport {
     pub fn settings_ignore(&self) -> &[String] {
         &self.settings_ignore
     }
+
+    pub fn idless_warnings(&self) -> usize {
+        self.idless_warnings
+    }
 }
 
 pub fn parse_cargo_deny_json_lines(
     text: &str,
 ) -> Result<CargoDenyAdvisoryReport, AdvisoryParseError> {
     let mut findings = BTreeSet::new();
+    let mut summary_counts = Vec::new();
+    let mut no_advisory_diagnostics = Vec::new();
     let mut saw_summary = false;
 
     for (index, line) in text.lines().enumerate() {
@@ -110,8 +196,16 @@ pub fn parse_cargo_deny_json_lines(
         }
 
         match record_type {
-            "summary" => saw_summary = true,
-            "diagnostic" => collect_cargo_deny_diagnostic(index + 1, &value, &mut findings)?,
+            "summary" => {
+                summary_counts = parse_cargo_deny_summary(index + 1, &value)?;
+                saw_summary = true;
+            }
+            "diagnostic" => collect_cargo_deny_diagnostic(
+                index + 1,
+                &value,
+                &mut findings,
+                &mut no_advisory_diagnostics,
+            )?,
             _ => {}
         }
     }
@@ -122,13 +216,48 @@ pub fn parse_cargo_deny_json_lines(
 
     Ok(CargoDenyAdvisoryReport {
         findings: findings.into_iter().collect(),
+        summary_counts,
+        no_advisory_diagnostics,
     })
+}
+
+fn parse_cargo_deny_summary(
+    line: usize,
+    value: &serde_json::Value,
+) -> Result<Vec<CargoDenySummaryCount>, AdvisoryParseError> {
+    let fields = value
+        .get("fields")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| AdvisoryParseError::CargoDenyShape {
+            reason: format!("summary line {line} missing fields"),
+        })?;
+    fields
+        .iter()
+        .map(|(check, counts)| {
+            let counts = counts
+                .as_object()
+                .ok_or_else(|| AdvisoryParseError::CargoDenyShape {
+                    reason: format!("summary line {line} {check} is not an object"),
+                })?;
+            let errors = counts
+                .get("errors")
+                .and_then(serde_json::Value::as_u64)
+                .ok_or_else(|| AdvisoryParseError::CargoDenyShape {
+                    reason: format!("summary line {line} {check}.errors missing or invalid"),
+                })?;
+            Ok(CargoDenySummaryCount {
+                check: check.to_owned(),
+                errors,
+            })
+        })
+        .collect()
 }
 
 fn collect_cargo_deny_diagnostic(
     line: usize,
     value: &serde_json::Value,
     findings: &mut BTreeSet<AdvisoryFinding>,
+    no_advisory_diagnostics: &mut Vec<CargoDenyNoAdvisoryDiagnostic>,
 ) -> Result<(), AdvisoryParseError> {
     let fields = value
         .get("fields")
@@ -137,6 +266,17 @@ fn collect_cargo_deny_diagnostic(
             reason: format!("diagnostic line {line} missing fields"),
         })?;
     let Some(advisory) = fields.get("advisory") else {
+        no_advisory_diagnostics.push(CargoDenyNoAdvisoryDiagnostic {
+            line,
+            severity: fields
+                .get("severity")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            code: fields
+                .get("code")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        });
         return Ok(());
     };
     let advisory_id = advisory
@@ -217,6 +357,7 @@ pub fn parse_cargo_audit_json(text: &str) -> Result<CargoAuditAdvisoryReport, Ad
             reason: "missing warnings object".to_owned(),
         })?;
     let mut findings = BTreeSet::new();
+    let mut idless_warnings = 0;
 
     for vulnerability in list {
         let Some(finding) = cargo_audit_finding(
@@ -236,6 +377,9 @@ pub fn parse_cargo_audit_json(text: &str) -> Result<CargoAuditAdvisoryReport, Ad
                 reason: format!("warnings.{kind} is not an array"),
             })?;
         for entry in entries {
+            if entry.get("advisory").is_none_or(serde_json::Value::is_null) {
+                idless_warnings += 1;
+            }
             let Some(finding) = cargo_audit_finding(
                 entry,
                 &format!("warnings.{kind} entry"),
@@ -262,6 +406,7 @@ pub fn parse_cargo_audit_json(text: &str) -> Result<CargoAuditAdvisoryReport, Ad
     Ok(CargoAuditAdvisoryReport {
         findings: findings.into_iter().collect(),
         settings_ignore,
+        idless_warnings,
     })
 }
 
@@ -275,7 +420,7 @@ fn cargo_audit_finding(
         .ok_or_else(|| AdvisoryParseError::CargoAuditShape {
             reason: format!("{context} is not an object"),
         })?;
-    let Some(advisory) = entry.get("advisory") else {
+    let Some(advisory) = entry.get("advisory").filter(|advisory| !advisory.is_null()) else {
         return match missing_advisory {
             MissingAdvisory::Skip => Ok(None),
             MissingAdvisory::Error => Err(AdvisoryParseError::CargoAuditShape {
@@ -428,6 +573,137 @@ pub fn reconcile_advisory_findings(
     AdvisoryReconciliationReport { dispositions }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvisoryAuditOutcome {
+    reconciliation: AdvisoryReconciliationReport,
+    completeness_failures: Vec<AdvisoryAuditCompletenessFailure>,
+    cargo_deny_no_advisory_errors: Vec<CargoDenyNoAdvisoryDiagnostic>,
+    cargo_deny_non_advisory_errors: Vec<CargoDenySummaryCount>,
+    cargo_audit_settings_ignore: Vec<String>,
+    cargo_audit_idless_warnings: usize,
+}
+
+impl AdvisoryAuditOutcome {
+    pub fn reconciliation(&self) -> &AdvisoryReconciliationReport {
+        &self.reconciliation
+    }
+
+    pub fn accepted_exceptions(&self) -> Vec<&ReviewedAdvisoryException> {
+        self.reconciliation.accepted_exceptions()
+    }
+
+    pub fn completeness_failures(&self) -> &[AdvisoryAuditCompletenessFailure] {
+        &self.completeness_failures
+    }
+
+    pub fn cargo_deny_no_advisory_errors(&self) -> &[CargoDenyNoAdvisoryDiagnostic] {
+        &self.cargo_deny_no_advisory_errors
+    }
+
+    pub fn cargo_deny_non_advisory_errors(&self) -> &[CargoDenySummaryCount] {
+        &self.cargo_deny_non_advisory_errors
+    }
+
+    pub fn cargo_audit_settings_ignore(&self) -> &[String] {
+        &self.cargo_audit_settings_ignore
+    }
+
+    pub fn cargo_audit_idless_warnings(&self) -> usize {
+        self.cargo_audit_idless_warnings
+    }
+
+    pub fn is_success(&self) -> bool {
+        self.reconciliation.is_success()
+            && self.completeness_failures.is_empty()
+            && self.cargo_deny_no_advisory_errors.is_empty()
+            && self.cargo_deny_non_advisory_errors.is_empty()
+            && self.cargo_audit_settings_ignore.is_empty()
+            && self.cargo_audit_idless_warnings == 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdvisoryAuditCompletenessFailure {
+    MissingCargoDenyReport,
+    MissingCargoAuditReport,
+    MissingCargoDenySummaryCheck { check: CargoDenyCheck },
+    CargoDenyAdvisoryErrorsUnenumerated,
+}
+
+pub fn evaluate_advisory_audit(
+    scanner: LockfileAdvisoryScanner,
+    cargo_deny_checks: &[CargoDenyCheck],
+    cargo_deny_report: Option<&CargoDenyAdvisoryReport>,
+    cargo_audit_report: Option<&CargoAuditAdvisoryReport>,
+    exceptions: &[&ReviewedAdvisoryException],
+    now: OffsetDateTime,
+) -> AdvisoryAuditOutcome {
+    let mut findings = BTreeSet::new();
+    let mut completeness_failures = Vec::new();
+    let mut cargo_deny_no_advisory_errors = Vec::new();
+    let mut cargo_deny_non_advisory_errors = Vec::new();
+    let mut cargo_audit_settings_ignore = Vec::new();
+    let mut cargo_audit_idless_warnings = 0;
+
+    if !cargo_deny_checks.is_empty() {
+        match cargo_deny_report {
+            Some(report) => {
+                findings.extend(report.findings().iter().cloned());
+                cargo_deny_no_advisory_errors.extend(
+                    report
+                        .no_advisory_diagnostics()
+                        .iter()
+                        .filter(|diagnostic| !diagnostic.is_known_benign())
+                        .cloned(),
+                );
+                cargo_deny_non_advisory_errors
+                    .extend(report.non_advisory_error_counts().into_iter().cloned());
+                if report.has_unenumerated_advisory_errors() {
+                    completeness_failures.push(
+                        AdvisoryAuditCompletenessFailure::CargoDenyAdvisoryErrorsUnenumerated,
+                    );
+                }
+                for check in cargo_deny_checks {
+                    if report.summary_count_for(*check).is_none() {
+                        completeness_failures.push(
+                            AdvisoryAuditCompletenessFailure::MissingCargoDenySummaryCheck {
+                                check: *check,
+                            },
+                        );
+                    }
+                }
+            }
+            None => {
+                completeness_failures.push(AdvisoryAuditCompletenessFailure::MissingCargoDenyReport)
+            }
+        }
+    }
+    if matches!(
+        scanner,
+        LockfileAdvisoryScanner::CargoAudit | LockfileAdvisoryScanner::Both
+    ) {
+        match cargo_audit_report {
+            Some(report) => {
+                findings.extend(report.findings().iter().cloned());
+                cargo_audit_settings_ignore.extend(report.settings_ignore().iter().cloned());
+                cargo_audit_idless_warnings += report.idless_warnings();
+            }
+            None => completeness_failures
+                .push(AdvisoryAuditCompletenessFailure::MissingCargoAuditReport),
+        }
+    }
+
+    let findings = findings.into_iter().collect::<Vec<_>>();
+    AdvisoryAuditOutcome {
+        reconciliation: reconcile_advisory_findings(&findings, exceptions, now),
+        completeness_failures,
+        cargo_deny_no_advisory_errors,
+        cargo_deny_non_advisory_errors,
+        cargo_audit_settings_ignore,
+        cargo_audit_idless_warnings,
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum AdvisoryParseError {
     #[error("unable to parse cargo-deny JSON line {line}: {source}")]
@@ -451,10 +727,14 @@ pub enum AdvisoryParseError {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdvisoryDisposition, AdvisoryFindingId, parse_cargo_audit_json,
+        AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition,
+        AdvisoryFindingId, evaluate_advisory_audit, parse_cargo_audit_json,
         parse_cargo_deny_json_lines, reconcile_advisory_findings,
     };
-    use crate::{ReviewedTargetsError, parse_reviewed_targets_toml};
+    use crate::{
+        CargoAuditAdvisoryReport, CargoDenyAdvisoryReport, CargoDenyCheck, LockfileAdvisoryScanner,
+        ReviewedAdvisoryException, ReviewedTargetsError, parse_reviewed_targets_toml,
+    };
     use time::{Date, Month, OffsetDateTime};
 
     const CHECKSUM: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -464,6 +744,8 @@ mod tests {
         include_str!("../tests/fixtures/advisory/cargo-audit-findings.json");
     const CARGO_DENY_CLEAN: &str =
         include_str!("../tests/fixtures/advisory/cargo-deny-clean.jsonl");
+    const CARGO_DENY_BANS_FINDING: &str =
+        include_str!("../tests/fixtures/advisory/cargo-deny-bans-finding.jsonl");
     const CARGO_DENY_WITH_FINDINGS: &str =
         include_str!("../tests/fixtures/advisory/cargo-deny-findings.jsonl");
 
@@ -471,12 +753,15 @@ mod tests {
     fn parses_cargo_deny_json_advisory_diagnostics() {
         let report = parse_cargo_deny_json_lines(&format!(
             r#"{{"type":"diagnostic","fields":{{"code":"advisory","advisory":{{"id":"RUSTSEC-2026-0001"}},"graphs":[{{"Krate":{{"name":"serde","version":"1.0.228"}}}}]}}}}
-{{"type":"summary","fields":{{}}}}
+{{"type":"summary","fields":{{"advisories":{{"errors":1,"warnings":0,"helps":0,"notes":0}}}}}}
 "#
         ))
         .expect("cargo-deny output should parse");
 
         assert_eq!(report.findings().len(), 1);
+        assert_eq!(report.summary_counts().len(), 1);
+        assert_eq!(report.summary_counts()[0].check(), "advisories");
+        assert_eq!(report.summary_counts()[0].errors(), 1);
         assert_eq!(
             report.findings()[0].advisory_id().to_string(),
             "RUSTSEC-2026-0001"
@@ -620,6 +905,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_real_cargo_deny_non_advisory_summary_errors() {
+        let report = parse_cargo_deny_json_lines(CARGO_DENY_BANS_FINDING)
+            .expect("real cargo-deny bans fixture should parse");
+
+        assert!(report.findings().is_empty());
+        assert_eq!(
+            report
+                .summary_counts()
+                .iter()
+                .map(|count| (count.check().to_owned(), count.errors()))
+                .collect::<Vec<_>>(),
+            vec![("advisories".to_owned(), 3), ("bans".to_owned(), 1)]
+        );
+        assert_eq!(
+            report
+                .non_advisory_error_counts()
+                .iter()
+                .map(|count| (count.check().to_owned(), count.errors()))
+                .collect::<Vec<_>>(),
+            vec![("bans".to_owned(), 1)]
+        );
+    }
+
+    #[test]
     fn cargo_audit_requires_complete_top_level_object() {
         let error = parse_cargo_audit_json(r#"{"vulnerabilities":{"list":[]}}"#)
             .expect_err("truncated cargo-audit output should fail");
@@ -688,6 +997,7 @@ mod tests {
         let reconciled = reconcile_advisory_findings(report.findings(), &[], fixed_now());
 
         assert_eq!(report.findings().len(), 1);
+        assert_eq!(report.idless_warnings(), 1);
         assert_eq!(
             report.findings()[0].advisory_id().to_string(),
             "RUSTSEC-2024-0375"
@@ -907,6 +1217,428 @@ mod tests {
     }
 
     #[test]
+    fn audit_outcome_passes_when_all_findings_are_accepted() {
+        let targets = reviewed_targets_with_advisories();
+        let exceptions = targets.advisory_exceptions();
+        let exception_refs = exceptions.iter().collect::<Vec<_>>();
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("findings should parse");
+
+        let outcome = evaluate_deny(&deny_report, &exception_refs, fixed_now());
+
+        assert!(outcome.is_success());
+        assert_eq!(outcome.accepted_exceptions().len(), 1);
+        assert!(outcome.cargo_deny_non_advisory_errors().is_empty());
+    }
+
+    #[test]
+    fn audit_outcome_fails_on_unreviewed_findings() {
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0003"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("finding should parse");
+
+        let outcome = evaluate_deny(&deny_report, &[], fixed_now());
+
+        assert!(!outcome.is_success());
+        assert!(matches!(
+            outcome.reconciliation().dispositions()[0],
+            AdvisoryDisposition::Unreviewed { .. }
+        ));
+    }
+
+    #[test]
+    fn audit_outcome_fails_on_expired_findings_but_accepts_boundary_date() {
+        let targets = reviewed_targets_with_advisories();
+        let exceptions = targets.advisory_exceptions();
+        let exception_refs = exceptions.iter().collect::<Vec<_>>();
+        let accepted = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("finding should parse");
+        let expired = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0002"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("finding should parse");
+        let boundary = Date::from_calendar_date(2026, Month::December, 31)
+            .expect("date should parse")
+            .midnight()
+            .assume_utc();
+
+        assert!(evaluate_deny(&accepted, &exception_refs, boundary).is_success());
+        let outcome = evaluate_deny(&expired, &exception_refs, fixed_now());
+
+        assert!(!outcome.is_success());
+        assert!(matches!(
+            outcome.reconciliation().dispositions()[0],
+            AdvisoryDisposition::Expired { .. }
+        ));
+    }
+
+    #[test]
+    fn audit_outcome_fails_on_non_advisory_cargo_deny_errors() {
+        let targets = reviewed_targets_with_advisories();
+        let exceptions = targets.advisory_exceptions();
+        let exception_refs = exceptions.iter().collect::<Vec<_>>();
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0},"bans":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("finding should parse");
+
+        let outcome = evaluate_advisory_audit(
+            LockfileAdvisoryScanner::CargoDeny,
+            &[CargoDenyCheck::Advisories, CargoDenyCheck::Bans],
+            Some(&deny_report),
+            None,
+            &exception_refs,
+            fixed_now(),
+        );
+
+        assert!(!outcome.is_success());
+        assert!(outcome.reconciliation().is_success());
+        assert_eq!(
+            outcome
+                .cargo_deny_non_advisory_errors()
+                .iter()
+                .map(|count| (count.check().to_owned(), count.errors()))
+                .collect::<Vec<_>>(),
+            vec![("bans".to_owned(), 1)]
+        );
+    }
+
+    #[test]
+    fn audit_outcome_fails_on_cargo_deny_error_diagnostic_without_advisory_id() {
+        let targets = reviewed_targets_with_advisories();
+        let exceptions = targets.advisory_exceptions();
+        let exception_refs = exceptions.iter().collect::<Vec<_>>();
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"diagnostic","fields":{"code":"yanked","message":"crate is yanked","severity":"error"}}
+{"type":"summary","fields":{"advisories":{"errors":2,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("cargo-deny output should parse");
+
+        let outcome = evaluate_deny(&deny_report, &exception_refs, fixed_now());
+
+        assert!(!outcome.is_success());
+        assert!(outcome.reconciliation().is_success());
+        assert_eq!(outcome.cargo_deny_no_advisory_errors().len(), 1);
+        assert_eq!(
+            outcome.cargo_deny_no_advisory_errors()[0].code(),
+            Some("yanked")
+        );
+    }
+
+    #[test]
+    fn audit_outcome_allows_known_benign_cargo_deny_diagnostics_without_advisory_id() {
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"context","message":"warning only","severity":"warning"}}
+{"type":"diagnostic","fields":{"code":"context","message":"note only","severity":"note"}}
+{"type":"diagnostic","fields":{"code":"context","message":"help only","severity":"help"}}
+{"type":"summary","fields":{"advisories":{"errors":0,"warnings":1,"helps":1,"notes":1}}}
+"#,
+        )
+        .expect("cargo-deny output should parse");
+
+        let outcome = evaluate_deny(&deny_report, &[], fixed_now());
+
+        assert!(outcome.is_success());
+        assert!(outcome.cargo_deny_no_advisory_errors().is_empty());
+    }
+
+    #[test]
+    fn audit_outcome_fails_when_expected_scanner_reports_are_absent() {
+        let outcome = evaluate_advisory_audit(
+            LockfileAdvisoryScanner::Both,
+            &[CargoDenyCheck::Advisories],
+            None,
+            None,
+            &[],
+            fixed_now(),
+        );
+
+        assert!(!outcome.is_success());
+        assert_eq!(
+            outcome.completeness_failures(),
+            &[
+                AdvisoryAuditCompletenessFailure::MissingCargoDenyReport,
+                AdvisoryAuditCompletenessFailure::MissingCargoAuditReport,
+            ]
+        );
+    }
+
+    #[test]
+    fn audit_outcome_fails_when_configured_cargo_deny_check_is_missing_from_summary() {
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"summary","fields":{"advisories":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("cargo-deny output should parse");
+
+        let outcome = evaluate_advisory_audit(
+            LockfileAdvisoryScanner::CargoDeny,
+            &[CargoDenyCheck::Advisories, CargoDenyCheck::Bans],
+            Some(&deny_report),
+            None,
+            &[],
+            fixed_now(),
+        );
+
+        assert!(!outcome.is_success());
+        assert_eq!(
+            outcome.completeness_failures(),
+            &[
+                AdvisoryAuditCompletenessFailure::MissingCargoDenySummaryCheck {
+                    check: CargoDenyCheck::Bans,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn audit_outcome_fails_when_cargo_deny_advisory_errors_are_unenumerated() {
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("cargo-deny output should parse");
+
+        let outcome = evaluate_advisory_audit(
+            LockfileAdvisoryScanner::CargoDeny,
+            &[CargoDenyCheck::Advisories],
+            Some(&deny_report),
+            None,
+            &[],
+            fixed_now(),
+        );
+
+        assert!(!outcome.is_success());
+        assert_eq!(
+            outcome.completeness_failures(),
+            &[AdvisoryAuditCompletenessFailure::CargoDenyAdvisoryErrorsUnenumerated]
+        );
+    }
+
+    #[test]
+    fn audit_outcome_still_fails_cargo_deny_bans_when_cargo_audit_scans_advisories() {
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"banned","message":"crate is banned","severity":"error"}}
+{"type":"summary","fields":{"bans":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("cargo-deny output should parse");
+        let audit_report = parse_cargo_audit_json(
+            r#"{
+  "vulnerabilities": { "found": false, "count": 0, "list": [] },
+  "settings": { "ignore": [] },
+  "warnings": {}
+}"#,
+        )
+        .expect("cargo-audit output should parse");
+
+        let outcome = evaluate_advisory_audit(
+            LockfileAdvisoryScanner::CargoAudit,
+            &[CargoDenyCheck::Bans],
+            Some(&deny_report),
+            Some(&audit_report),
+            &[],
+            fixed_now(),
+        );
+
+        assert!(!outcome.is_success());
+        assert_eq!(outcome.cargo_deny_no_advisory_errors().len(), 1);
+        assert_eq!(
+            outcome
+                .cargo_deny_non_advisory_errors()
+                .iter()
+                .map(|count| (count.check().to_owned(), count.errors()))
+                .collect::<Vec<_>>(),
+            vec![("bans".to_owned(), 1)]
+        );
+    }
+
+    #[test]
+    fn audit_outcome_uses_cargo_audit_findings_when_cargo_deny_is_clean() {
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"summary","fields":{"bans":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("cargo-deny output should parse");
+        let audit_report = parse_cargo_audit_json(
+            r#"{
+  "vulnerabilities": {
+    "found": true,
+    "count": 1,
+    "list": [
+      {
+        "advisory": { "id": "RUSTSEC-2026-0003" },
+        "package": { "name": "serde", "version": "1.0.228" }
+      }
+    ]
+  },
+  "settings": { "ignore": [] },
+  "warnings": {}
+}"#,
+        )
+        .expect("cargo-audit output should parse");
+
+        let outcome = evaluate_advisory_audit(
+            LockfileAdvisoryScanner::CargoAudit,
+            &[CargoDenyCheck::Bans],
+            Some(&deny_report),
+            Some(&audit_report),
+            &[],
+            fixed_now(),
+        );
+
+        assert!(!outcome.is_success());
+        assert!(outcome.cargo_deny_no_advisory_errors().is_empty());
+        assert!(outcome.cargo_deny_non_advisory_errors().is_empty());
+        assert!(matches!(
+            outcome.reconciliation().dispositions()[0],
+            AdvisoryDisposition::Unreviewed { .. }
+        ));
+    }
+
+    #[test]
+    fn audit_outcome_fails_on_cargo_audit_ignored_settings() {
+        let audit_report = parse_cargo_audit_json(
+            r#"{
+  "vulnerabilities": { "found": false, "count": 0, "list": [] },
+  "settings": { "ignore": ["RUSTSEC-2026-0001"] },
+  "warnings": {}
+}"#,
+        )
+        .expect("cargo-audit output should parse");
+
+        let outcome = evaluate_audit(&audit_report, &[], fixed_now());
+
+        assert!(!outcome.is_success());
+        assert_eq!(
+            outcome.cargo_audit_settings_ignore(),
+            &["RUSTSEC-2026-0001".to_owned()]
+        );
+    }
+
+    #[test]
+    fn audit_outcome_fails_on_cargo_audit_idless_warnings() {
+        let audit_report = parse_cargo_audit_json(
+            r#"{
+  "vulnerabilities": { "found": false, "count": 0, "list": [] },
+  "settings": { "ignore": [] },
+  "warnings": {
+    "yanked": [
+      { "kind": "yanked", "package": { "name": "gone", "version": "1.2.3" } }
+    ]
+  }
+}"#,
+        )
+        .expect("cargo-audit output should parse");
+
+        let outcome = evaluate_audit(&audit_report, &[], fixed_now());
+
+        assert!(!outcome.is_success());
+        assert_eq!(outcome.cargo_audit_idless_warnings(), 1);
+    }
+
+    #[test]
+    fn audit_outcome_fails_on_non_yanked_cargo_audit_idless_warnings() {
+        let audit_report = parse_cargo_audit_json(
+            r#"{
+  "vulnerabilities": { "found": false, "count": 0, "list": [] },
+  "settings": { "ignore": [] },
+  "warnings": {
+    "future-warning": [
+      { "kind": "future-warning", "package": { "name": "gone", "version": "1.2.3" } }
+    ]
+  }
+}"#,
+        )
+        .expect("cargo-audit output should parse");
+
+        let outcome = evaluate_audit(&audit_report, &[], fixed_now());
+
+        assert!(!outcome.is_success());
+        assert_eq!(outcome.cargo_audit_idless_warnings(), 1);
+    }
+
+    #[test]
+    fn audit_outcome_counts_null_advisory_warnings_as_idless() {
+        let audit_report = parse_cargo_audit_json(
+            r#"{
+  "vulnerabilities": { "found": false, "count": 0, "list": [] },
+  "settings": { "ignore": [] },
+  "warnings": {
+    "future-warning": [
+      { "advisory": null, "package": { "name": "gone", "version": "1.2.3" } }
+    ]
+  }
+}"#,
+        )
+        .expect("cargo-audit output should parse");
+
+        let outcome = evaluate_audit(&audit_report, &[], fixed_now());
+
+        assert!(!outcome.is_success());
+        assert_eq!(outcome.cargo_audit_idless_warnings(), 1);
+    }
+
+    #[test]
+    fn audit_outcome_deduplicates_findings_across_scanners() {
+        let targets = reviewed_targets_with_advisories();
+        let exceptions = targets.advisory_exceptions();
+        let exception_refs = exceptions.iter().collect::<Vec<_>>();
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("cargo-deny output should parse");
+        let audit_report = parse_cargo_audit_json(
+            r#"{
+  "vulnerabilities": {
+    "found": true,
+    "count": 1,
+    "list": [
+      {
+        "advisory": { "id": "RUSTSEC-2026-0001" },
+        "package": { "name": "serde", "version": "1.0.228" }
+      }
+    ]
+  },
+  "settings": { "ignore": [] },
+  "warnings": {}
+}"#,
+        )
+        .expect("cargo-audit output should parse");
+
+        let outcome = evaluate_advisory_audit(
+            LockfileAdvisoryScanner::Both,
+            &[CargoDenyCheck::Advisories],
+            Some(&deny_report),
+            Some(&audit_report),
+            &exception_refs,
+            fixed_now(),
+        );
+
+        assert!(outcome.is_success());
+        assert_eq!(outcome.reconciliation().dispositions().len(), 1);
+    }
+
+    #[test]
     fn rejects_cross_family_duplicate_advisory_bindings() {
         let error = parse_reviewed_targets_toml(&format!(
             r#"[rust]
@@ -998,6 +1730,36 @@ serde = [
 "#
         ))
         .expect("reviewed targets should parse")
+    }
+
+    fn evaluate_deny(
+        report: &CargoDenyAdvisoryReport,
+        exceptions: &[&ReviewedAdvisoryException],
+        now: OffsetDateTime,
+    ) -> AdvisoryAuditOutcome {
+        evaluate_advisory_audit(
+            LockfileAdvisoryScanner::CargoDeny,
+            &[CargoDenyCheck::Advisories],
+            Some(report),
+            None,
+            exceptions,
+            now,
+        )
+    }
+
+    fn evaluate_audit(
+        report: &CargoAuditAdvisoryReport,
+        exceptions: &[&ReviewedAdvisoryException],
+        now: OffsetDateTime,
+    ) -> AdvisoryAuditOutcome {
+        evaluate_advisory_audit(
+            LockfileAdvisoryScanner::CargoAudit,
+            &[],
+            None,
+            Some(report),
+            exceptions,
+            now,
+        )
     }
 
     fn fixed_now() -> OffsetDateTime {

@@ -222,8 +222,15 @@ cargo barbican review [--base-dir PATH]
     - checked-in dependency review records under `docs/dependency-reviews/`
 
 cargo barbican audit
-    Run `cargo audit` and `cargo deny check advisories bans sources`.
-    Fail if either fails.
+    Enumerate the complete advisory finding set from the configured
+    scanner(s) (`cargo-deny` and/or `cargo-audit`) with native advisory
+    ignores neutralised, reconcile each finding against reviewed advisory
+    exceptions, and compute a Barbican-owned verdict. Fail on any unreviewed
+    or expired advisory finding, any non-advisory scanner error
+    (`cargo-deny` bans/sources/licenses), incomplete enumeration, or — when
+    `delegates.unmanaged_delegated_policy = "deny"` — any native delegated
+    advisory ignore. Accepted exceptions and native delegated ignores are
+    rendered.
 
 cargo barbican verify
     Run the local execution gates in order:

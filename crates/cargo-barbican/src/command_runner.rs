@@ -18,9 +18,25 @@ pub trait CommandRunner {
     fn cargo_tree(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn git_diff(&self, current_dir: &Path, paths: &[PathBuf]) -> Result<String, RunnerError>;
     fn cargo_audit(&self, current_dir: &Path) -> Result<String, RunnerError>;
-    fn cargo_deny(&self, current_dir: &Path) -> Result<(), RunnerError>;
+    fn cargo_audit_json(
+        &self,
+        controlled_cwd: &Path,
+        lockfile_path: &Path,
+    ) -> Result<CommandOutput, RunnerError>;
+    fn cargo_deny_json(
+        &self,
+        current_dir: &Path,
+        config_path: &Path,
+        checks: &[barbican::CargoDenyCheck],
+    ) -> Result<CommandOutput, RunnerError>;
     fn cargo_build_locked(&self, current_dir: &Path) -> Result<(), RunnerError>;
     fn cargo_test_locked(&self, current_dir: &Path) -> Result<(), RunnerError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandOutput {
+    pub stdout: String,
+    pub stderr: String,
 }
 
 #[derive(Debug)]
@@ -119,11 +135,34 @@ impl CommandRunner for RealCommandRunner {
         run_cargo_command(current_dir, ["audit"])
     }
 
-    fn cargo_deny(&self, current_dir: &Path) -> Result<(), RunnerError> {
-        run_cargo_command_status(
-            current_dir,
-            ["deny", "check", "advisories", "bans", "sources"],
-        )
+    fn cargo_audit_json(
+        &self,
+        controlled_cwd: &Path,
+        lockfile_path: &Path,
+    ) -> Result<CommandOutput, RunnerError> {
+        let mut command = prepared_cargo_command(controlled_cwd);
+        command.args(["audit", "--json", "-f"]);
+        command.arg(lockfile_path);
+        command.arg("-d");
+        command.arg(advisory_database_path());
+
+        output_from_prepared_command(command)
+    }
+
+    fn cargo_deny_json(
+        &self,
+        current_dir: &Path,
+        config_path: &Path,
+        checks: &[barbican::CargoDenyCheck],
+    ) -> Result<CommandOutput, RunnerError> {
+        let mut command = prepared_cargo_command(current_dir);
+        command.args(["deny", "-f", "json", "check", "-c"]);
+        command.arg(config_path);
+        for check in checks {
+            command.arg(check.as_str());
+        }
+
+        output_from_prepared_command(command)
     }
 
     fn cargo_build_locked(&self, current_dir: &Path) -> Result<(), RunnerError> {
@@ -249,6 +288,14 @@ fn run_prepared_command(mut command: ProcessCommand) -> Result<Output, RunnerErr
     command.output().map_err(RunnerError::Spawn)
 }
 
+fn output_from_prepared_command(command: ProcessCommand) -> Result<CommandOutput, RunnerError> {
+    let output = run_prepared_command(command)?;
+    Ok(CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
 fn stdout_from_output(output: Output) -> Result<String, RunnerError> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -259,6 +306,14 @@ fn stdout_from_output(output: Output) -> Result<String, RunnerError> {
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         })
     }
+}
+
+fn advisory_database_path() -> PathBuf {
+    env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cargo")))
+        .unwrap_or_else(|| PathBuf::from(".cargo"))
+        .join("advisory-db")
 }
 
 #[cfg(test)]

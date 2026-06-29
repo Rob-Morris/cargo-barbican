@@ -247,7 +247,7 @@ fn render_assessment_report(
         report,
         RustAssessmentFindingSeverity::Elevated,
     )?;
-    render_allowed_policy_exceptions(
+    render_assess_allowed_exceptions(
         stdout,
         report.allowed_execution_surfaces(),
         report.allowed_release_age_exceptions(),
@@ -260,7 +260,7 @@ fn render_assessment_report(
     Ok(())
 }
 
-fn render_allowed_policy_exceptions(
+fn render_assess_allowed_exceptions(
     stdout: &mut dyn Write,
     allowed_surfaces: &[ReviewedExecutionSurfaceAllowance],
     allowed_age_exceptions: &[ReviewedReleaseAgeException],

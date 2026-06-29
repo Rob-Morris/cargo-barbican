@@ -7,10 +7,10 @@ use barbican::{
     check_reviewed_rust_targets,
 };
 
-use super::inventory::escape_render_field;
 use super::{
     CommandError, ReviewRecordCheck, check_review_record_paths, load_current_lockfile,
     load_current_manifest_direct_requirements, load_reviewed_targets,
+    render_allowed_policy_exceptions,
 };
 
 pub(super) fn run_pin_check(
@@ -171,17 +171,7 @@ fn render_pin_check_report(
         })
         .flat_map(|family| family.advisory_exceptions_with_matching_resolved_target())
         .collect::<Vec<_>>();
-    if !advisory_exceptions.is_empty() {
-        writeln!(stdout, "Allowed policy exceptions:").map_err(CommandError::Io)?;
-        for exception in advisory_exceptions {
-            writeln!(
-                stdout,
-                "  - {}",
-                escape_render_field(&exception.to_string())
-            )
-            .map_err(CommandError::Io)?;
-        }
-    }
+    render_allowed_policy_exceptions(stdout, advisory_exceptions)?;
 
     Ok(())
 }

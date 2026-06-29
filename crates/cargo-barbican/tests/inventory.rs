@@ -94,8 +94,21 @@ impl CommandRunner for FakeCommandRunner {
         Err(runner_error("unexpected cargo audit"))
     }
 
-    fn cargo_deny(&self, _current_dir: &Path) -> Result<(), RunnerError> {
-        Err(runner_error("unexpected cargo deny"))
+    fn cargo_audit_json(
+        &self,
+        _controlled_cwd: &Path,
+        _lockfile_path: &Path,
+    ) -> Result<cargo_barbican::CommandOutput, RunnerError> {
+        Err(runner_error("unexpected cargo audit json"))
+    }
+
+    fn cargo_deny_json(
+        &self,
+        _current_dir: &Path,
+        _config_path: &Path,
+        _checks: &[barbican::CargoDenyCheck],
+    ) -> Result<cargo_barbican::CommandOutput, RunnerError> {
+        Err(runner_error("unexpected cargo deny json"))
     }
 
     fn cargo_build_locked(&self, _current_dir: &Path) -> Result<(), RunnerError> {
