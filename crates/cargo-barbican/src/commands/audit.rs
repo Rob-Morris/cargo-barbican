@@ -8,18 +8,17 @@ use barbican::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
     AdvisoryFindingId, CargoDenyNoAdvisoryDiagnostic, LockfileAdvisoryScanner, OffsetDateTime,
     ReviewedAdvisoryException, ReviewedTargets, RustReviewedTargetsReport,
-    UnmanagedDelegatedPolicyMode, advisory_ignores_from_toml, check_reviewed_rust_targets,
-    evaluate_advisory_audit, generate_cargo_deny_runtime_config, parse_cargo_audit_json,
-    parse_cargo_deny_json_lines,
+    UnmanagedDelegatedPolicyMode, check_reviewed_rust_targets, evaluate_advisory_audit,
+    generate_cargo_deny_runtime_config, parse_cargo_audit_json, parse_cargo_deny_json_lines,
 };
 
 use crate::command_runner::CommandRunner;
 
-use super::inventory::escape_render_field;
 use super::scratch_dir::ScratchDir;
 use super::{
-    CommandError, ReviewRecordCheck, check_review_record_paths, escape_diagnostic_for_terminal,
-    fail, load_config, load_current_lockfile, load_current_manifest_direct_requirements,
+    CommandError, NativeDelegatedIgnore, ReviewRecordCheck, check_review_record_paths,
+    escape_diagnostic_for_terminal, escape_render_field, fail, load_config, load_current_lockfile,
+    load_current_manifest_direct_requirements, load_native_delegated_ignores,
     load_reviewed_targets, read_optional_text_no_symlink, render_allowed_policy_exceptions,
 };
 
@@ -41,7 +40,7 @@ where
 
     let user_deny_toml = read_optional_text_no_symlink(current_dir, Path::new("deny.toml"))
         .map_err(CommandError::Io)?;
-    let native_ignores = load_native_delegated_ignores(current_dir, user_deny_toml.as_deref())?;
+    let native_ignores = load_native_delegated_ignores(current_dir)?;
     let scratch = ScratchDir::create("cargo-barbican-audit", false).map_err(CommandError::Io)?;
     let generated_config = generate_cargo_deny_runtime_config(
         user_deny_toml.as_deref(),
@@ -162,55 +161,6 @@ fn bound_advisory_exceptions<'a>(
         .collect()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct NativeDelegatedIgnore {
-    source: &'static str,
-    advisory_ids: Vec<String>,
-}
-
-impl NativeDelegatedIgnore {
-    pub(super) fn source(&self) -> &'static str {
-        self.source
-    }
-
-    pub(super) fn advisory_ids(&self) -> &[String] {
-        &self.advisory_ids
-    }
-}
-
-pub(super) fn load_native_delegated_ignores(
-    current_dir: &Path,
-    user_deny_toml: Option<&str>,
-) -> Result<Vec<NativeDelegatedIgnore>, CommandError> {
-    let audit_toml = read_optional_text_no_symlink(current_dir, Path::new(".cargo/audit.toml"))
-        .map_err(CommandError::Io)?;
-    let mut ignores = Vec::new();
-    if let Some(entry) = native_ignore_entry("deny.toml", user_deny_toml)? {
-        ignores.push(entry);
-    }
-    if let Some(entry) = native_ignore_entry(".cargo/audit.toml", audit_toml.as_deref())? {
-        ignores.push(entry);
-    }
-
-    Ok(ignores)
-}
-
-fn native_ignore_entry(
-    source: &'static str,
-    text: Option<&str>,
-) -> Result<Option<NativeDelegatedIgnore>, CommandError> {
-    let Some(text) = text else {
-        return Ok(None);
-    };
-    let advisory_ids = advisory_ignores_from_toml(text)
-        .map_err(|error| CommandError::Io(io::Error::other(error)))?;
-
-    Ok((!advisory_ids.is_empty()).then_some(NativeDelegatedIgnore {
-        source,
-        advisory_ids,
-    }))
-}
-
 fn render_audit_report(
     stdout: &mut dyn Write,
     passed: bool,
@@ -312,9 +262,9 @@ fn render_native_ignores(
         writeln!(
             stdout,
             "  - {prefix} {} ignores {}",
-            entry.source,
+            entry.source(),
             entry
-                .advisory_ids
+                .advisory_ids()
                 .iter()
                 .map(|id| escape_render_field(id))
                 .collect::<Vec<_>>()

@@ -1,4 +1,3 @@
-use std::fmt::Write as _;
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
@@ -17,10 +16,10 @@ use barbican::{
 use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
-use super::audit::{NativeDelegatedIgnore, load_native_delegated_ignores};
 use super::{
-    CommandError, check_review_record_paths, load_config, load_current_lockfile,
-    load_manifest_texts_from_root, load_reviewed_targets, parse_manifest_requirements,
+    CommandError, NativeDelegatedIgnore, check_review_record_paths, escape_render_field,
+    load_config, load_current_lockfile, load_manifest_texts_from_root,
+    load_native_delegated_ignores, load_reviewed_targets, parse_manifest_requirements,
     read_optional_text_no_symlink,
 };
 
@@ -33,7 +32,7 @@ pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
     let config = load_config(current_dir)?;
     let user_deny_toml = read_optional_text_no_symlink(current_dir, Path::new("deny.toml"))
         .map_err(CommandError::Io)?;
-    let native_ignores = load_native_delegated_ignores(current_dir, user_deny_toml.as_deref())?;
+    let native_ignores = load_native_delegated_ignores(current_dir)?;
     let lockfile = load_current_lockfile(current_dir, Path::new("Cargo.lock"))?;
     let manifest_texts = load_manifest_texts_from_root(current_dir)?;
     let manifest_requirements = parse_manifest_requirements(&manifest_texts)?;
@@ -397,38 +396,7 @@ fn render_inventory(
     }
 
     writeln!(stdout).map_err(CommandError::Io)?;
-    writeln!(stdout, "Reviewed advisory exceptions:").map_err(CommandError::Io)?;
-    writeln!(
-        stdout,
-        "  expiry window: soon-to-expire means review_by within {} day(s)",
-        barbican::INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS
-    )
-    .map_err(CommandError::Io)?;
-    writeln!(
-        stdout,
-        "  stale means the exception's crate@version is not present in the current Cargo.lock"
-    )
-    .map_err(CommandError::Io)?;
-    if inventory.advisory_exceptions().is_empty() {
-        writeln!(stdout, "  exceptions: none").map_err(CommandError::Io)?;
-    } else {
-        writeln!(stdout, "  exceptions:").map_err(CommandError::Io)?;
-        for exception in inventory.advisory_exceptions() {
-            writeln!(
-                stdout,
-                "  - {} {} family={} review_record={} review_by={} status={} resolved-target={} review-record={}",
-                exception.spec(),
-                escape_render_field(exception.advisory_id()),
-                escape_render_field(exception.family()),
-                escape_render_field(exception.review_record()),
-                exception.review_by(),
-                render_advisory_exception_status(exception.status()),
-                if exception.resolved_target_matches() { "matched" } else { "not matched" },
-                if exception.review_record_exists() { "exists" } else { "missing" }
-            )
-            .map_err(CommandError::Io)?;
-        }
-    }
+    render_advisory_exceptions(stdout, inventory)?;
 
     writeln!(stdout).map_err(CommandError::Io)?;
     render_advisory_delegation(stdout, delegation_report)?;
@@ -513,6 +481,46 @@ fn render_inventory(
             "  - Review each finding or gap, update reviewed-targets.toml and review records, then run `cargo barbican verify`."
         )
         .map_err(CommandError::Io)?;
+    }
+
+    Ok(())
+}
+
+fn render_advisory_exceptions(
+    stdout: &mut dyn Write,
+    inventory: &Inventory,
+) -> Result<(), CommandError> {
+    writeln!(stdout, "Reviewed advisory exceptions:").map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  expiry window: soon-to-expire means review_by within {} day(s)",
+        barbican::INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS
+    )
+    .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  stale means the exception's crate@version is not present in the current Cargo.lock"
+    )
+    .map_err(CommandError::Io)?;
+    if inventory.advisory_exceptions().is_empty() {
+        writeln!(stdout, "  exceptions: none").map_err(CommandError::Io)?;
+    } else {
+        writeln!(stdout, "  exceptions:").map_err(CommandError::Io)?;
+        for exception in inventory.advisory_exceptions() {
+            writeln!(
+                stdout,
+                "  - {} {} family={} review_record={} review_by={} status={} resolved-target={} review-record={}",
+                exception.spec(),
+                escape_render_field(exception.advisory_id()),
+                escape_render_field(exception.family()),
+                escape_render_field(exception.review_record()),
+                exception.review_by(),
+                render_advisory_exception_status(exception.status()),
+                if exception.resolved_target_matches() { "matched" } else { "not matched" },
+                if exception.review_record_exists() { "exists" } else { "missing" }
+            )
+            .map_err(CommandError::Io)?;
+        }
     }
 
     Ok(())
@@ -640,23 +648,4 @@ fn render_gap(gap: &InventoryGap) -> String {
             format!("live execution surface is not declared in reviewed policy: {spec} {surface}")
         }
     }
-}
-
-pub(super) fn escape_render_field(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            '\u{1b}' => escaped.push_str("\\x1b"),
-            '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' => {
-                write!(&mut escaped, "\\x{:02x}", character as u32)
-                    .expect("writing to a String cannot fail");
-            }
-            _ => escaped.push(character),
-        }
-    }
-
-    escaped
 }

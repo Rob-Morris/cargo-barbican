@@ -25,9 +25,10 @@ use std::process::ExitCode;
 use barbican::{
     BarbicanConfig, ConfigLoadError, CratesIoClient, ExactCrateSpec, OffsetDateTime,
     ReleaseAgeOutcome, ReleaseAgeReport, ReviewedReleaseAgeException, ReviewedTargets,
-    ReviewedTargetsError, check_release_age_at, format_age, parse_lockfile,
-    parse_manifest_dependencies, parse_manifest_direct_requirements, parse_reviewed_targets_toml,
-    parse_workspace_member_glob_roots, parse_workspace_member_manifest_paths,
+    ReviewedTargetsError, advisory_ignores_from_toml, check_release_age_at, format_age,
+    parse_lockfile, parse_manifest_dependencies, parse_manifest_direct_requirements,
+    parse_reviewed_targets_toml, parse_workspace_member_glob_roots,
+    parse_workspace_member_manifest_paths,
 };
 use clap::Parser;
 
@@ -352,7 +353,7 @@ where
 {
     let rendered = exceptions
         .into_iter()
-        .map(|exception| inventory::escape_render_field(&exception.to_string()))
+        .map(|exception| escape_render_field(&exception.to_string()))
         .collect::<Vec<_>>();
     if rendered.is_empty() {
         return Ok(());
@@ -364,6 +365,25 @@ where
     }
 
     Ok(())
+}
+
+pub(super) fn escape_render_field(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{1b}' => escaped.push_str("\\x1b"),
+            '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' => {
+                write!(&mut escaped, "\\x{:02x}", character as u32)
+                    .expect("writing to a String cannot fail");
+            }
+            _ => escaped.push(character),
+        }
+    }
+
+    escaped
 }
 
 pub(super) fn load_config(current_dir: &Path) -> Result<BarbicanConfig, CommandError> {
@@ -788,6 +808,56 @@ pub(super) fn review_record_exists(current_dir: &Path, review_record: &str) -> b
     fs::symlink_metadata(current_dir.join(review_record))
         .map(|metadata| metadata.is_file())
         .unwrap_or(false)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct NativeDelegatedIgnore {
+    source: &'static str,
+    advisory_ids: Vec<String>,
+}
+
+impl NativeDelegatedIgnore {
+    pub(super) fn source(&self) -> &'static str {
+        self.source
+    }
+
+    pub(super) fn advisory_ids(&self) -> &[String] {
+        &self.advisory_ids
+    }
+}
+
+pub(super) fn load_native_delegated_ignores(
+    current_dir: &Path,
+) -> Result<Vec<NativeDelegatedIgnore>, CommandError> {
+    let deny_toml = read_optional_text_no_symlink(current_dir, Path::new("deny.toml"))
+        .map_err(CommandError::Io)?;
+    let audit_toml = read_optional_text_no_symlink(current_dir, Path::new(".cargo/audit.toml"))
+        .map_err(CommandError::Io)?;
+    let mut ignores = Vec::new();
+    if let Some(entry) = native_ignore_entry("deny.toml", deny_toml.as_deref())? {
+        ignores.push(entry);
+    }
+    if let Some(entry) = native_ignore_entry(".cargo/audit.toml", audit_toml.as_deref())? {
+        ignores.push(entry);
+    }
+
+    Ok(ignores)
+}
+
+fn native_ignore_entry(
+    source: &'static str,
+    text: Option<&str>,
+) -> Result<Option<NativeDelegatedIgnore>, CommandError> {
+    let Some(text) = text else {
+        return Ok(None);
+    };
+    let advisory_ids = advisory_ignores_from_toml(text)
+        .map_err(|error| CommandError::Io(io::Error::other(error)))?;
+
+    Ok((!advisory_ids.is_empty()).then_some(NativeDelegatedIgnore {
+        source,
+        advisory_ids,
+    }))
 }
 
 pub(super) fn workspace_manifest_paths(current_dir: &Path) -> Result<Vec<PathBuf>, CommandError> {

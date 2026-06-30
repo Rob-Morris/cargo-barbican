@@ -92,14 +92,14 @@ impl RustReviewedFamilyReport {
                 let resolved_check = self
                     .resolved_checks
                     .iter()
-                    .find(|check| check.crate_name() == exception.spec().crate_name());
+                    .find(|check| check.crate_name() == exception.spec().crate_name())
+                    .expect("parse_reviewed_targets_toml validates advisory targets resolve");
                 ReviewedAdvisoryExceptionBinding {
                     exception,
-                    resolved_target_matches: resolved_check
-                        .is_some_and(ReviewedResolvedDependencyCheck::is_success),
-                    resolved_target_present: resolved_check.is_some_and(|check| {
-                        check.actual_versions().contains(exception.spec().version())
-                    }),
+                    resolved_target_matches: resolved_check.is_success(),
+                    resolved_target_present: resolved_check
+                        .actual_versions()
+                        .contains(exception.spec().version()),
                 }
             })
             .collect()
