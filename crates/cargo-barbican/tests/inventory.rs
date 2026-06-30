@@ -4,8 +4,10 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use barbican::{CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec};
-use cargo_barbican::{Cli, CommandRunner, RunnerError, run_cli_with_runner};
+use barbican::{CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, OffsetDateTime};
+use cargo_barbican::{
+    Cli, CommandRunner, RunnerError, run_cli_with_runner, run_cli_with_runner_at,
+};
 use clap::Parser;
 
 #[derive(Default)]
@@ -327,6 +329,61 @@ stale = [{ id = "RUSTSEC-2000-0001", review_by = "2000-01-01" }]
 }
 
 #[test]
+fn inventory_renders_expired_and_soon_to_expire_advisory_exception_statuses() {
+    let temp_dir = fresh_temp_dir();
+    write_inventory_fixture(&temp_dir);
+    fs::create_dir_all(temp_dir.join("docs/dependency-reviews"))
+        .expect("review record dir should create");
+    fs::write(
+        temp_dir.join("docs/dependency-reviews/serde.md"),
+        "# serde\n",
+    )
+    .expect("serde review should write");
+    fs::write(
+        temp_dir.join("docs/dependency-reviews/loose.md"),
+        "# loose\n",
+    )
+    .expect("loose review should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/serde.md"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+
+[rust.families.allowed_advisories]
+serde = [{ id = "RUSTSEC-2027-0001", review_by = "2027-09-13" }]
+
+[[rust.families]]
+name = "loose-family"
+review_record = "docs/dependency-reviews/loose.md"
+
+[rust.families.resolved]
+loose = { version = "0.1.0", checksum_sha256 = "1111111111111111111111111111111111111111111111111111111111111111" }
+
+[rust.families.allowed_advisories]
+loose = [{ id = "RUSTSEC-2027-0002", review_by = "2027-10-01" }]
+"#,
+    )
+    .expect("reviewed targets should write");
+
+    let runner = FakeCommandRunner::default();
+    let now = OffsetDateTime::from_unix_timestamp(1_820_908_800)
+        .expect("fixed timestamp should be valid");
+    let (exit_code, stdout, stderr) = run_inventory_with_runner_at(&temp_dir, &runner, now);
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("serde@1.0.228 RUSTSEC-2027-0001 family=serde-family review_record=docs/dependency-reviews/serde.md review_by=2027-09-13 status=expired resolved-target=matched review-record=exists"));
+    assert!(stdout.contains("loose@0.1.0 RUSTSEC-2027-0002 family=loose-family review_record=docs/dependency-reviews/loose.md review_by=2027-10-01 status=soon-to-expire resolved-target=matched review-record=exists"));
+}
+
+#[test]
 fn inventory_without_reviewed_targets_reports_no_policy() {
     let temp_dir = fresh_temp_dir();
     write_inventory_fixture(&temp_dir);
@@ -645,6 +702,35 @@ fn run_inventory_with_runner(
 
     let exit_code = run_cli_with_runner(cli, temp_dir, &client, runner, &mut stdout, &mut stderr)
         .expect("command should run");
+    assert_eq!(runner.frozen_metadata_calls(), 1);
+
+    (
+        exit_code,
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        String::from_utf8(stderr).expect("stderr should be utf8"),
+    )
+}
+
+fn run_inventory_with_runner_at(
+    temp_dir: &Path,
+    runner: &FakeCommandRunner,
+    now: OffsetDateTime,
+) -> (ExitCode, String, String) {
+    let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
+    let client = FakeCratesIoClient;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        temp_dir,
+        &client,
+        runner,
+        now,
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
     assert_eq!(runner.frozen_metadata_calls(), 1);
 
     (

@@ -1399,6 +1399,7 @@ boundary-soon = { version = "1.0.0", checksum_sha256 = "121212121212121212121212
 boundary-active = { version = "1.0.0", checksum_sha256 = "3434343434343434343434343434343434343434343434343434343434343434" }
 expired = { version = "1.0.0", checksum_sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }
 stale = { version = "1.0.0", checksum_sha256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+stale-expired = { version = "1.0.0", checksum_sha256 = "5656565656565656565656565656565656565656565656565656565656565656" }
 mismatch = { version = "1.0.0", checksum_sha256 = "9999999999999999999999999999999999999999999999999999999999999999" }
 
 [rust.families.allowed_advisories]
@@ -1408,6 +1409,7 @@ boundary-soon = [{ id = "RUSTSEC-2027-0007", review_by = "2027-10-14" }]
 boundary-active = [{ id = "RUSTSEC-2027-0008", review_by = "2027-10-15" }]
 expired = [{ id = "RUSTSEC-2027-0003", review_by = "2027-09-13" }]
 stale = [{ id = "RUSTSEC-2027-0004", review_by = "2027-11-01" }]
+stale-expired = [{ id = "RUSTSEC-2027-0009", review_by = "2027-09-13" }]
 mismatch = [{ id = "RUSTSEC-2027-0005", review_by = "2027-11-01" }]
 
 [[rust.families]]
@@ -1483,6 +1485,13 @@ missing-record = [{ id = "RUSTSEC-2027-0006", review_by = "2027-11-01" }]
         assert_advisory_inventory(
             &inventory,
             "RUSTSEC-2027-0004",
+            InventoryAdvisoryExceptionStatus::Stale,
+            false,
+            true,
+        );
+        assert_advisory_inventory(
+            &inventory,
+            "RUSTSEC-2027-0009",
             InventoryAdvisoryExceptionStatus::Stale,
             false,
             true,
