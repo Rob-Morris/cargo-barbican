@@ -705,7 +705,7 @@ pub(super) fn load_reviewed_targets(
     let reviewed_targets = parse_reviewed_targets_toml(&text).map_err(|source| {
         CommandError::ReviewedTargetsParse {
             path: path.display().to_string(),
-            source,
+            source: Box::new(source),
         }
     })?;
 
@@ -1124,7 +1124,7 @@ pub enum CommandError {
     },
     ReviewedTargetsParse {
         path: String,
-        source: ReviewedTargetsError,
+        source: Box<ReviewedTargetsError>,
     },
     ReviewedTargetsRead {
         path: String,
