@@ -59,7 +59,8 @@ records, non-crates.io sources, uncovered crates.io packages, and live graph
 execution surfaces collected with `cargo metadata --frozen`. Live surfaces are
 cross-referenced against declared `allowed_surfaces`; if metadata collection
 fails, inventory still renders the offline sections and marks live graph
-surfaces as not collected.
+surfaces as not collected. It also reports reviewed advisory-exception status
+and advisory delegation configuration without running the delegated scanners.
 
 ### Before Adding A New Dependency
 
@@ -543,13 +544,17 @@ cargo barbican policy init
 The command creates missing files:
 
 - `barbican.toml`
+- `deny.toml`
 - `reviewed-targets.toml`
 - `docs/dependency-reviews/`
 - `docs/dependency-reviews/README.md`
 
 It preserves existing regular files, validates existing `barbican.toml`, and
 fails closed on wrong-type scaffold paths or ancestors such as directories in
-file positions and symlinks that would otherwise be followed.
+file positions and symlinks that would otherwise be followed. The generated
+`deny.toml` carries the non-advisory `cargo-deny` bans/sources posture only;
+it does not contain `[advisories]`, because `cargo barbican audit` forces the
+advisory section at runtime.
 
 The output reports each scaffold item as created, already present, or blocked.
 On success it points to the manual adoption guide. Init is intentionally not a
@@ -581,6 +586,18 @@ coverage, declared allowed execution surfaces, missing review records, and
 uncovered resolved crates. Live graph execution surfaces are reported as
 declared when they match checked-in `allowed_surfaces` policy and undeclared
 otherwise.
+
+Inventory also reports reviewed advisory exceptions without running
+`cargo-deny` or `cargo-audit`. Each configured exception is shown with its
+binding state against the current `Cargo.lock` and review record, plus an
+expiry status: active, soon-to-expire, expired, or stale. The
+soon-to-expire window is currently 30 days and is printed in the report.
+
+The advisory delegation section shows the configured lockfile scanner,
+`cargo-deny` checks, unmanaged delegated-ignore policy, native advisory ignores
+found in `deny.toml` / `.cargo/audit.toml`, and whether non-advisory
+`cargo-deny` posture would come from a checked-in `deny.toml` or Barbican's
+generated default base.
 
 Missing `reviewed-targets.toml` is not an error. Malformed policy, malformed
 workspace manifests, and missing or malformed `Cargo.lock` fail closed.
@@ -661,17 +678,23 @@ Runs delegated advisory and source-policy checks.
 cargo barbican audit
 ```
 
-Use this as the routine delegated-tool check.
+Use this as the routine delegated advisory and deny-policy check.
 
-It runs:
+`audit` does not inherit `cargo-audit` or `cargo-deny` exit codes as the policy
+verdict. Instead, it generates a max-disclosure runtime `cargo-deny` config
+that forces `[advisories]` and strips graph suppression, runs the configured
+scanner(s), parses the complete structured advisory finding set, reconciles
+each finding against checksum-bound reviewed `allowed_advisories` exceptions,
+and owns pass/fail itself. A non-zero scanner exit is normal when findings are
+present; incomplete or unparsable scanner evidence fails closed.
 
-```bash
-cargo audit
-cargo deny check advisories bans sources
-```
+Reviewed advisory exceptions are honoured only when the resolved target and
+checksum still match, the review record exists, and `review_by` has not
+expired. Native advisory ignores in `deny.toml` or `.cargo/audit.toml` are
+neutralised and reported according to
+`delegates.unmanaged_delegated_policy` (`warn` | `deny` | `allow`).
 
-The command fails if either delegated tool fails. It assumes `cargo-audit` and
-`cargo-deny` are installed and available on `PATH`.
+See [../functional/cli.md](../functional/cli.md) for the full audit contract.
 
 ### `cargo barbican verify`
 

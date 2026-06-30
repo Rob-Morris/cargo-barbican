@@ -17,6 +17,7 @@ cargo barbican policy init
 The command creates missing scaffold files:
 
 - `barbican.toml`
+- `deny.toml`
 - `reviewed-targets.toml`
 - `docs/dependency-reviews/`
 - `docs/dependency-reviews/README.md`
@@ -61,6 +62,18 @@ The crate must already be present in the same family `resolved` map with a
 `checksum_sha256`; cargo-barbican verifies that checksum before honouring the
 exception.
 
+For advisory findings that are intentionally accepted, record the exception in
+the same reviewed family under `allowed_advisories` with the `RUSTSEC-*` id and
+a `review_by` deadline. The crate must already be present in that family's
+`resolved` map with `checksum_sha256`; `audit` reconciles findings against the
+bound target, review record, and deadline before accepting the risk.
+
+Review `[delegates]` in `barbican.toml` before enforcing audit. It selects the
+lockfile scanner (`cargo-deny`, `cargo-audit`, or `both`), configures the
+`cargo-deny` check groups, and controls how native advisory ignores in
+`deny.toml` / `.cargo/audit.toml` are reported. Native ignores are neutralised
+regardless of the reporting mode.
+
 ## 3. Check Reviewed-Target Policy
 
 After adding reviewed families and records:
@@ -91,7 +104,12 @@ cargo-barbican version instead. Review the copied files before committing them.
 
 ```bash
 cp templates/barbican.toml /path/to/consumer/barbican.toml
+cp templates/deny.toml /path/to/consumer/deny.toml
 cp templates/reviewed-targets.toml /path/to/consumer/reviewed-targets.toml
 mkdir -p /path/to/consumer/docs/dependency-reviews
 cp templates/dependency-reviews/README.md /path/to/consumer/docs/dependency-reviews/README.md
 ```
+
+If the consumer repo already has a `deny.toml`, keep it and review the diff
+against `templates/deny.toml` manually. `policy init` follows the same
+create-if-missing rule and never overwrites an existing regular file.

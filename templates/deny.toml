@@ -1,0 +1,38 @@
+# Synced from cargo-barbican v0.14.0
+# Runtime advisory checks are owned by cargo-barbican audit.
+#
+# Do not add [advisories] here to weaken advisory handling. During audit,
+# cargo-barbican generates a runtime cargo-deny config that forces:
+# - ignore = []
+# - yanked = "deny"
+# - unmaintained = "all"
+# - unsound = "all"
+#
+# This checked-in file carries the non-advisory cargo-deny posture that
+# cargo-barbican preserves for bans and sources checks.
+
+# Optional repo-specific graph scope. cargo-barbican preserves targets/features
+# scope but strips graph exclusion keys that can hide advisories.
+#
+# [graph]
+# targets = [
+#   "aarch64-apple-darwin",
+#   "x86_64-apple-darwin",
+#   "x86_64-unknown-linux-gnu",
+#   "x86_64-pc-windows-msvc",
+# ]
+
+[bans]
+# Tighten to "deny" once duplicate versions are resolved for this repo.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+# Tighten to "deny" after adding explicit allow-git entries for this repo.
+unknown-git = "warn"
+allow-registry = [
+  "https://github.com/rust-lang/crates.io-index",
+]

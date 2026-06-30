@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.13.1
+# Synced from cargo-barbican v0.14.0
 # Review and edit this local policy after copying or running `cargo barbican policy init`.
 
 [release_age]
@@ -13,3 +13,14 @@ proc_macro_changes = true
 native_sys_crates = true
 
 [delegates]
+# How to report native deny.toml/.cargo/audit.toml advisory ignores.
+# These ignores are always neutralised by audit; this setting controls reporting only.
+unmanaged_delegated_policy = "warn" # warn | deny | allow
+
+[delegates.advisories]
+# Structured advisory scanner used for lockfile advisory reconciliation.
+lockfile_scanner = "cargo-deny" # cargo-deny | cargo-audit | both
+
+[delegates.cargo_deny]
+# cargo-deny check groups Barbican runs and reconciles.
+checks = ["advisories", "bans", "sources"] # advisories | bans | sources | licenses

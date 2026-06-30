@@ -90,7 +90,7 @@ impl ReviewedRustFamily {
         &self.allowed_advisories
     }
 
-    fn execution_surface_allowances(&self) -> Vec<ReviewedExecutionSurfaceAllowance> {
+    pub(crate) fn execution_surface_allowances(&self) -> Vec<ReviewedExecutionSurfaceAllowance> {
         self.allowed_surfaces
             .iter()
             .flat_map(|(crate_name, surfaces)| {

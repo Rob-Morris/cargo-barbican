@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::reviewed_targets::ObservedResolvedTarget;
 use crate::{
     CargoDependencySourceKind, CargoManifestDirectRequirement, Lockfile, ReviewedAdvisoryException,
-    ReviewedResolvedTarget, ReviewedTargets, Sha256Digest,
+    ReviewedExecutionSurfaceAllowance, ReviewedResolvedTarget, ReviewedTargets, Sha256Digest,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +25,13 @@ impl RustReviewedTargetsReport {
     pub fn is_empty(&self) -> bool {
         self.families.is_empty()
     }
+
+    pub fn execution_surface_allowances(&self) -> Vec<&ReviewedExecutionSurfaceAllowance> {
+        self.families
+            .iter()
+            .flat_map(RustReviewedFamilyReport::execution_surface_allowances)
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +40,7 @@ pub struct RustReviewedFamilyReport {
     review_record: String,
     direct_checks: Vec<ReviewedDirectDependencyCheck>,
     resolved_checks: Vec<ReviewedResolvedDependencyCheck>,
+    execution_surface_allowances: Vec<ReviewedExecutionSurfaceAllowance>,
     advisory_exceptions: Vec<ReviewedAdvisoryException>,
 }
 
@@ -53,6 +61,10 @@ impl RustReviewedFamilyReport {
         &self.resolved_checks
     }
 
+    pub fn execution_surface_allowances(&self) -> &[ReviewedExecutionSurfaceAllowance] {
+        &self.execution_surface_allowances
+    }
+
     /// Returns advisory exceptions whose checksum-bound resolved target matched.
     /// Callers must additionally require review-record success before rendering
     /// or applying the exception as honoured policy. Callers that suppress
@@ -60,12 +72,35 @@ impl RustReviewedFamilyReport {
     pub fn advisory_exceptions_with_matching_resolved_target(
         &self,
     ) -> Vec<&ReviewedAdvisoryException> {
+        self.advisory_exception_bindings()
+            .into_iter()
+            .filter(|binding| binding.resolved_target_matches())
+            .map(|binding| binding.exception())
+            .collect()
+    }
+
+    /// Returns advisory exceptions with their resolved-target binding state.
+    ///
+    /// This is derived from the reviewed-targets report, not raw config:
+    /// `resolved_target_matches` means the checksum-bound reviewed target
+    /// matched the current `Cargo.lock`, while `resolved_target_present` means
+    /// the crate@version still appears in the current `Cargo.lock`.
+    pub fn advisory_exception_bindings(&self) -> Vec<ReviewedAdvisoryExceptionBinding<'_>> {
         self.advisory_exceptions
             .iter()
-            .filter(|exception| {
-                self.resolved_checks.iter().any(|check| {
-                    check.crate_name() == exception.spec().crate_name() && check.is_success()
-                })
+            .map(|exception| {
+                let resolved_check = self
+                    .resolved_checks
+                    .iter()
+                    .find(|check| check.crate_name() == exception.spec().crate_name());
+                ReviewedAdvisoryExceptionBinding {
+                    exception,
+                    resolved_target_matches: resolved_check
+                        .is_some_and(ReviewedResolvedDependencyCheck::is_success),
+                    resolved_target_present: resolved_check.is_some_and(|check| {
+                        check.actual_versions().contains(exception.spec().version())
+                    }),
+                }
             })
             .collect()
     }
@@ -78,6 +113,27 @@ impl RustReviewedFamilyReport {
                 .resolved_checks
                 .iter()
                 .all(ReviewedResolvedDependencyCheck::is_success)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReviewedAdvisoryExceptionBinding<'a> {
+    exception: &'a ReviewedAdvisoryException,
+    resolved_target_matches: bool,
+    resolved_target_present: bool,
+}
+
+impl<'a> ReviewedAdvisoryExceptionBinding<'a> {
+    pub fn exception(&self) -> &'a ReviewedAdvisoryException {
+        self.exception
+    }
+
+    pub fn resolved_target_matches(&self) -> bool {
+        self.resolved_target_matches
+    }
+
+    pub fn resolved_target_present(&self) -> bool {
+        self.resolved_target_present
     }
 }
 
@@ -239,6 +295,7 @@ pub fn check_reviewed_rust_targets(
                 review_record: family.review_record().to_owned(),
                 direct_checks,
                 resolved_checks,
+                execution_surface_allowances: family.execution_surface_allowances(),
                 advisory_exceptions: family.advisory_exceptions(),
             }
         })

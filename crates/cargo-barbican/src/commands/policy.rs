@@ -14,6 +14,7 @@ use super::{
 
 pub(crate) const DEFAULT_BARBICAN_CONFIG: &str =
     include_str!("../../../../templates/barbican.toml");
+pub(crate) const DEFAULT_DENY_TOML: &str = include_str!("../../../../templates/deny.toml");
 const DEFAULT_REVIEWED_TARGETS: &str = include_str!("../../../../templates/reviewed-targets.toml");
 const DEFAULT_DEPENDENCY_REVIEWS_README: &str =
     include_str!("../../../../templates/dependency-reviews/README.md");
@@ -37,6 +38,12 @@ fn run_policy_init(current_dir: &Path, stdout: &mut dyn Write) -> Result<ExitCod
     let config_ok = ensure_config(current_dir, config_path, &mut report)?;
 
     if config_ok {
+        ensure_file(
+            current_dir,
+            Path::new("deny.toml"),
+            DEFAULT_DENY_TOML,
+            &mut report,
+        )?;
         ensure_reviewed_targets(
             current_dir,
             Path::new(REVIEWED_TARGETS_CONFIG_FILE),
@@ -391,7 +398,7 @@ impl InitStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::DEFAULT_BARBICAN_CONFIG;
+    use super::{DEFAULT_BARBICAN_CONFIG, DEFAULT_DENY_TOML};
 
     #[test]
     fn embedded_default_config_matches_template() {
@@ -401,6 +408,16 @@ mod tests {
             std::fs::read_to_string(template_path).expect("template config should be readable");
 
         assert_eq!(DEFAULT_BARBICAN_CONFIG, template);
+    }
+
+    #[test]
+    fn embedded_default_deny_toml_matches_template() {
+        let template_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates/deny.toml");
+        let template =
+            std::fs::read_to_string(template_path).expect("deny template should be readable");
+
+        assert_eq!(DEFAULT_DENY_TOML, template);
     }
 
     #[test]

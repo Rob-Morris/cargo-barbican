@@ -25,12 +25,12 @@ This directory is now partially populated.
 Available now:
 
 - `barbican.toml`
+- `deny.toml`
 - `dependency-reviews/README.md`
 - `reviewed-targets.toml`
 
 Still pending:
 
-- `deny.toml`
 - `dependency-management.md`
 
 ## Sync header convention
@@ -38,7 +38,7 @@ Still pending:
 Each template file shipped to a consumer should include a header comment:
 
 ```
-# Synced from cargo-barbican v0.13.1
+# Synced from cargo-barbican v0.14.0
 ```
 
 Template-specific follow-up comments may differ. Some copied templates, such

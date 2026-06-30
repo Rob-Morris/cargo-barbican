@@ -48,7 +48,8 @@ pub use inspect::{
     CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate, inspect_published_crate_at,
 };
 pub use inventory::{
-    GraphSurfaces, Inventory, InventoryDeclaredSurface, InventoryDirectDependency,
+    GraphSurfaces, INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS, Inventory, InventoryAdvisoryException,
+    InventoryAdvisoryExceptionStatus, InventoryDeclaredSurface, InventoryDirectDependency,
     InventoryDirectRequirements, InventoryGap, InventoryLiveSurface, InventoryNonCratesIoSource,
     InventoryResolvedCrate, InventoryReviewedFamily, InventoryRollup, ReviewRecordFact,
     WorkspacePackageIdentity, build_graph_surfaces, build_inventory,
@@ -69,8 +70,9 @@ pub use metadata::{
     parse_cargo_metadata, select_package_id,
 };
 pub use pin_check::{
-    ObservedDirectDependency, ReviewedDirectDependencyCheck, ReviewedResolvedDependencyCheck,
-    RustReviewedFamilyReport, RustReviewedTargetsReport, check_reviewed_rust_targets,
+    ObservedDirectDependency, ReviewedAdvisoryExceptionBinding, ReviewedDirectDependencyCheck,
+    ReviewedResolvedDependencyCheck, RustReviewedFamilyReport, RustReviewedTargetsReport,
+    check_reviewed_rust_targets,
 };
 pub use release_age::{
     ReleaseAgeOutcome, ReleaseAgeReport, check_release_age, check_release_age_at,

@@ -221,6 +221,112 @@ serde = ["proc-macro"]
 }
 
 #[test]
+fn inventory_reports_advisory_exception_and_delegation_state() {
+    let temp_dir = fresh_temp_dir();
+    write_inventory_fixture(&temp_dir);
+    fs::create_dir_all(temp_dir.join("docs/dependency-reviews"))
+        .expect("review record dir should create");
+    fs::write(
+        temp_dir.join("docs/dependency-reviews/serde.md"),
+        "reviewed serde advisory exception\n",
+    )
+    .expect("review record should write");
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"
+[delegates]
+unmanaged_delegated_policy = "deny"
+
+[delegates.advisories]
+lockfile_scanner = "both"
+
+[delegates.cargo_deny]
+checks = ["advisories", "bans"]
+"#,
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("deny.toml"),
+        r#"
+[advisories]
+ignore = [{ id = "RUSTSEC-2026-0001", reason = "native reviewed elsewhere" }]
+"#,
+    )
+    .expect("deny config should write");
+    fs::create_dir_all(temp_dir.join(".cargo")).expect("cargo config dir should create");
+    fs::write(
+        temp_dir.join(".cargo/audit.toml"),
+        r#"
+[advisories]
+ignore = ["RUSTSEC-2026-0002"]
+"#,
+    )
+    .expect("audit config should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+
+[rust.families.allowed_advisories]
+serde = [{ id = "RUSTSEC-2099-0001", review_by = "2099-01-01" }]
+
+[[rust.families]]
+name = "loose-family"
+review_record = "docs/dependency-reviews/loose.md"
+
+[rust.families.resolved]
+loose = { version = "0.1.0", checksum_sha256 = "1111111111111111111111111111111111111111111111111111111111111111" }
+
+[rust.families.allowed_advisories]
+loose = [{ id = "RUSTSEC-2099-0002", review_by = "2099-01-01" }]
+
+[[rust.families]]
+name = "stale-family"
+review_record = "docs/dependency-reviews/stale.md"
+
+[rust.families.resolved]
+stale = { version = "1.0.0", checksum_sha256 = "2222222222222222222222222222222222222222222222222222222222222222" }
+
+[rust.families.allowed_advisories]
+stale = [{ id = "RUSTSEC-2000-0001", review_by = "2000-01-01" }]
+"#,
+    )
+    .expect("reviewed targets should write");
+
+    let runner = FakeCommandRunner::default();
+    let (exit_code, stdout, stderr) = run_inventory_with_runner(&temp_dir, &runner);
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(stdout.contains(
+        "deny.toml: configured; cargo-deny non-advisory posture would use checked-in deny.toml"
+    ));
+    assert!(stdout.contains("Reviewed advisory exceptions:"));
+    assert!(stdout.contains("expiry window: soon-to-expire means review_by within 30 day(s)"));
+    assert!(stdout.contains("stale means the exception's crate@version is not present"));
+    assert!(stdout.contains("serde@1.0.228 RUSTSEC-2099-0001 family=serde-family review_record=docs/dependency-reviews/serde.md review_by=2099-01-01 status=active resolved-target=matched review-record=exists"));
+    assert!(stdout.contains("loose@0.1.0 RUSTSEC-2099-0002 family=loose-family review_record=docs/dependency-reviews/loose.md review_by=2099-01-01 status=active resolved-target=matched review-record=missing"));
+    assert!(stdout.contains("stale@1.0.0 RUSTSEC-2000-0001 family=stale-family review_record=docs/dependency-reviews/stale.md review_by=2000-01-01 status=stale resolved-target=not matched review-record=missing"));
+    assert!(stdout.contains("Advisory delegation:"));
+    assert!(stdout.contains("lockfile scanner: both"));
+    assert!(stdout.contains("cargo-deny checks: advisories, bans"));
+    assert!(stdout.contains("unmanaged delegated policy: deny"));
+    assert!(stdout.contains("native delegated advisory ignores:"));
+    assert!(stdout.contains("deny.toml ignores RUSTSEC-2026-0001"));
+    assert!(stdout.contains(".cargo/audit.toml ignores RUSTSEC-2026-0002"));
+}
+
+#[test]
 fn inventory_without_reviewed_targets_reports_no_policy() {
     let temp_dir = fresh_temp_dir();
     write_inventory_fixture(&temp_dir);
@@ -231,6 +337,16 @@ fn inventory_without_reviewed_targets_reports_no_policy() {
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(stderr.is_empty());
     assert!(stdout.contains("reviewed-targets.toml: not configured"));
+    assert!(stdout.contains(
+        "deny.toml: not configured; cargo-deny non-advisory posture would use Barbican's generated default base"
+    ));
+    assert!(stdout.contains("Reviewed advisory exceptions:"));
+    assert!(stdout.contains("exceptions: none"));
+    assert!(stdout.contains("Advisory delegation:"));
+    assert!(stdout.contains("lockfile scanner: cargo-deny"));
+    assert!(stdout.contains("cargo-deny checks: advisories, bans, sources"));
+    assert!(stdout.contains("unmanaged delegated policy: warn"));
+    assert!(stdout.contains("native delegated advisory ignores: none"));
     assert!(stdout.contains("live graph surface status: collected via cargo metadata --frozen"));
     assert!(stdout.contains("no policy configured yet; resolved crates are not classified as slipped-through policy gaps"));
     let observational =

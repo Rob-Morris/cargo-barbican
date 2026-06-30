@@ -21,6 +21,9 @@ For later checked-pin enforcement, the machine-readable companion file is
 - optional `allowed_surfaces` — reviewed `build-rs`, `proc-macro`, or
   `native-sys` execution surfaces for crates already present in the same
   `resolved` map
+- optional `allowed_advisories` — reviewed advisory exceptions for crates
+  already present in the same `resolved` map, recorded as `{ id, review_by }`
+  entries with a `RUSTSEC-*` id and a re-review deadline
 
 When a crates.io family carries `checksum_sha256`, `pin-check` reconciles that
 digest against the resolved `Cargo.lock` checksum chain as part of the local
@@ -30,6 +33,11 @@ When a reviewed family carries `allowed_surfaces`, `assess` can suppress the
 matching execution-surface elevated-risk signal while still rendering the
 reviewed exception in an `Allowed policy exceptions:` section. The family
 `review_record` is the evidence path for those allowances.
+
+When a reviewed family carries `allowed_advisories`, `audit` can accept the
+matching advisory finding only while the resolved crate/version/checksum still
+matches, the family review record exists, and `review_by` has not expired. Once
+the deadline is past, `audit` fails the exception and requires re-review.
 
 `inspect` can supply evidence for a review record, but it does not by itself
 activate an entry in `reviewed-targets.toml`.
@@ -99,6 +107,11 @@ YYYY-MM-DD-short-subject.md
 - Allowed execution surfaces:
   List any reviewed `build-rs`, `proc-macro`, or `native-sys` allowances added
   under `[rust.families.allowed_surfaces]`.
+- Allowed advisory exceptions:
+  List any reviewed advisory acceptances added under
+  `[rust.families.allowed_advisories]`, including the `RUSTSEC-*` id, the
+  affected exact crate already present in `resolved`, and the `review_by`
+  re-review deadline.
 
 ## Release Age
 

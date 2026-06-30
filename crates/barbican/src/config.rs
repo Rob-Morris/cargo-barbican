@@ -183,6 +183,16 @@ impl CargoDenyCheck {
     }
 }
 
+impl UnmanagedDelegatedPolicyMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Warn => "warn",
+            Self::Deny => "deny",
+            Self::Allow => "allow",
+        }
+    }
+}
+
 impl LockfileAdvisoryScanner {
     pub fn as_str(self) -> &'static str {
         match self {

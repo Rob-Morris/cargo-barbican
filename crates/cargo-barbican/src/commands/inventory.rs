@@ -6,25 +6,34 @@ use std::process::ExitCode;
 use std::collections::BTreeSet;
 
 use barbican::{
-    CargoManifestDirectRequirement, CargoManifestError, CargoManifestPackage, Inventory,
-    InventoryDirectRequirements, InventoryGap, ReviewRecordFact, WorkspacePackageIdentity,
-    build_graph_surfaces, build_inventory, parse_cargo_metadata, parse_manifest_package_identity,
-    parse_workspace_dependency_requirements, parse_workspace_package_version,
+    BarbicanConfig, CargoManifestDirectRequirement, CargoManifestError, CargoManifestPackage,
+    Inventory, InventoryAdvisoryExceptionStatus, InventoryDirectRequirements, InventoryGap,
+    OffsetDateTime, ReviewRecordFact, WorkspacePackageIdentity, build_graph_surfaces,
+    build_inventory, check_reviewed_rust_targets, parse_cargo_metadata,
+    parse_manifest_package_identity, parse_workspace_dependency_requirements,
+    parse_workspace_package_version,
 };
 
 use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
+use super::audit::{NativeDelegatedIgnore, load_native_delegated_ignores};
 use super::{
-    CommandError, check_review_record_paths, load_current_lockfile, load_manifest_texts_from_root,
-    load_reviewed_targets, parse_manifest_requirements,
+    CommandError, check_review_record_paths, load_config, load_current_lockfile,
+    load_manifest_texts_from_root, load_reviewed_targets, parse_manifest_requirements,
+    read_optional_text_no_symlink,
 };
 
 pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
     current_dir: &Path,
     runner: &R,
+    now: OffsetDateTime,
     stdout: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
+    let config = load_config(current_dir)?;
+    let user_deny_toml = read_optional_text_no_symlink(current_dir, Path::new("deny.toml"))
+        .map_err(CommandError::Io)?;
+    let native_ignores = load_native_delegated_ignores(current_dir, user_deny_toml.as_deref())?;
     let lockfile = load_current_lockfile(current_dir, Path::new("Cargo.lock"))?;
     let manifest_texts = load_manifest_texts_from_root(current_dir)?;
     let manifest_requirements = parse_manifest_requirements(&manifest_texts)?;
@@ -47,19 +56,28 @@ pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let reviewed_report = reviewed_targets
+        .as_ref()
+        .map(|targets| check_reviewed_rust_targets(targets, &manifest_requirements, &lockfile));
     let surface_collection = collect_graph_surfaces(current_dir, runner);
 
     let inventory = build_inventory(
         &lockfile,
         InventoryDirectRequirements::new(&manifest_requirements, &workspace_requirements),
         &workspace_packages,
-        reviewed_targets.as_ref(),
+        reviewed_report.as_ref(),
         &review_record_facts,
+        now,
         surface_collection.surfaces(),
     );
 
     let surface_report = build_surface_report(&inventory, &surface_collection);
-    render_inventory(stdout, &inventory, surface_report)?;
+    let delegation_report = InventoryDelegationReport {
+        config: &config,
+        deny_toml_present: user_deny_toml.is_some(),
+        native_ignores: &native_ignores,
+    };
+    render_inventory(stdout, &inventory, surface_report, delegation_report)?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -179,6 +197,7 @@ fn render_inventory(
     stdout: &mut dyn Write,
     inventory: &Inventory,
     surface_report: SurfaceReport<'_>,
+    delegation_report: InventoryDelegationReport<'_>,
 ) -> Result<(), CommandError> {
     let rollup = inventory.rollup();
     let surfaces_not_collected = surface_report.is_not_collected();
@@ -242,6 +261,12 @@ fn render_inventory(
         )
         .map_err(CommandError::Io)?;
     }
+    let deny_toml_status = if delegation_report.deny_toml_present {
+        "configured; cargo-deny non-advisory posture would use checked-in deny.toml"
+    } else {
+        "not configured; cargo-deny non-advisory posture would use Barbican's generated default base"
+    };
+    writeln!(stdout, "  deny.toml: {deny_toml_status}").map_err(CommandError::Io)?;
 
     writeln!(stdout).map_err(CommandError::Io)?;
     writeln!(stdout, "Direct dependencies:").map_err(CommandError::Io)?;
@@ -372,6 +397,43 @@ fn render_inventory(
     }
 
     writeln!(stdout).map_err(CommandError::Io)?;
+    writeln!(stdout, "Reviewed advisory exceptions:").map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  expiry window: soon-to-expire means review_by within {} day(s)",
+        barbican::INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS
+    )
+    .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  stale means the exception's crate@version is not present in the current Cargo.lock"
+    )
+    .map_err(CommandError::Io)?;
+    if inventory.advisory_exceptions().is_empty() {
+        writeln!(stdout, "  exceptions: none").map_err(CommandError::Io)?;
+    } else {
+        writeln!(stdout, "  exceptions:").map_err(CommandError::Io)?;
+        for exception in inventory.advisory_exceptions() {
+            writeln!(
+                stdout,
+                "  - {} {} family={} review_record={} review_by={} status={} resolved-target={} review-record={}",
+                exception.spec(),
+                escape_render_field(exception.advisory_id()),
+                escape_render_field(exception.family()),
+                escape_render_field(exception.review_record()),
+                exception.review_by(),
+                render_advisory_exception_status(exception.status()),
+                if exception.resolved_target_matches() { "matched" } else { "not matched" },
+                if exception.review_record_exists() { "exists" } else { "missing" }
+            )
+            .map_err(CommandError::Io)?;
+        }
+    }
+
+    writeln!(stdout).map_err(CommandError::Io)?;
+    render_advisory_delegation(stdout, delegation_report)?;
+
+    writeln!(stdout).map_err(CommandError::Io)?;
     writeln!(stdout, "Reviewed-target coverage:").map_err(CommandError::Io)?;
     if !inventory.policy_configured() {
         writeln!(
@@ -454,6 +516,75 @@ fn render_inventory(
     }
 
     Ok(())
+}
+
+struct InventoryDelegationReport<'a> {
+    config: &'a BarbicanConfig,
+    deny_toml_present: bool,
+    native_ignores: &'a [NativeDelegatedIgnore],
+}
+
+fn render_advisory_delegation(
+    stdout: &mut dyn Write,
+    report: InventoryDelegationReport<'_>,
+) -> Result<(), CommandError> {
+    writeln!(stdout, "Advisory delegation:").map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  lockfile scanner: {}",
+        report.config.delegates.advisories.lockfile_scanner.as_str()
+    )
+    .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  cargo-deny checks: {}",
+        report
+            .config
+            .delegates
+            .cargo_deny
+            .checks
+            .iter()
+            .map(|check| check.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+    .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  unmanaged delegated policy: {}",
+        report.config.delegates.unmanaged_delegated_policy.as_str()
+    )
+    .map_err(CommandError::Io)?;
+    if report.native_ignores.is_empty() {
+        writeln!(stdout, "  native delegated advisory ignores: none").map_err(CommandError::Io)?;
+    } else {
+        writeln!(stdout, "  native delegated advisory ignores:").map_err(CommandError::Io)?;
+        for entry in report.native_ignores {
+            writeln!(
+                stdout,
+                "  - {} ignores {}",
+                entry.source(),
+                entry
+                    .advisory_ids()
+                    .iter()
+                    .map(|id| escape_render_field(id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .map_err(CommandError::Io)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn render_advisory_exception_status(status: InventoryAdvisoryExceptionStatus) -> &'static str {
+    match status {
+        InventoryAdvisoryExceptionStatus::Active => "active",
+        InventoryAdvisoryExceptionStatus::SoonToExpire => "soon-to-expire",
+        InventoryAdvisoryExceptionStatus::Expired => "expired",
+        InventoryAdvisoryExceptionStatus::Stale => "stale",
+    }
 }
 
 fn render_gap(gap: &InventoryGap) -> String {

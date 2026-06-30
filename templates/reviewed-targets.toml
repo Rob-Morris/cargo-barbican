@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.13.1
+# Synced from cargo-barbican v0.14.0
 # Copy this template into a consumer repo, then edit that repo's
 # reviewed-targets.toml to declare reviewed dependency families.
 
@@ -19,6 +19,9 @@
 #   present in the same `resolved` map
 # - optional `allowed_age_exceptions`: reviewed release-age exceptions for
 #   crates already present in the same `resolved` map with `checksum_sha256`
+# - optional `allowed_advisories`: reviewed advisory exceptions for crates
+#   already present in the same `resolved` map with `checksum_sha256`; `review_by`
+#   is the re-review deadline, and audit fails the exception once past it
 
 [rust]
 
@@ -38,3 +41,6 @@
 #
 # [rust.families.allowed_age_exceptions]
 # some-crate = "1.2.3"
+#
+# [rust.families.allowed_advisories]
+# some-crate = [{ id = "RUSTSEC-2026-0001", review_by = "2026-12-31" }]

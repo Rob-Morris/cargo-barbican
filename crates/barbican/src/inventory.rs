@@ -3,9 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::metadata::metadata_packages;
 use crate::{
     CargoDependencySourceKind, CargoManifestDirectRequirement, ExactCrateSpec,
-    ExecutionSurfaceKind, Lockfile, MetadataPackageSurfaces, ReviewedTargets, Sha256Digest,
-    parse_exact_version_requirement,
+    ExecutionSurfaceKind, Lockfile, MetadataPackageSurfaces, RustReviewedTargetsReport,
+    Sha256Digest, parse_exact_version_requirement,
 };
+use time::{Duration, OffsetDateTime};
+
+pub const INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS: i64 = 30;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Inventory {
@@ -14,6 +17,7 @@ pub struct Inventory {
     resolved_crates_io: Vec<InventoryResolvedCrate>,
     non_crates_io_sources: Vec<InventoryNonCratesIoSource>,
     reviewed_families: Vec<InventoryReviewedFamily>,
+    advisory_exceptions: Vec<InventoryAdvisoryException>,
     declared_surfaces: Vec<InventoryDeclaredSurface>,
     live_surfaces: Option<Vec<InventoryLiveSurface>>,
     gaps: Vec<InventoryGap>,
@@ -38,6 +42,10 @@ impl Inventory {
 
     pub fn reviewed_families(&self) -> &[InventoryReviewedFamily] {
         &self.reviewed_families
+    }
+
+    pub fn advisory_exceptions(&self) -> &[InventoryAdvisoryException] {
+        &self.advisory_exceptions
     }
 
     pub fn declared_surfaces(&self) -> &[InventoryDeclaredSurface] {
@@ -214,6 +222,60 @@ impl InventoryReviewedFamily {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InventoryAdvisoryExceptionStatus {
+    Active,
+    SoonToExpire,
+    Expired,
+    Stale,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryAdvisoryException {
+    advisory_id: String,
+    spec: ExactCrateSpec,
+    family: String,
+    review_record: String,
+    review_by: time::Date,
+    status: InventoryAdvisoryExceptionStatus,
+    resolved_target_matches: bool,
+    review_record_exists: bool,
+}
+
+impl InventoryAdvisoryException {
+    pub fn advisory_id(&self) -> &str {
+        &self.advisory_id
+    }
+
+    pub fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
+    pub fn family(&self) -> &str {
+        &self.family
+    }
+
+    pub fn review_record(&self) -> &str {
+        &self.review_record
+    }
+
+    pub fn review_by(&self) -> time::Date {
+        self.review_by
+    }
+
+    pub fn status(&self) -> InventoryAdvisoryExceptionStatus {
+        self.status
+    }
+
+    pub fn resolved_target_matches(&self) -> bool {
+        self.resolved_target_matches
+    }
+
+    pub fn review_record_exists(&self) -> bool {
+        self.review_record_exists
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryDeclaredSurface {
     family: String,
@@ -380,8 +442,9 @@ pub fn build_inventory(
     lockfile: &Lockfile,
     direct_requirements: InventoryDirectRequirements<'_>,
     workspace_packages: &BTreeSet<WorkspacePackageIdentity>,
-    reviewed_targets: Option<&ReviewedTargets>,
+    reviewed_report: Option<&RustReviewedTargetsReport>,
     review_record_facts: &[ReviewRecordFact],
+    now: OffsetDateTime,
     surfaces: Option<&GraphSurfaces>,
 ) -> Inventory {
     let workspace_requirements_by_name = direct_requirements
@@ -450,8 +513,10 @@ pub fn build_inventory(
     let mut declared_surfaces = Vec::new();
     let mut declared_surface_keys = BTreeSet::new();
 
-    if let Some(reviewed_targets) = reviewed_targets {
-        for family in reviewed_targets.rust_families() {
+    let mut advisory_exceptions = Vec::new();
+
+    if let Some(reviewed_report) = reviewed_report {
+        for family in reviewed_report.families() {
             let record_fact = review_facts_by_family.get(family.name()).copied();
             let review_record_exists = record_fact.is_some_and(ReviewRecordFact::exists);
             if !review_record_exists {
@@ -461,22 +526,45 @@ pub fn build_inventory(
                 });
             }
 
-            for (crate_name, target) in family.resolved() {
+            for check in family.resolved_checks() {
                 covered_specs.insert(
-                    ExactCrateSpec::from_parts(crate_name, target.version())
-                        .expect("parse_reviewed_targets_toml validates exact specs"),
+                    ExactCrateSpec::from_parts(
+                        check.crate_name(),
+                        check.expected_target().version(),
+                    )
+                    .expect("parse_reviewed_targets_toml validates exact specs"),
                 );
             }
             reviewed_families.push(InventoryReviewedFamily {
                 name: family.name().to_owned(),
                 review_record: family.review_record().to_owned(),
                 review_record_exists,
-                direct_count: family.direct().len(),
-                resolved_count: family.resolved().len(),
+                direct_count: family.direct_checks().len(),
+                resolved_count: family.resolved_checks().len(),
             });
+
+            advisory_exceptions.extend(family.advisory_exception_bindings().into_iter().map(
+                |binding| {
+                    let exception = binding.exception();
+                    InventoryAdvisoryException {
+                        advisory_id: exception.advisory_id().to_string(),
+                        spec: exception.spec().clone(),
+                        family: exception.family().to_owned(),
+                        review_record: exception.review_record().to_owned(),
+                        review_by: exception.review_by(),
+                        status: advisory_exception_status(
+                            binding.resolved_target_present(),
+                            exception.review_by(),
+                            now,
+                        ),
+                        resolved_target_matches: binding.resolved_target_matches(),
+                        review_record_exists,
+                    }
+                },
+            ));
         }
         declared_surfaces.extend(
-            reviewed_targets
+            reviewed_report
                 .execution_surface_allowances()
                 .into_iter()
                 .map(|allowance| InventoryDeclaredSurface {
@@ -498,7 +586,7 @@ pub fn build_inventory(
                 spec: package.exact_spec().clone(),
                 checksum: package.checksum().cloned(),
             };
-            if reviewed_targets.is_some() && !covered_specs.contains(resolved.spec()) {
+            if reviewed_report.is_some() && !covered_specs.contains(resolved.spec()) {
                 gaps.push(InventoryGap::UncoveredResolvedCrate {
                     spec: resolved.spec().clone(),
                 });
@@ -544,7 +632,7 @@ pub fn build_inventory(
                     gaps.push(InventoryGap::UndeclaredExecutionSurface {
                         spec: spec.clone(),
                         surface,
-                        policy_configured: reviewed_targets.is_some(),
+                        policy_configured: reviewed_report.is_some(),
                     });
                 }
                 live_surfaces.push(InventoryLiveSurface {
@@ -563,14 +651,34 @@ pub fn build_inventory(
     });
 
     Inventory {
-        policy_configured: reviewed_targets.is_some(),
+        policy_configured: reviewed_report.is_some(),
         direct_dependencies,
         resolved_crates_io,
         non_crates_io_sources,
         reviewed_families,
+        advisory_exceptions,
         declared_surfaces,
         live_surfaces,
         gaps,
+    }
+}
+
+fn advisory_exception_status(
+    resolved_target_present: bool,
+    review_by: time::Date,
+    now: OffsetDateTime,
+) -> InventoryAdvisoryExceptionStatus {
+    if !resolved_target_present {
+        return InventoryAdvisoryExceptionStatus::Stale;
+    }
+
+    let today = now.date();
+    if review_by < today {
+        InventoryAdvisoryExceptionStatus::Expired
+    } else if review_by <= today + Duration::days(INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS) {
+        InventoryAdvisoryExceptionStatus::SoonToExpire
+    } else {
+        InventoryAdvisoryExceptionStatus::Active
     }
 }
 
@@ -608,10 +716,16 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::{
-        InventoryDirectRequirements, InventoryGap, ReviewRecordFact, WorkspacePackageIdentity,
-        build_graph_surfaces, build_inventory, parse_cargo_metadata, parse_lockfile,
+        InventoryAdvisoryExceptionStatus, InventoryDirectRequirements, InventoryGap,
+        ReviewRecordFact, WorkspacePackageIdentity, build_graph_surfaces, build_inventory,
+        check_reviewed_rust_targets, parse_cargo_metadata, parse_lockfile,
         parse_manifest_direct_requirements, parse_reviewed_targets_toml,
     };
+    use time::OffsetDateTime;
+
+    fn inventory_now() -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(1_820_908_800).expect("fixed timestamp is valid")
+    }
 
     #[test]
     fn builds_inventory_with_policy_gaps_and_rollups() {
@@ -664,17 +778,20 @@ covered = { version = "1.0.0", checksum_sha256 = "0123456789abcdef0123456789abcd
 "#,
         )
         .expect("reviewed targets should parse");
+        let reviewed_report =
+            check_reviewed_rust_targets(&reviewed_targets, &requirements, &lockfile);
 
         let inventory = build_inventory(
             &lockfile,
             InventoryDirectRequirements::new(&requirements, &[]),
             &BTreeSet::new(),
-            Some(&reviewed_targets),
+            Some(&reviewed_report),
             &[ReviewRecordFact::new(
                 "covered-family".to_owned(),
                 "docs/dependency-reviews/covered.md".to_owned(),
                 false,
             )],
+            inventory_now(),
             None,
         );
 
@@ -747,6 +864,7 @@ serde = "=1.0.228"
             &BTreeSet::new(),
             None,
             &[],
+            inventory_now(),
             None,
         );
 
@@ -802,6 +920,7 @@ path-crate = { path = "crates/path-crate" }
             &BTreeSet::new(),
             None,
             &[],
+            inventory_now(),
             None,
         );
 
@@ -851,6 +970,7 @@ source = "git+https://example.invalid/git-crate"
             &workspace_packages,
             None,
             &[],
+            inventory_now(),
             None,
         );
 
@@ -1115,12 +1235,13 @@ multi = ["build-rs"]
         )
         .expect("metadata should parse");
         let graph_surfaces = build_graph_surfaces(&metadata).expect("surfaces should build");
+        let reviewed_report = check_reviewed_rust_targets(&reviewed_targets, &[], &lockfile);
 
         let inventory = build_inventory(
             &lockfile,
             InventoryDirectRequirements::new(&[], &[]),
             &BTreeSet::new(),
-            Some(&reviewed_targets),
+            Some(&reviewed_report),
             &[
                 ReviewRecordFact::new(
                     "covered-family".to_owned(),
@@ -1138,6 +1259,7 @@ multi = ["build-rs"]
                     true,
                 ),
             ],
+            inventory_now(),
             Some(&graph_surfaces),
         );
 
@@ -1212,6 +1334,190 @@ multi = ["build-rs"]
                     && *surface == crate::ExecutionSurfaceKind::NativeSys
                     && *policy_configured)
         }));
+    }
+
+    #[test]
+    fn advisory_exceptions_report_binding_and_expiry_status() {
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "active"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[[package]]
+name = "soon"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+[[package]]
+name = "boundary-soon"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1212121212121212121212121212121212121212121212121212121212121212"
+
+[[package]]
+name = "boundary-active"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3434343434343434343434343434343434343434343434343434343434343434"
+
+[[package]]
+name = "expired"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+[[package]]
+name = "mismatch"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+
+[[package]]
+name = "missing-record"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+"#,
+        )
+        .expect("lockfile should parse");
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "existing-family"
+review_record = "docs/dependency-reviews/existing.md"
+
+[rust.families.resolved]
+active = { version = "1.0.0", checksum_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+soon = { version = "1.0.0", checksum_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+boundary-soon = { version = "1.0.0", checksum_sha256 = "1212121212121212121212121212121212121212121212121212121212121212" }
+boundary-active = { version = "1.0.0", checksum_sha256 = "3434343434343434343434343434343434343434343434343434343434343434" }
+expired = { version = "1.0.0", checksum_sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }
+stale = { version = "1.0.0", checksum_sha256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+mismatch = { version = "1.0.0", checksum_sha256 = "9999999999999999999999999999999999999999999999999999999999999999" }
+
+[rust.families.allowed_advisories]
+active = [{ id = "RUSTSEC-2027-0001", review_by = "2027-11-01" }]
+soon = [{ id = "RUSTSEC-2027-0002", review_by = "2027-10-01" }]
+boundary-soon = [{ id = "RUSTSEC-2027-0007", review_by = "2027-10-14" }]
+boundary-active = [{ id = "RUSTSEC-2027-0008", review_by = "2027-10-15" }]
+expired = [{ id = "RUSTSEC-2027-0003", review_by = "2027-09-13" }]
+stale = [{ id = "RUSTSEC-2027-0004", review_by = "2027-11-01" }]
+mismatch = [{ id = "RUSTSEC-2027-0005", review_by = "2027-11-01" }]
+
+[[rust.families]]
+name = "missing-family"
+review_record = "docs/dependency-reviews/missing.md"
+
+[rust.families.resolved]
+missing-record = { version = "1.0.0", checksum_sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }
+
+[rust.families.allowed_advisories]
+missing-record = [{ id = "RUSTSEC-2027-0006", review_by = "2027-11-01" }]
+"#,
+        )
+        .expect("reviewed targets should parse");
+        let reviewed_report = check_reviewed_rust_targets(&reviewed_targets, &[], &lockfile);
+
+        let inventory = build_inventory(
+            &lockfile,
+            InventoryDirectRequirements::new(&[], &[]),
+            &BTreeSet::new(),
+            Some(&reviewed_report),
+            &[
+                ReviewRecordFact::new(
+                    "existing-family".to_owned(),
+                    "docs/dependency-reviews/existing.md".to_owned(),
+                    true,
+                ),
+                ReviewRecordFact::new(
+                    "missing-family".to_owned(),
+                    "docs/dependency-reviews/missing.md".to_owned(),
+                    false,
+                ),
+            ],
+            inventory_now(),
+            None,
+        );
+
+        assert_advisory_inventory(
+            &inventory,
+            "RUSTSEC-2027-0001",
+            InventoryAdvisoryExceptionStatus::Active,
+            true,
+            true,
+        );
+        assert_advisory_inventory(
+            &inventory,
+            "RUSTSEC-2027-0002",
+            InventoryAdvisoryExceptionStatus::SoonToExpire,
+            true,
+            true,
+        );
+        assert_advisory_inventory(
+            &inventory,
+            "RUSTSEC-2027-0007",
+            InventoryAdvisoryExceptionStatus::SoonToExpire,
+            true,
+            true,
+        );
+        assert_advisory_inventory(
+            &inventory,
+            "RUSTSEC-2027-0008",
+            InventoryAdvisoryExceptionStatus::Active,
+            true,
+            true,
+        );
+        assert_advisory_inventory(
+            &inventory,
+            "RUSTSEC-2027-0003",
+            InventoryAdvisoryExceptionStatus::Expired,
+            true,
+            true,
+        );
+        assert_advisory_inventory(
+            &inventory,
+            "RUSTSEC-2027-0004",
+            InventoryAdvisoryExceptionStatus::Stale,
+            false,
+            true,
+        );
+        assert_advisory_inventory(
+            &inventory,
+            "RUSTSEC-2027-0005",
+            InventoryAdvisoryExceptionStatus::Active,
+            false,
+            true,
+        );
+        assert_advisory_inventory(
+            &inventory,
+            "RUSTSEC-2027-0006",
+            InventoryAdvisoryExceptionStatus::Active,
+            true,
+            false,
+        );
+    }
+
+    fn assert_advisory_inventory(
+        inventory: &crate::Inventory,
+        advisory_id: &str,
+        status: InventoryAdvisoryExceptionStatus,
+        resolved_target_matches: bool,
+        review_record_exists: bool,
+    ) {
+        let exception = inventory
+            .advisory_exceptions()
+            .iter()
+            .find(|exception| exception.advisory_id() == advisory_id)
+            .expect("advisory exception should be reported");
+        assert_eq!(exception.status(), status);
+        assert_eq!(exception.resolved_target_matches(), resolved_target_matches);
+        assert_eq!(exception.review_record_exists(), review_record_exists);
     }
 
     #[test]

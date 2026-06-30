@@ -573,6 +573,10 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
         include_str!("../../../templates/barbican.toml")
     );
     assert_eq!(
+        fs::read_to_string(temp_dir.join("deny.toml")).expect("deny config should exist"),
+        include_str!("../../../templates/deny.toml")
+    );
+    assert_eq!(
         fs::read_to_string(temp_dir.join("reviewed-targets.toml"))
             .expect("reviewed targets should exist"),
         include_str!("../../../templates/reviewed-targets.toml")
@@ -582,10 +586,10 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
             .expect("review readme should exist"),
         include_str!("../../../templates/dependency-reviews/README.md")
     );
-    assert!(!temp_dir.join("deny.toml").exists());
 
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("- barbican.toml: created\n"));
+    assert!(rendered.contains("- deny.toml: created\n"));
     assert!(rendered.contains("- reviewed-targets.toml: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews/README.md: created\n"));
@@ -621,9 +625,34 @@ fn policy_init_is_idempotent_for_existing_regular_scaffold() {
     assert_eq!(exit_code, ExitCode::SUCCESS);
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("- barbican.toml: already present\n"));
+    assert!(rendered.contains("- deny.toml: already present\n"));
     assert!(rendered.contains("- reviewed-targets.toml: already present\n"));
     assert!(rendered.contains("- docs/dependency-reviews: already present\n"));
     assert!(rendered.contains("- docs/dependency-reviews/README.md: already present\n"));
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn policy_init_preserves_existing_regular_deny_toml() {
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let existing_deny = "[bans]\nmultiple-versions = \"warn\"\n";
+    fs::write(temp_dir.join("deny.toml"), existing_deny).expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("deny.toml")).expect("deny config should still exist"),
+        existing_deny
+    );
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("- deny.toml: already present\n"));
     assert!(stderr.is_empty());
 }
 
@@ -716,6 +745,7 @@ fn policy_init_reports_malformed_config_without_creating_dependent_scaffold() {
     assert_eq!(exit_code, ExitCode::from(1));
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("- barbican.toml: blocked (invalid config:"));
+    assert!(!temp_dir.join("deny.toml").exists());
     assert!(!temp_dir.join("reviewed-targets.toml").exists());
     assert!(!temp_dir.join("docs/dependency-reviews/README.md").exists());
     assert!(stderr.is_empty());
@@ -744,6 +774,7 @@ fn policy_init_escapes_malformed_config_parse_diagnostics() {
     assert!(!rendered.contains('\u{001b}'));
     assert!(rendered.contains("\\x1b"));
     assert!(rendered.contains("2 | \\x1b = \"pwned\"\n  | ^"));
+    assert!(!temp_dir.join("deny.toml").exists());
     assert!(!temp_dir.join("reviewed-targets.toml").exists());
     assert!(stderr.is_empty());
 }
@@ -789,6 +820,7 @@ fn policy_init_fails_closed_on_wrong_type_scaffold_paths() {
     assert_eq!(exit_code, ExitCode::from(1));
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("- barbican.toml: created\n"));
+    assert!(rendered.contains("- deny.toml: created\n"));
     assert!(
         rendered
             .contains("- reviewed-targets.toml: blocked (expected regular file, found directory)")
@@ -818,6 +850,7 @@ fn policy_init_fails_closed_on_symlinked_policy_paths() {
 
     assert_eq!(exit_code, ExitCode::from(1));
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("- deny.toml: created\n"));
     assert!(
         rendered
             .contains("- reviewed-targets.toml: blocked (expected regular file, found symlink)")

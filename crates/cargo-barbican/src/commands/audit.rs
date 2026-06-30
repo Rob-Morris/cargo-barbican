@@ -163,12 +163,22 @@ fn bound_advisory_exceptions<'a>(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct NativeDelegatedIgnore {
+pub(super) struct NativeDelegatedIgnore {
     source: &'static str,
     advisory_ids: Vec<String>,
 }
 
-fn load_native_delegated_ignores(
+impl NativeDelegatedIgnore {
+    pub(super) fn source(&self) -> &'static str {
+        self.source
+    }
+
+    pub(super) fn advisory_ids(&self) -> &[String] {
+        &self.advisory_ids
+    }
+}
+
+pub(super) fn load_native_delegated_ignores(
     current_dir: &Path,
     user_deny_toml: Option<&str>,
 ) -> Result<Vec<NativeDelegatedIgnore>, CommandError> {

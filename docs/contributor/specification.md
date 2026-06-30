@@ -154,8 +154,11 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 - the deterministic setup command for explicit repo policy scaffolding
 - non-interactive and non-certifying: it does not review existing dependencies
   or generate active reviewed families
-- template-backed: it writes the shipped `barbican.toml`,
+- template-backed: it writes the shipped `barbican.toml`, `deny.toml`,
   `reviewed-targets.toml`, and dependency-review README templates when absent
+- advisory-owned: the shipped `deny.toml` carries non-advisory bans/sources
+  posture only and deliberately omits `[advisories]`; `cargo barbican audit`
+  forces advisory disclosure in its runtime cargo-deny config
 - conservative with existing files: regular files are preserved, existing
   `barbican.toml` is validated, and symlinks or wrong-type scaffold paths fail
   closed

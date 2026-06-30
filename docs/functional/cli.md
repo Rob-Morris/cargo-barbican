@@ -134,11 +134,16 @@ cargo barbican policy init
     Create the explicit policy scaffold for adopting cargo-barbican in a repo.
     The first slice creates missing:
     - `barbican.toml`
+    - `deny.toml`
     - `reviewed-targets.toml`
     - `docs/dependency-reviews/`
     - `docs/dependency-reviews/README.md`
-    It does not create `deny.toml`, active reviewed families, dependency
-    review records, or inventory reports.
+    `deny.toml` carries the preserved non-advisory `cargo-deny` posture for
+    bans and sources. It deliberately contains no `[advisories]` section:
+    `cargo barbican audit` owns advisory disclosure at runtime and forces that
+    section when invoking `cargo-deny`.
+    It does not create active reviewed families, dependency review records, or
+    inventory reports.
     Existing regular files are preserved. Existing `barbican.toml` is read
     and validated. Malformed config fails before dependent scaffold files are
     created. Symlinks, directories, and other wrong-type paths at scaffold
@@ -168,6 +173,15 @@ cargo barbican inventory
       as policy coverage gaps
     - reports live graph execution surfaces as declared or undeclared against
       the checked-in `allowed_surfaces` policy
+    - reports reviewed advisory exceptions with status active, soon-to-expire,
+      expired, or stale, and separately reports each exception's binding state
+      against the current lockfile (`resolved-target` matched or not matched)
+      and review record (exists or missing)
+    - reports advisory delegation config: selected lockfile scanner,
+      configured `cargo-deny` checks, unmanaged delegated-ignore policy,
+      native advisory ignores in `deny.toml` / `.cargo/audit.toml`, and whether
+      `cargo-deny` would use a checked-in `deny.toml` or Barbican's generated
+      default base for non-advisory posture
     Missing `reviewed-targets.toml` is not an error; the report states that no
     reviewed-target policy is configured yet. Malformed `reviewed-targets.toml`,
     malformed workspace manifests, and missing or malformed `Cargo.lock` fail
