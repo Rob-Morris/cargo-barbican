@@ -19,7 +19,8 @@ const DEFAULT_REVIEWED_TARGETS: &str = include_str!("../../../../templates/revie
 const DEFAULT_DEPENDENCY_REVIEWS_README: &str =
     include_str!("../../../../templates/dependency-reviews/README.md");
 
-const ADOPTION_GUIDE_PATH: &str = "docs/user/adoption.md";
+const ADOPTION_GUIDE_PATH: &str =
+    "https://github.com/rob-morris/cargo-barbican/blob/main/docs/user/adoption.md";
 
 pub(super) fn run_policy(
     command: PolicyCommand,

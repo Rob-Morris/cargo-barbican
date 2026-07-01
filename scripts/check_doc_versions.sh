@@ -77,9 +77,10 @@ assert_contains() {
 }
 
 assert_contains README.md "badge/version-$crate_version-blue" "current version badge"
-assert_contains README.md "--tag v$crate_version" "current install tag"
+assert_contains README.md "--branch main" "current pre-release install branch"
+assert_contains README.md "restore the --tag install line" "pre-release tag restoration note"
 assert_contains README.md "badge/Rust-$rust_version-" "current Rust badge"
-assert_contains docs/user/integration.md "--tag v$crate_version" "current install tag"
+assert_contains docs/user/integration.md "--branch main" "current pre-release install branch"
 assert_contains docs/user/integration.md "$sync_header" "template sync-header example"
 assert_contains templates/README.md "$sync_header" "template sync-header convention"
 

@@ -113,18 +113,20 @@ cargo barbican inspect cargo-audit@0.22.1
 Then decide whether you need additional manual review of the tool's dependency
 graph, advisories, provenance, and high-risk transitive crates.
 
-`gatehouse candidate` is useful when you want cargo-barbican to assemble the
+`gatehouse candidate` is useful when you want cargo-barbican to assemble an
 isolated pre-install dossier:
 
 ```bash
 cargo barbican gatehouse candidate cargo-audit@0.22.1
 ```
 
-Treat the dossier as review evidence, not full trust. The command does not
-prove that every transitive dependency is benign, and it does not build, test,
-or execute the tool. For large dependency graphs, follow up with manual review
-of high-risk transitive crates, especially crates with build scripts, proc
-macros, native code, unusual provenance, or advisory history.
+Treat the dossier as partial review evidence, not full install proof. For a
+tool crate, `gatehouse candidate` builds a synthetic single-dependency library
+graph; it does not model `cargo install --locked` semantics or prove the
+tool's real install graph. It also does not build, test, or execute the tool.
+For large dependency graphs, follow up with manual review of high-risk
+transitive crates, especially crates with build scripts, proc macros, native
+code, unusual provenance, or advisory history.
 
 ### Updating An Existing Dependency
 

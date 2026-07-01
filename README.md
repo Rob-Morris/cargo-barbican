@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.14.1-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.14.2-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20branch-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -41,11 +41,13 @@ support is explicitly delivered.
 
 ## Quickstart
 
-Install the pinned release from git:
+Install the current pre-release from git:
 
 ```bash
-cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.14.1
+cargo install --locked --git https://github.com/rob-morris/cargo-barbican --branch main
 ```
+
+<!-- PRE-RELEASE: cargo-barbican is not yet publicly released and no v* git tag is cut. Before the first public release, cut & push the matching git tag and restore the --tag install line. Tracked in the brain project release checklist. -->
 
 Set up the minimal policy files in the repository that will use the gate:
 

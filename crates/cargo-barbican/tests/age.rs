@@ -593,7 +593,9 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
     assert!(rendered.contains("- reviewed-targets.toml: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews/README.md: created\n"));
-    assert!(rendered.contains("Review the manual adoption guide: docs/user/adoption.md"));
+    assert!(rendered.contains(
+        "Review the manual adoption guide: https://github.com/rob-morris/cargo-barbican/blob/main/docs/user/adoption.md"
+    ));
     assert!(rendered.contains("Review current dependencies"));
     assert!(stderr.is_empty());
 }

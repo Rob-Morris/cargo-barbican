@@ -14,7 +14,7 @@ intermediate state; record the command and reason below.
 of the branch guard; do not use it for normal commit verification.
 [2] Dependency provenance: any direct dependency change, dependency-tool install, or `deny.toml` policy change has a checked-in record under `docs/dependency-reviews/`.
 [3] Docs routing: if docs were added, moved, removed, or materially changed, the relevant `README.md` indexes and cited standards/contributor docs were updated.
-[4] Doc version consistency: `scripts/check_doc_versions.sh --staged` passes for the staged commit, including README badges, install tags, Rust toolchain badge, and shipped template sync headers.
+[4] Doc version consistency: `scripts/check_doc_versions.sh --staged` passes for the staged commit, including README badges, install references, Rust toolchain badge, and shipped template sync headers.
 [5] Version bundle: if the shared repo version changed, both crate manifests, `docs/CHANGELOG.md`, and the matching `docs/changelog/vX.Y.Z.md` entry were updated together.
 [6] Commit subject: the subject was drafted against `docs/standards/commit-messages.md`, and any versioned subject reuses the canonical changelog `Summary` verbatim.
 
