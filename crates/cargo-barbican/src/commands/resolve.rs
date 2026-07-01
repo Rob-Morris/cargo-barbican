@@ -17,8 +17,9 @@ use super::age_lock::recheck_lockfile_age_against_lockfiles;
 use super::diff_render::render_unified_file_diff;
 use super::scratch_dir::ScratchDir;
 use super::{
-    CommandError, fail, finish_release_age_checks, load_config, load_current_lockfile_text,
-    load_current_lockfile_with_text, load_reviewed_release_age_exceptions, parse_specs,
+    CommandError, escape_diagnostic_for_terminal, fail, finish_release_age_checks, load_config,
+    load_current_lockfile_text, load_current_lockfile_with_text,
+    load_reviewed_release_age_exceptions, parse_specs,
 };
 
 pub(super) fn run_resolve<C, R>(
@@ -173,7 +174,12 @@ where
             Some(&base_lockfile_text),
             Some(&current_lockfile_text),
         );
-        writeln!(stdout, "Dry run preview:\n{diff}").map_err(CommandError::Io)?;
+        writeln!(
+            stdout,
+            "Dry run preview:\n{}",
+            escape_diagnostic_for_terminal(&diff)
+        )
+        .map_err(CommandError::Io)?;
     }
 
     Ok(ExitCode::SUCCESS)

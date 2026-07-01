@@ -1297,6 +1297,51 @@ fn resolve_dry_run_previews_lockfile_diff_without_mutating_repo() {
 }
 
 #[test]
+fn resolve_dry_run_escapes_bidi_and_zero_width_controls_in_lockfile_diff() {
+    let cli = Cli::parse_from(["cargo-barbican", "resolve", "--dry-run", "serde@1.0.228"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-01T00:00:00Z", false);
+    let spoofed_source = format!(
+        "registry+https://github.com/rust-lang/crates.io-index{}{}",
+        '\u{202e}', '\u{200b}'
+    );
+    let updated_lockfile =
+        lockfile_with_package_sources(&[("serde", "1.0.228", Some(&spoofed_source))]);
+    let runner = FakeCommandRunner::default()
+        .with_updated_lockfile(&updated_lockfile)
+        .with_cargo_metadata(&metadata_with_packages(&[(
+            "serde",
+            "1.0.228",
+            "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        )]));
+    let temp_dir = fresh_temp_dir();
+    let original_lockfile = lockfile_with_packages(&[("serde", "1.0.227", true)]);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(temp_dir.join("Cargo.lock"), &original_lockfile)
+        .expect("current lockfile should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("\\x202e"));
+    assert!(rendered.contains("\\x200b"));
+    assert!(!rendered.contains('\u{202e}'));
+    assert!(!rendered.contains('\u{200b}'));
+    assert!(
+        rendered.contains("\n-source = \"registry+https://github.com/rust-lang/crates.io-index\"")
+    );
+    assert!(
+        rendered.contains("\n+source = \"registry+https://github.com/rust-lang/crates.io-index")
+    );
+    assert!(!rendered.contains("\\n"));
+}
+
+#[test]
 fn resolve_dry_run_reports_when_no_lockfile_change_would_be_made() {
     let cli = Cli::parse_from(["cargo-barbican", "resolve", "--dry-run", "serde@1.0.228"]);
     let lockfile = lockfile_with_packages(&[("serde", "1.0.228", true)]);

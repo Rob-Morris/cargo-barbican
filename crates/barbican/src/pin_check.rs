@@ -594,6 +594,63 @@ checksum = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     }
 
     #[test]
+    fn fails_when_lockfile_reports_extra_checksum_even_if_expected_is_present() {
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+        )
+        .expect("reviewed targets should parse");
+        let manifest_requirements = manifest_requirements("[dependencies]\nserde = \"=1.0.228\"\n")
+            .expect("manifest should parse");
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+"#,
+        )
+        .expect("lockfile should parse");
+
+        let report =
+            check_reviewed_rust_targets(&reviewed_targets, &manifest_requirements, &lockfile);
+
+        assert!(!report.is_success());
+        assert_eq!(
+            report.families()[0].resolved_checks()[0].actual_versions(),
+            &BTreeSet::from(["1.0.228".to_owned()])
+        );
+        assert_eq!(
+            report.families()[0].resolved_checks()[0].actual_checksums_sha256(),
+            &BTreeSet::from([
+                Sha256Digest::try_from(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                )
+                .expect("digest should parse"),
+                Sha256Digest::try_from(
+                    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                )
+                .expect("digest should parse"),
+            ])
+        );
+    }
+
+    #[test]
     fn fails_when_reviewed_checksum_is_missing_from_lockfile() {
         let reviewed_targets = parse_reviewed_targets_toml(
             r#"

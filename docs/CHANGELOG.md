@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.14.1](changelog/v0.14.1.md) | 2026-07-01 | Harden checksum-set matching and terminal-output hygiene |
 | [v0.14.0](changelog/v0.14.0.md) | 2026-06-30 | Add inventory advisory reporting and deny.toml scaffold |
 | [v0.13.1](changelog/v0.13.1.md) | 2026-06-29 | Harden policy-file reads against symlink disclosure |
 | [v0.13.0](changelog/v0.13.0.md) | 2026-06-29 | Add reviewed advisory reconciliation to audit |

@@ -378,7 +378,10 @@ impl ReviewedResolvedTarget {
         let version_matches =
             observed.versions.len() == 1 && observed.versions.contains(self.version());
         let checksum_matches = match self.checksum_sha256() {
-            Some(expected_checksum) => observed.checksums_sha256.contains(expected_checksum),
+            Some(expected_checksum) => {
+                observed.checksums_sha256.len() == 1
+                    && observed.checksums_sha256.contains(expected_checksum)
+            }
             None => true,
         };
 
@@ -670,8 +673,18 @@ fn is_terminal_control_char(character: char) -> bool {
         '\u{0000}'..='\u{001f}'
             | '\u{007f}'
             | '\u{0080}'..='\u{009f}'
+            | '\u{061c}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200d}'
+            | '\u{200e}'
+            | '\u{200f}'
             | '\u{2028}'
             | '\u{2029}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{feff}'
     )
 }
 
@@ -1209,7 +1222,8 @@ native-sys = "1.2.3"
     #[test]
     fn rejects_control_characters_in_family_names_and_review_records() {
         for character in [
-            "\\u0000", "\\n", "\\u001f", "\\u007f", "\\u0080", "\\u009f", "\\u2028", "\\u2029",
+            "\\u0000", "\\n", "\\u001f", "\\u007f", "\\u0080", "\\u009f", "\\u200b", "\\u2028",
+            "\\u2029", "\\u202e", "\\u200f", "\\u2060",
         ] {
             let family_error = parse_reviewed_targets_toml(&format!(
                 r#"

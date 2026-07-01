@@ -375,7 +375,18 @@ pub(super) fn escape_render_field(value: &str) -> String {
             '\r' => escaped.push_str("\\r"),
             '\t' => escaped.push_str("\\t"),
             '\u{1b}' => escaped.push_str("\\x1b"),
-            '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}' | '\u{2028}' | '\u{2029}' => {
+            '\u{0}'..='\u{1f}'
+            | '\u{7f}'..='\u{9f}'
+            | '\u{061c}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200d}'
+            | '\u{200e}'
+            | '\u{200f}'
+            | '\u{2028}'..='\u{202e}'
+            | '\u{2060}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{feff}' => {
                 write!(&mut escaped, "\\x{:02x}", character as u32)
                     .expect("writing to a String cannot fail");
             }
@@ -1001,7 +1012,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::scratch_dir::ScratchDir;
-    use super::{minimal_search_roots, review_record_exists, validate_crates_io_base_url};
+    use super::{
+        escape_diagnostic_for_terminal, escape_render_field, minimal_search_roots,
+        review_record_exists, validate_crates_io_base_url,
+    };
 
     #[test]
     fn accepts_https_crates_io_base_urls() {
@@ -1056,6 +1070,22 @@ mod tests {
                 PathBuf::from("libs"),
             ])),
             vec![PathBuf::from(".")]
+        );
+    }
+
+    #[test]
+    fn escape_render_field_escapes_bidi_and_zero_width_controls() {
+        assert_eq!(
+            escape_render_field("safe\u{202e}name\u{200b}field\u{200f}\u{2060}"),
+            "safe\\x202ename\\x200bfield\\x200f\\x2060"
+        );
+    }
+
+    #[test]
+    fn escape_diagnostic_for_terminal_escapes_bidi_and_zero_width_controls() {
+        assert_eq!(
+            escape_diagnostic_for_terminal("line\u{2066}value\u{feff}\u{200f}\u{2060}\n\tcaret"),
+            "line\\x2066value\\xfeff\\x200f\\x2060\n\tcaret"
         );
     }
 
@@ -1254,8 +1284,16 @@ pub(super) fn escape_diagnostic_for_terminal(value: &str) -> String {
             | '\u{000b}'..='\u{001f}'
             | '\u{007f}'
             | '\u{0080}'..='\u{009f}'
-            | '\u{2028}'
-            | '\u{2029}' => {
+            | '\u{061c}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200d}'
+            | '\u{200e}'
+            | '\u{200f}'
+            | '\u{2028}'..='\u{202e}'
+            | '\u{2060}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{feff}' => {
                 write!(&mut escaped, "\\x{:02x}", character as u32)
                     .expect("writing to a String cannot fail");
             }
