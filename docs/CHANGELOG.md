@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.17.0](changelog/v0.17.0.md) | 2026-07-01 | Add pick command for semver version discovery |
 | [v0.16.0](changelog/v0.16.0.md) | 2026-07-01 | Rename resolve to update and reclaim resolve |
 | [v0.15.0](changelog/v0.15.0.md) | 2026-07-01 | Add version flag and exact spec equals tolerance |
 | [v0.14.2](changelog/v0.14.2.md) | 2026-07-01 | Polish pre-release adoption guidance |

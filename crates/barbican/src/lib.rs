@@ -14,6 +14,7 @@ pub mod inventory;
 pub mod lockfile;
 pub mod manifest;
 pub mod metadata;
+pub mod pick;
 pub mod pin_check;
 pub mod release_age;
 pub mod reviewed_targets;
@@ -39,7 +40,8 @@ pub use config::{
     MAXIMUM_RELEASE_AGE_MINIMUM_DAYS, ReleaseAgeConfig, UnmanagedDelegatedPolicyMode,
 };
 pub use crates_io::{
-    CrateRelease, CratesIoClient, CratesIoClientError, parse_version_response_body,
+    CrateRelease, CratesIoClient, CratesIoClientError, VersionInfo, parse_version_response_body,
+    parse_versions_response_body,
 };
 pub use deny_config::{
     CargoDenyRuntimeConfigError, advisory_ignores_from_toml, generate_cargo_deny_runtime_config,
@@ -68,6 +70,10 @@ pub use manifest::{
 pub use metadata::{
     CargoMetadata, CargoMetadataError, MetadataPackageSurfaces, package_surfaces,
     parse_cargo_metadata, select_package_id,
+};
+pub use pick::{
+    PickError, PickExcludedVersion, PickExclusionReason, PickSelection, PickSpec, PickSpecError,
+    parse_pick_spec, pick_version,
 };
 pub use pin_check::{
     ObservedDirectDependency, ReviewedAdvisoryExceptionBinding, ReviewedDirectDependencyCheck,

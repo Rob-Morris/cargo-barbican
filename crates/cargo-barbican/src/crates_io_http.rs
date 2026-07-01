@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use barbican::{
-    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, parse_version_response_body,
+    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, VersionInfo,
+    parse_version_response_body, parse_versions_response_body,
 };
 use ureq::Agent;
 
@@ -35,6 +36,10 @@ impl UreqCratesIoClient {
             spec.crate_name(),
             spec.version()
         )
+    }
+
+    fn versions_url(&self, crate_name: &str) -> String {
+        format!("{}/api/v1/crates/{crate_name}", self.base_url)
     }
 
     fn tarball_url(&self, spec: &ExactCrateSpec) -> String {
@@ -71,6 +76,31 @@ impl CratesIoClient for UreqCratesIoClient {
         })?;
 
         parse_version_response_body(&body)
+    }
+
+    fn fetch_versions(&self, crate_name: &str) -> Result<Vec<VersionInfo>, CratesIoClientError> {
+        let mut response = self
+            .agent
+            .get(self.versions_url(crate_name))
+            .header("User-Agent", USER_AGENT)
+            .call()
+            .map_err(|error| CratesIoClientError::Transport {
+                reason: error.to_string(),
+            })?;
+
+        if response.status().is_client_error() || response.status().is_server_error() {
+            return Err(CratesIoClientError::HttpStatus {
+                status_code: response.status().as_u16(),
+            });
+        }
+
+        let body = response.body_mut().read_to_string().map_err(|error| {
+            CratesIoClientError::Transport {
+                reason: error.to_string(),
+            }
+        })?;
+
+        parse_versions_response_body(&body)
     }
 
     fn fetch_release_tarball(&self, spec: &ExactCrateSpec) -> Result<Vec<u8>, CratesIoClientError> {

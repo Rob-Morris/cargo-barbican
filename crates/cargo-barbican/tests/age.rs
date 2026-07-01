@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use barbican::{
-    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, OffsetDateTime,
+    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, OffsetDateTime, VersionInfo,
     parse_version_response_body,
 };
 use cargo_barbican::{
@@ -27,8 +27,10 @@ use tar::{Builder, Header};
 #[derive(Default)]
 struct FakeCratesIoClient {
     responses: HashMap<String, Result<CrateRelease, CratesIoClientError>>,
+    version_responses: HashMap<String, Result<Vec<VersionInfo>, CratesIoClientError>>,
     tarball_responses: HashMap<String, Result<Vec<u8>, CratesIoClientError>>,
     fetches: RefCell<Vec<String>>,
+    version_fetches: RefCell<Vec<String>>,
     tarball_fetches: RefCell<Vec<String>>,
 }
 
@@ -52,7 +54,7 @@ impl FakeCratesIoClient {
         self.responses.insert(
             spec.to_owned(),
             Ok(parse_version_response_body(&format!(
-                r#"{{"version":{{"checksum":"{checksum_sha256_hex}","created_at":"{published_at}","yanked":{yanked}}}}}"#
+                r#"{{"version":{{"num":"0.0.0","checksum":"{checksum_sha256_hex}","created_at":"{published_at}","yanked":{yanked}}}}}"#
             ))
             .expect("fake response should parse")),
         );
@@ -64,6 +66,29 @@ impl FakeCratesIoClient {
         self
     }
 
+    fn with_versions(mut self, crate_name: &str, versions: &[(&str, &str, bool)]) -> Self {
+        self.version_responses.insert(
+            crate_name.to_owned(),
+            Ok(versions
+                .iter()
+                .map(|(num, published_at, yanked)| fake_version_info(num, published_at, *yanked))
+                .collect()),
+        );
+        self
+    }
+
+    fn with_raw_versions(mut self, crate_name: &str, versions: Vec<VersionInfo>) -> Self {
+        self.version_responses
+            .insert(crate_name.to_owned(), Ok(versions));
+        self
+    }
+
+    fn with_versions_error(mut self, crate_name: &str, error: CratesIoClientError) -> Self {
+        self.version_responses
+            .insert(crate_name.to_owned(), Err(error));
+        self
+    }
+
     fn with_tarball(mut self, spec: &str, tarball: &[u8]) -> Self {
         self.tarball_responses
             .insert(spec.to_owned(), Ok(tarball.to_vec()));
@@ -72,6 +97,10 @@ impl FakeCratesIoClient {
 
     fn recorded_fetches(&self) -> Vec<String> {
         self.fetches.borrow().clone()
+    }
+
+    fn recorded_version_fetches(&self) -> Vec<String> {
+        self.version_fetches.borrow().clone()
     }
 
     fn recorded_tarball_fetches(&self) -> Vec<String> {
@@ -92,6 +121,20 @@ impl CratesIoClient for FakeCratesIoClient {
             })
     }
 
+    fn fetch_versions(&self, crate_name: &str) -> Result<Vec<VersionInfo>, CratesIoClientError> {
+        self.version_fetches
+            .borrow_mut()
+            .push(crate_name.to_owned());
+        self.version_responses
+            .get(crate_name)
+            .cloned()
+            .unwrap_or_else(|| {
+                Err(CratesIoClientError::Transport {
+                    reason: "missing fake versions response".to_owned(),
+                })
+            })
+    }
+
     fn fetch_release_tarball(&self, spec: &ExactCrateSpec) -> Result<Vec<u8>, CratesIoClientError> {
         self.tarball_fetches.borrow_mut().push(spec.to_string());
         self.tarball_responses
@@ -102,6 +145,39 @@ impl CratesIoClient for FakeCratesIoClient {
                     reason: "missing fake tarball response".to_owned(),
                 })
             })
+    }
+}
+
+fn fake_version_info(num: &str, published_at: &str, yanked: bool) -> VersionInfo {
+    let release = parse_version_response_body(&format!(
+        r#"{{"version":{{"num":"{num}","checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"{published_at}","yanked":{yanked}}}}}"#
+    ))
+    .expect("fake version response should parse");
+
+    VersionInfo {
+        num: num.to_owned(),
+        checksum_sha256_hex: release.checksum_sha256_hex,
+        published_at_raw: release.published_at_raw,
+        published_at: release.published_at,
+        yanked,
+    }
+}
+
+fn fake_raw_version_info(num: &str, published_at: &str, yanked: bool) -> VersionInfo {
+    let mut version = fake_version_info("0.0.0", published_at, yanked);
+    version.num = num.to_owned();
+    version
+}
+
+struct FailingWriter;
+
+impl Write for FailingWriter {
+    fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+        Err(io::Error::other("stdout blocked"))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -1477,6 +1553,42 @@ fn resolve_restores_original_lockfile_when_age_gate_fails() {
         String::from_utf8(stderr)
             .expect("stderr should be utf8")
             .contains("FAIL freshdep@1.0.0: published 2020-05-26T00:00:00Z")
+    );
+}
+
+#[test]
+fn resolve_restores_original_lockfile_when_age_recheck_errors() {
+    let cli = Cli::parse_from(["cargo-barbican", "resolve"]);
+    let generated_lockfile = lockfile_with_packages(&[("freshdep", "1.0.0", true)]);
+    let client =
+        FakeCratesIoClient::default().with_release("freshdep@1.0.0", "2020-05-01T00:00:00Z", false);
+    let runner = FakeCommandRunner::default().with_generated_lockfile(&generated_lockfile);
+    let temp_dir = fresh_temp_dir();
+    let original_lockfile = lockfile_with_packages(&[("serde", "1.0.227", true)]);
+    let mut stdout = FailingWriter;
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nfreshdep = \"1\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(temp_dir.join("Cargo.lock"), &original_lockfile).expect("base lockfile should write");
+
+    let result = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    );
+
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("Cargo.lock")).expect("restored lockfile should read"),
+        original_lockfile
     );
 }
 
@@ -3323,7 +3435,7 @@ fn age_smoke_tests_the_ureq_client_against_a_local_http_server() {
     let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
     let Some((base_url, requests, handle)) = spawn_http_stub(
         "HTTP/1.1 200 OK",
-        r#"{"version":{"checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"2026-05-01T00:00:00Z","yanked":false}}"#,
+        r#"{"version":{"num":"1.0.228","checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"2026-05-01T00:00:00Z","yanked":false}}"#,
     ) else {
         eprintln!("[SKIP] no loopback bind available - skipping HTTP smoke test");
         return;
@@ -4002,6 +4114,163 @@ fn inspect_renders_reviewed_release_age_exception() {
     assert!(rendered.contains(
         "release-age exception allowed by reviewed family sample-family (docs/dependency-reviews/2026-05-27-sample.md)"
     ));
+}
+
+#[test]
+fn pick_selects_newest_policy_compliant_version() {
+    let cli = Cli::parse_from(["cargo-barbican", "pick", "serde@^1"]);
+    let client = FakeCratesIoClient::default().with_versions(
+        "serde",
+        &[
+            ("2.0.0", "2020-05-01T00:00:00Z", false),
+            ("1.7.0", "2020-05-30T00:00:00Z", false),
+            ("1.6.0-alpha.1", "2020-05-01T00:00:00Z", false),
+            ("1.5.0", "2020-05-01T00:00:00Z", false),
+            ("1.4.0", "2020-05-01T00:00:00Z", true),
+        ],
+    );
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert_eq!(client.recorded_version_fetches(), vec!["serde".to_owned()]);
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pick serde@1.5.0"));
+    assert!(rendered.contains("selected: serde@1.5.0"));
+    assert!(rendered.contains("release age: OK   serde@1.5.0"));
+    assert!(rendered.contains("2.0.0: does not match requirement"));
+    assert!(rendered.contains("1.6.0-alpha.1: pre-release"));
+    assert!(rendered.contains("1.7.0: too fresh"));
+    assert!(rendered.contains("1.4.0: yanked"));
+}
+
+#[test]
+fn pick_fails_closed_when_no_version_satisfies_policy() {
+    let cli = Cli::parse_from(["cargo-barbican", "pick", "serde@^1"]);
+    let client = FakeCratesIoClient::default()
+        .with_versions("serde", &[("1.0.0", "2020-05-30T00:00:00Z", false)]);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL serde@^1: no version satisfied requirement and policy")
+    );
+}
+
+#[test]
+fn pick_reports_invalid_specs_before_fetching_versions() {
+    let cli = Cli::parse_from(["cargo-barbican", "pick", "bad/name@^1"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(client.recorded_version_fetches().is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL bad/name@^1")
+    );
+}
+
+#[test]
+fn pick_reports_version_fetch_failures() {
+    let cli = Cli::parse_from(["cargo-barbican", "pick", "serde"]);
+    let client = FakeCratesIoClient::default().with_versions_error(
+        "serde",
+        CratesIoClientError::Transport {
+            reason: "network blocked".to_owned(),
+        },
+    );
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL serde: unable to reach crates.io (network blocked)")
+    );
+}
+
+#[test]
+fn pick_escapes_untrusted_version_strings() {
+    let cli = Cli::parse_from(["cargo-barbican", "pick", "serde@^1"]);
+    let raw_version = "1.0.0\u{1b}[2K";
+    let client = FakeCratesIoClient::default().with_raw_versions(
+        "serde",
+        vec![fake_raw_version_info(
+            raw_version,
+            "2020-05-01T00:00:00Z",
+            false,
+        )],
+    );
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let rendered = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(!rendered.contains('\u{1b}'));
+    assert!(rendered.contains("\\x1b"));
+    assert!(rendered.contains("1.0.0\\x1b[2K"));
+    assert!(rendered.contains("invalid semver"));
 }
 
 #[test]

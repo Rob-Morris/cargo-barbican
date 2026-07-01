@@ -61,6 +61,11 @@ pub(crate) enum Command {
         #[arg(required = true)]
         specs: Vec<String>,
     },
+    Pick {
+        #[arg(long, value_parser = min_age_days_parser())]
+        min_age_days: Option<u64>,
+        spec: String,
+    },
     Gatehouse {
         #[command(subcommand)]
         command: GatehouseCommand,

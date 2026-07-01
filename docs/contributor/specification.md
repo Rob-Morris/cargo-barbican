@@ -53,6 +53,7 @@ diff rendering.
 | `miniz_oxide` | =0.9.1 (`default-features = false`, `features = [\"with-alloc\"]`) | crates.io | Direct dependency for `.crate` gzip handling in the library and test support in the binary |
 | `sha2` | =0.10.9 (`default-features = false`, `features = [\"force-soft\"]`) | crates.io | Direct dependency for reviewed artefact SHA-256 verification and test support |
 | `tar` | =0.4.46 (`default-features = false`) | crates.io | Direct dependency for `.crate` tarball inspection and test support |
+| `semver` | =1.0.28 | crates.io | First-principles review; Cargo-compatible semver range evaluation for `pick` |
 
 `ureq` is preferred over a heavier HTTP stack because the surface is small and
 blocking I/O is acceptable at the CLI boundary.
@@ -75,8 +76,8 @@ The checked-in root `barbican.toml` carries these sections:
 - `[high_scrutiny]`
 - `[delegates]`
 
-`[release_age].minimum_days` is active for `age`, `age-lock`, `resolve`,
-`update`, `assess`, and `inspect`.
+`[release_age].minimum_days` is active for `age`, `age-lock`, `pick`,
+`resolve`, `update`, `assess`, and `inspect`.
 
 The current baseline rules for comparative commands are:
 
@@ -131,6 +132,19 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 - fail-closed for routine intake: checksum mismatches, IOC hits, and required
   inspection failures are blocking; surfaced high-scrutiny execution surfaces
   are elevated-risk
+
+`cargo barbican pick` is currently:
+
+- Rust-only and crates.io-only
+- read-only
+- one crate name or crate plus Cargo semver requirement input
+- release-age aware, using the same default and override rules as `age`
+- range-aware through the reviewed `semver` crate
+- conservative: yanked versions, pre-releases, versions outside the range, and
+  too-fresh versions are excluded from selection
+- exact-output oriented: successful output prints the selected `crate@version`
+  to feed into `inspect`, `gatehouse candidate`, or a manifest edit followed by
+  `resolve`
 
 `cargo barbican gatehouse candidate` is currently:
 

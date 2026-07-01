@@ -47,13 +47,15 @@ support is explicitly delivered.
 
 ## Current implemented surface
 
-The simple hardening path is implemented. `age`, `age-lock`, `resolve`,
+The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
 `update`, `assess`, `inspect`, `gatehouse candidate`, `policy init`,
 `pin-check`, `review`, `audit`, and `verify` are implemented.
 
 The current intake layer is:
 
 - `assess` remains the post-add diff classifier
+- `pick` is the implemented read-only exact-version discovery surface for
+  crates.io semver ranges
 - `inspect` is the implemented first Rust-only, crates.io-only deep-review surface
 - `pin-check` is now the implemented first reviewed-target enforcement surface
 - the current enforcement baseline is checked-in review records plus a repo-root

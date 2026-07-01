@@ -1,6 +1,6 @@
 [package]
 name = "barbican"
-version = "0.16.0"
+version = "0.17.0"
 description = "Library for Rust supply-chain hardening: release-age gating, lockfile diffing, policy assessment."
 edition.workspace = true
 license.workspace = true
@@ -16,6 +16,7 @@ workspace = true
 miniz_oxide = { version = "=0.9.1", default-features = false, features = ["with-alloc"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
+semver = "=1.0.28"
 sha2 = { version = "=0.10.9", default-features = false, features = ["force-soft"] }
 tar = { version = "=0.4.46", default-features = false }
 thiserror = "=2.0.18"

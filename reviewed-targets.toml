@@ -69,3 +69,13 @@ similar = "=3.1.1"
 
 [rust.families.resolved]
 similar = { version = "3.1.1", checksum_sha256 = "e6505efef05804732ed8a3f2d4f279429eb485bd69d5b0cc6b19cc02005cda16" }
+
+[[rust.families]]
+name = "semver-version-selection-2026-07-01"
+review_record = "docs/dependency-reviews/2026-07-01-semver-1.0.28.md"
+
+[rust.families.direct]
+semver = "=1.0.28"
+
+[rust.families.resolved]
+semver = { version = "1.0.28", checksum_sha256 = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd" }

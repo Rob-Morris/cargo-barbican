@@ -60,9 +60,10 @@ dependencies = [
 
 [[package]]
 name = "barbican"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "miniz_oxide",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
@@ -95,7 +96,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "cargo-barbican"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "barbican",
  "clap",
@@ -422,6 +423,12 @@ dependencies = [
  "rustls-pki-types",
  "untrusted",
 ]
+
+[[package]]
+name = "semver"
+version = "1.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "serde"

@@ -80,6 +80,7 @@ current implemented surface is:
 
 - `cargo barbican age`
 - `cargo barbican age-lock`
+- `cargo barbican pick`
 - `cargo barbican resolve`
 - `cargo barbican update`
 - `cargo barbican assess`
@@ -118,6 +119,8 @@ The current comparative baseline behaviour is:
 
 The current intake layer now includes the first pre-add deep-review slice:
 
+- `cargo barbican pick` exists as the read-only crates.io semver-range version
+  discovery surface
 - `cargo barbican inspect` exists as the first Rust-only, crates.io-only
   pre-add deep-review surface
 - `cargo barbican gatehouse candidate` exists as the first workflow

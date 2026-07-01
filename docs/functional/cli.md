@@ -29,6 +29,18 @@ cargo barbican age-lock [--base-ref REF | --base-lockfile PATH] [--lockfile Carg
     Reviewed release-age exceptions are honoured through the same shared
     release-age policy path as `age`.
 
+cargo barbican pick [--min-age-days N] <crate|crate@range>
+    Discover the newest crates.io version matching a Cargo semver requirement
+    while applying release-age policy. When no range is supplied, all stable
+    versions are candidates. The command drops yanked versions, pre-releases,
+    semver-incompatible versions, and versions below the minimum release age,
+    then prints the selected exact `crate@version`.
+    When `--min-age-days` is absent, the command uses the same
+    `barbican.toml` release-age default as `age`.
+    Reviewed release-age exceptions are honoured through the same shared
+    release-age policy path as `age`.
+    Pure HTTP GET to the crates.io API.
+
 cargo barbican resolve [--min-age-days N]
     1. Snapshot the current `Cargo.lock`.
     2. Run `cargo generate-lockfile` against the current manifests.

@@ -18,6 +18,7 @@ For exact parser rules and behaviour contracts, see
 | --- | --- | --- |
 | `cargo barbican age` | Base evidence | Check release age for exact crates.io versions. |
 | `cargo barbican age-lock` | Base evidence | Check new lockfile selections against a baseline. |
+| `cargo barbican pick` | Base evidence | Discover a policy-compliant exact crates.io version from a semver range. |
 | `cargo barbican inspect` | Base evidence | Inspect exact crates.io candidates before adding them. |
 | `cargo barbican resolve` | Base action | Generate `Cargo.lock` for current manifests under release-age policy. |
 | `cargo barbican update` | Base action | Update existing locked dependencies to exact versions. |
@@ -69,12 +70,15 @@ Start with the granular base commands when you want to control the review
 steps yourself.
 
 ```bash
+cargo barbican pick fast_log@^1
 cargo barbican age fast_log@1.7.7
 cargo barbican inspect fast_log@1.7.7
 ```
 
-`age` answers the narrow release-age question. `inspect` gathers static
-artefact evidence from crates.io and the published `.crate` tarball.
+`pick` discovers the newest semver-compatible version that satisfies
+release-age policy. `age` answers the narrow release-age question for an exact
+version. `inspect` gathers static artefact evidence from crates.io and the
+published `.crate` tarball.
 
 After adding the dependency or changing the manifest, resolve the workspace
 lockfile under policy and then use the base post-add commands:
@@ -278,15 +282,18 @@ Candidate commands expect exact crates.io specs in this form:
 crate-name@1.2.3
 ```
 
-Use exact versions for intake and update commands. Do not use semver ranges,
-feature flags, registry URLs, or git/path specs as candidate specs.
+Use exact versions for `age`, `inspect`, `gatehouse candidate`, and `update`.
+Do not use semver ranges, feature flags, registry URLs, or git/path specs as
+exact candidate specs. Use `pick` when you need to turn a semver range into an
+exact `crate@version`.
 
 ### Exact Candidate Specs
 
 Commands that accept exact candidate specs use the `crate@version` form. A
 single optional leading `=` is accepted on the CLI version component:
-`crate@=1.2.3` is equivalent to `crate@1.2.3`. Version ranges remain invalid,
-including `crate@^1`, `crate@>=1`, `crate@=^1`, and wildcard specs.
+`crate@=1.2.3` is equivalent to `crate@1.2.3`. Version ranges remain invalid
+for exact-spec commands, including `crate@^1`, `crate@>=1`, `crate@=^1`, and
+wildcard specs. `pick` is the range-aware command.
 
 ### Global Options
 
@@ -303,6 +310,7 @@ Prints the shipped cargo-barbican version.
 | --- | --- | --- |
 | `age` | No | Performs crates.io metadata checks. |
 | `age-lock` | No | Reads current and baseline lockfiles. |
+| `pick` | No | Fetches crates.io version metadata and prints an exact candidate. |
 | `inspect` | No | Fetches and inspects published crates.io artefacts. |
 | `gatehouse` | No | Workflow namespace. Supported workflows may create temporary sandboxes outside the repo. |
 | `resolve` | Yes | Runs `cargo generate-lockfile`; restores `Cargo.lock` if release-age policy fails. |
@@ -464,6 +472,38 @@ Outputs:
 
 `inspect` can supply evidence for a review record, but it does not activate an
 entry in `reviewed-targets.toml` by itself.
+
+### `cargo barbican pick`
+
+Discovers the newest stable crates.io version matching a semver requirement
+while preserving the release-age gate.
+
+```bash
+cargo barbican pick [--min-age-days N] <crate|crate@range>
+```
+
+Use this before `inspect` or `gatehouse candidate` when you want the tool to
+choose the exact version from a range.
+
+Examples:
+
+```bash
+cargo barbican pick serde
+cargo barbican pick serde@^1
+cargo barbican pick --min-age-days 30 serde@>=1.0,<2.0
+```
+
+What it does:
+
+- fetches the crates.io version list for one crate
+- interprets the optional range with Cargo-compatible semver semantics
+- drops yanked versions, pre-releases, semver-incompatible versions, and
+  versions below release-age policy
+- prints the selected exact `crate@version`
+
+`pick` is read-only. It does not edit manifests or `Cargo.lock`; feed the
+selected exact version into `inspect`, `gatehouse candidate`, or a manifest
+edit followed by `resolve`.
 
 ### `cargo barbican gatehouse`
 

@@ -8,7 +8,7 @@ use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
 use super::age_lock::recheck_lockfile_age_against_lockfiles;
-use super::update::{MemoizingCratesIoClient, restore_base_lockfile};
+use super::lockfile_ops::{MemoizingCratesIoClient, restore_base_lockfile};
 use super::{
     CommandError, fail, load_config, load_current_lockfile_text, load_current_lockfile_with_text,
     load_reviewed_release_age_exceptions,
@@ -50,7 +50,7 @@ where
     };
 
     if let Err(error) = runner.cargo_generate_lockfile(current_dir) {
-        restore_base_lockfile(current_dir, &base_lockfile_text, stderr)?;
+        restore_base_lockfile(current_dir, &base_lockfile_text)?;
         return fail(stderr, format!("cargo generate-lockfile: {error}"));
     }
 
@@ -58,12 +58,12 @@ where
         match load_current_lockfile_with_text(current_dir, Path::new("Cargo.lock")) {
             Ok(lockfile_with_text) => lockfile_with_text,
             Err(error) => {
-                restore_base_lockfile(current_dir, &base_lockfile_text, stderr)?;
+                restore_base_lockfile(current_dir, &base_lockfile_text)?;
                 return fail(stderr, error);
             }
         };
 
-    let age_recheck_exit = recheck_lockfile_age_against_lockfiles(
+    let age_recheck_exit = match recheck_lockfile_age_against_lockfiles(
         &current_lockfile,
         &base_lockfile,
         "Cargo.lock",
@@ -74,10 +74,16 @@ where
         now,
         stdout,
         stderr,
-    )?;
+    ) {
+        Ok(exit_code) => exit_code,
+        Err(error) => {
+            restore_base_lockfile(current_dir, &base_lockfile_text)?;
+            return Err(error);
+        }
+    };
 
     if age_recheck_exit != ExitCode::SUCCESS {
-        restore_base_lockfile(current_dir, &base_lockfile_text, stderr)?;
+        restore_base_lockfile(current_dir, &base_lockfile_text)?;
     }
 
     Ok(age_recheck_exit)

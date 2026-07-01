@@ -6,6 +6,8 @@ mod diff_render;
 mod gatehouse;
 mod inspect;
 mod inventory;
+mod lockfile_ops;
+mod pick;
 mod pin_check;
 mod policy;
 mod resolve;
@@ -202,6 +204,9 @@ where
             stdout,
             stderr,
         ),
+        Command::Pick { min_age_days, spec } => {
+            pick::run_pick(min_age_days, spec, current_dir, client, now, stdout, stderr)
+        }
         Command::Gatehouse { command } => {
             gatehouse::run_gatehouse(command, current_dir, client, runner, now, stdout, stderr)
         }
@@ -1177,6 +1182,10 @@ pub enum CommandError {
         path: String,
         source: io::Error,
     },
+    LockfileRestore {
+        path: String,
+        source: io::Error,
+    },
     ManifestParse {
         path: String,
         source: barbican::CargoManifestError,
@@ -1255,6 +1264,15 @@ impl fmt::Display for CommandError {
                     formatter,
                     "{}",
                     escape_diagnostic_for_terminal(&format!("unable to read {path}: {source}"))
+                )
+            }
+            Self::LockfileRestore { path, source } => {
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!(
+                        "unable to restore {path} after a failed lockfile operation: {source}"
+                    ))
                 )
             }
             Self::ManifestParse { path, source } => {
@@ -1348,6 +1366,7 @@ impl std::error::Error for CommandError {
             Self::LockfileMissing { .. } => None,
             Self::LockfileParse { source, .. } => Some(source),
             Self::LockfileRead { source, .. } => Some(source),
+            Self::LockfileRestore { source, .. } => Some(source),
             Self::ManifestParse { source, .. } => Some(source),
             Self::ManifestRead { source, .. } => Some(source),
             Self::ReviewedTargetsParse { source, .. } => Some(source),

@@ -1,13 +1,10 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use barbican::{
-    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, OffsetDateTime,
-    parse_cargo_metadata, parse_lockfile, select_package_id,
+    CratesIoClient, OffsetDateTime, parse_cargo_metadata, parse_lockfile, select_package_id,
 };
 
 use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
@@ -15,6 +12,7 @@ use crate::command_runner::CommandRunner;
 
 use super::age_lock::recheck_lockfile_age_against_lockfiles;
 use super::diff_render::render_unified_file_diff;
+use super::lockfile_ops::{MemoizingCratesIoClient, restore_base_lockfile};
 use super::scratch_dir::ScratchDir;
 use super::{
     CommandError, escape_diagnostic_for_terminal, fail, finish_release_age_checks, load_config,
@@ -110,7 +108,7 @@ where
     for (spec, package_id) in selections {
         if let Err(error) = runner.cargo_update_precise(resolve_dir, &package_id, spec.version()) {
             if !dry_run {
-                restore_base_lockfile(current_dir, &base_lockfile_text, stderr)?;
+                restore_base_lockfile(current_dir, &base_lockfile_text)?;
             }
             return fail(
                 stderr,
@@ -127,7 +125,7 @@ where
             Ok(lockfile_with_text) => lockfile_with_text,
             Err(error) => {
                 if !dry_run {
-                    restore_base_lockfile(current_dir, &base_lockfile_text, stderr)?;
+                    restore_base_lockfile(current_dir, &base_lockfile_text)?;
                 }
                 return fail(stderr, error);
             }
@@ -153,7 +151,7 @@ where
 
     if !dry_run {
         if age_recheck_exit != ExitCode::SUCCESS {
-            restore_base_lockfile(current_dir, &base_lockfile_text, stderr)?;
+            restore_base_lockfile(current_dir, &base_lockfile_text)?;
         }
         return Ok(age_recheck_exit);
     }
@@ -183,56 +181,6 @@ where
     }
 
     Ok(ExitCode::SUCCESS)
-}
-
-pub(super) fn restore_base_lockfile(
-    current_dir: &Path,
-    base_lockfile_text: &str,
-    stderr: &mut dyn Write,
-) -> Result<(), CommandError> {
-    let lockfile_path = current_dir.join("Cargo.lock");
-    if let Err(error) = fs::write(&lockfile_path, base_lockfile_text) {
-        writeln!(
-            stderr,
-            "unable to restore Cargo.lock after failed update: {error}"
-        )
-        .map_err(CommandError::Io)?;
-    }
-
-    Ok(())
-}
-
-pub(super) struct MemoizingCratesIoClient<'a, C: ?Sized> {
-    inner: &'a C,
-    cache: RefCell<HashMap<ExactCrateSpec, Result<CrateRelease, CratesIoClientError>>>,
-}
-
-impl<'a, C: ?Sized> MemoizingCratesIoClient<'a, C> {
-    pub(super) fn new(inner: &'a C) -> Self {
-        Self {
-            inner,
-            cache: RefCell::new(HashMap::new()),
-        }
-    }
-}
-
-impl<C> CratesIoClient for MemoizingCratesIoClient<'_, C>
-where
-    C: CratesIoClient + ?Sized,
-{
-    fn fetch_release(&self, spec: &ExactCrateSpec) -> Result<CrateRelease, CratesIoClientError> {
-        if let Some(cached) = self.cache.borrow().get(spec) {
-            return cached.clone();
-        }
-
-        let result = self.inner.fetch_release(spec);
-        self.cache.borrow_mut().insert(spec.clone(), result.clone());
-        result
-    }
-
-    fn fetch_release_tarball(&self, spec: &ExactCrateSpec) -> Result<Vec<u8>, CratesIoClientError> {
-        self.inner.fetch_release_tarball(spec)
-    }
 }
 
 struct DryRunWorkspace {

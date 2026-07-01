@@ -687,7 +687,7 @@ mod tests {
             self.responses.insert(
                 spec.to_owned(),
                 Ok(crate::parse_version_response_body(&format!(
-                    r#"{{"version":{{"checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"{published_at}","yanked":{yanked}}}}}"#
+                    r#"{{"version":{{"num":"0.0.0","checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"{published_at}","yanked":{yanked}}}}}"#
                 ))
                 .expect("fake response should parse")),
             );
