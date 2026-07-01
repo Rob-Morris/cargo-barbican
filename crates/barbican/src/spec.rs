@@ -59,6 +59,8 @@ impl FromStr for ExactCrateSpec {
             return Err(ExactCrateSpecError::InvalidShape(spec.to_owned()));
         };
 
+        let version = version.strip_prefix('=').unwrap_or(version);
+
         if crate_name.is_empty() || version.is_empty() {
             return Err(ExactCrateSpecError::InvalidShape(spec.to_owned()));
         }
@@ -114,7 +116,7 @@ pub enum ExactCrateSpecError {
     InvalidShape(String),
     #[error("Crate names may contain only ASCII letters, numbers, '_' and '-': {0:?}")]
     InvalidCrateName(String),
-    #[error("Version ranges are not allowed in routine checks: {0:?}")]
+    #[error("Expected exact crate@version spec; version ranges are not allowed: {0:?}")]
     VersionRange(String),
 }
 
@@ -136,6 +138,17 @@ mod tests {
     #[test]
     fn parses_valid_exact_specs() {
         let spec = "serde@1.0.228"
+            .parse::<ExactCrateSpec>()
+            .expect("spec should parse");
+
+        assert_eq!(spec.crate_name(), "serde");
+        assert_eq!(spec.version(), "1.0.228");
+        assert_eq!(spec.to_string(), "serde@1.0.228");
+    }
+
+    #[test]
+    fn parses_cli_specs_with_optional_leading_equals() {
+        let spec = "serde@=1.0.228"
             .parse::<ExactCrateSpec>()
             .expect("spec should parse");
 
@@ -167,14 +180,13 @@ mod tests {
 
     #[test]
     fn rejects_version_ranges() {
-        let error = "serde@^1.0.228"
-            .parse::<ExactCrateSpec>()
-            .expect_err("range specs should fail");
+        for spec in ["serde@^1.0.228", "serde@=^1", "serde@>=1"] {
+            let error = spec
+                .parse::<ExactCrateSpec>()
+                .expect_err("range specs should fail");
 
-        assert_eq!(
-            error,
-            ExactCrateSpecError::VersionRange("serde@^1.0.228".to_owned())
-        );
+            assert_eq!(error, ExactCrateSpecError::VersionRange(spec.to_owned()));
+        }
     }
 
     #[test]

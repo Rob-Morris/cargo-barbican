@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 pub(crate) const REVIEWED_TARGETS_CONFIG_FILE: &str = "reviewed-targets.toml";
 
 #[derive(Debug, Parser)]
-#[command(name = "cargo-barbican", bin_name = "cargo barbican")]
+#[command(name = "cargo-barbican", bin_name = "cargo barbican", version)]
 pub struct Cli {
     #[command(subcommand)]
     pub(crate) command: Command,

@@ -15,6 +15,7 @@ mod verify;
 
 use std::collections::BTreeSet;
 use std::env;
+use std::ffi::OsString;
 use std::fmt;
 use std::fmt::Write as _;
 use std::fs;
@@ -49,12 +50,34 @@ pub(super) const REVIEW_ROOT_FILE_PATHS: [&str; 4] = [
 pub(super) const REVIEW_RECORDS_DIR: &str = "docs/dependency-reviews";
 
 pub fn run(stdout: &mut dyn Write, stderr: &mut dyn Write) -> Result<ExitCode, CommandError> {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(cargo_subcommand_args(env::args_os()));
     let current_dir = env::current_dir().map_err(CommandError::Io)?;
     let client = UreqCratesIoClient::new(crates_io_base_url()?);
     let runner = RealCommandRunner;
 
     run_cli_with_runner(cli, &current_dir, &client, &runner, stdout, stderr)
+}
+
+fn cargo_subcommand_args<I>(args: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let mut args = args.into_iter();
+    let Some(program) = args.next() else {
+        return Vec::new();
+    };
+
+    let mut normalised = vec![program];
+    match args.next() {
+        Some(first) if first == "barbican" => normalised.extend(args),
+        Some(first) => {
+            normalised.push(first);
+            normalised.extend(args);
+        }
+        None => {}
+    }
+
+    normalised
 }
 
 pub fn run_cli_with_runner<C, R>(

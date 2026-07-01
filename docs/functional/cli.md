@@ -6,6 +6,9 @@ behaviour of the implemented command set.
 ## Subcommands
 
 ```text
+cargo barbican --version
+    Print the shipped cargo-barbican version.
+
 cargo barbican age [--min-age-days N] <crate@version>...
     Check that each crate@version was published at least N days ago
     (default 7). The default comes from `barbican.toml`
@@ -256,6 +259,11 @@ cargo barbican verify
     configured. `verify` fails closed instead: build/test execution requires an
     explicit reviewed-target policy.
 ```
+
+`<crate@version>` candidate specs are exact crates.io package specs. A single
+optional leading `=` on the version is accepted for CLI ergonomics:
+`crate@=1.2.3` is normalised to `crate@1.2.3`. Version ranges such as
+`crate@^1`, `crate@>=1`, `crate@=^1`, and wildcard specs remain invalid.
 
 ## Exit codes
 

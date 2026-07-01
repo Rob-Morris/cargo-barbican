@@ -279,6 +279,22 @@ crate-name@1.2.3
 Use exact versions for intake and update commands. Do not use semver ranges,
 feature flags, registry URLs, or git/path specs as candidate specs.
 
+### Exact Candidate Specs
+
+Commands that accept exact candidate specs use the `crate@version` form. A
+single optional leading `=` is accepted on the CLI version component:
+`crate@=1.2.3` is equivalent to `crate@1.2.3`. Version ranges remain invalid,
+including `crate@^1`, `crate@>=1`, `crate@=^1`, and wildcard specs.
+
+### Global Options
+
+```bash
+cargo barbican --version
+cargo-barbican --version
+```
+
+Prints the shipped cargo-barbican version.
+
 ### Repository Mutation
 
 | Command | Mutates repo files? | Notes |
