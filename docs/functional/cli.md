@@ -29,7 +29,20 @@ cargo barbican age-lock [--base-ref REF | --base-lockfile PATH] [--lockfile Carg
     Reviewed release-age exceptions are honoured through the same shared
     release-age policy path as `age`.
 
-cargo barbican resolve [--dry-run] [--min-age-days N] <crate@version>...
+cargo barbican resolve [--min-age-days N]
+    1. Snapshot the current `Cargo.lock`.
+    2. Run `cargo generate-lockfile` against the current manifests.
+    3. Recheck newly selected crates.io versions against the pre-resolve
+       `Cargo.lock` snapshot.
+    4. Restore the original `Cargo.lock` and exit 1 if any newly selected
+       crates.io version is too fresh, yanked, or otherwise violates release-age
+       policy.
+    When `--min-age-days` is absent, the command uses the same
+    `barbican.toml` release-age default as `age`.
+    The post-resolution lockfile recheck honours the same reviewed release-age
+    exceptions as `age`.
+
+cargo barbican update [--dry-run] [--min-age-days N] <crate@version>...
     1. Run `age` on each spec.
     2. Use `cargo metadata` to disambiguate package IDs when a crate name
        appears at multiple versions in the lockfile.

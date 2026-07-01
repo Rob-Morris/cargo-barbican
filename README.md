@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.15.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20branch-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.16.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20branch-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -98,17 +98,25 @@ candidate package.
 
 ### Perform a routine update
 
-Use `resolve` to age-check exact candidates, run `cargo update --precise`, and
+Use `update` to age-check exact candidates, run `cargo update --precise`, and
 then recheck any newly selected transitive crates:
 
 ```bash
-cargo barbican resolve serde@1.0.228
+cargo barbican update serde@1.0.228
 ```
 
 Preview the lockfile result without mutating the working tree:
 
 ```bash
-cargo barbican resolve --dry-run serde@1.0.228
+cargo barbican update --dry-run serde@1.0.228
+```
+
+After editing manifests, use `resolve` to regenerate `Cargo.lock` for the
+current workspace and apply the same release-age gate to newly selected
+crates.io versions:
+
+```bash
+cargo barbican resolve
 ```
 
 ### Review the dependency diff

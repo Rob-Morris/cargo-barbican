@@ -76,7 +76,7 @@ The checked-in root `barbican.toml` carries these sections:
 - `[delegates]`
 
 `[release_age].minimum_days` is active for `age`, `age-lock`, `resolve`,
-`assess`, and `inspect`.
+`update`, `assess`, and `inspect`.
 
 The current baseline rules for comparative commands are:
 
@@ -86,9 +86,12 @@ The current baseline rules for comparative commands are:
   `--base-dir <path>` as an explicit non-git dependency-state baseline
 - `review` keeps the existing git-backed default path and also accepts
   `--base-dir <path>` as an explicit non-git review baseline
-- `resolve` no longer depends on `HEAD`; it rechecks against an internal
+- `resolve` generates `Cargo.lock` for the current manifests and rechecks newly
+  selected crates.io versions against an internal pre-resolve `Cargo.lock`
+  snapshot, restoring the snapshot on release-age failure
+- `update` no longer depends on `HEAD`; it rechecks against an internal
   pre-update `Cargo.lock` snapshot
-- `resolve` also supports `--dry-run`, which executes the targeted update in an
+- `update` also supports `--dry-run`, which executes the targeted update in an
   internal temp workspace and prints a summary/diff preview of the would-be
   `Cargo.lock` change instead of mutating the repo
   - the dry-run workspace copy preserves relative symlinks only when their
@@ -147,7 +150,7 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 - cleanup-first by default, with `--preserve-sandbox` available for manual
   inspection of the generated sandbox
 - not a repo-integration simulation; repo adoption remains covered by
-  `resolve`, `assess`, `review`, `pin-check`, and `verify`
+  `resolve`, `update`, `assess`, `review`, `pin-check`, and `verify`
 
 `cargo barbican policy init` is currently:
 
@@ -229,9 +232,10 @@ The reviewed-target enforcement baseline is:
 - release-age-aware commands honour matching `allowed_age_exceptions` from the
   same reviewed family only when the referenced `resolved` target carries
   `checksum_sha256` and the family `review_record` exists
-- `age`, `age-lock`, `resolve`, and `assess` compare that reviewed digest
-  against crates.io's published checksum metadata; `inspect` and `gatehouse
-  candidate` also verify downloaded tarball bytes through the inspect path
+- `age`, `age-lock`, `resolve`, `update`, and `assess` compare that reviewed
+  digest against crates.io's published checksum metadata; `inspect` and
+  `gatehouse candidate` also verify downloaded tarball bytes through the
+  inspect path
 - applied release-age exceptions are rendered visibly as allowed policy
   exceptions; yanked releases and exception artefact checksum mismatches remain
   blocking

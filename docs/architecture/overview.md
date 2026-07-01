@@ -48,8 +48,8 @@ support is explicitly delivered.
 ## Current implemented surface
 
 The simple hardening path is implemented. `age`, `age-lock`, `resolve`,
-`assess`, `inspect`, `gatehouse candidate`, `policy init`, `pin-check`,
-`review`, `audit`, and `verify` are implemented.
+`update`, `assess`, `inspect`, `gatehouse candidate`, `policy init`,
+`pin-check`, `review`, `audit`, and `verify` are implemented.
 
 The current intake layer is:
 
@@ -75,9 +75,12 @@ The current intake layer is:
   decoupled from `git`:
   `age-lock` can compare against an explicit baseline lockfile,
   `assess` and `review` can compare against an explicit baseline directory,
-  and `resolve` rechecks against an internal pre-update `Cargo.lock` snapshot
+  and `update` rechecks against an internal pre-update `Cargo.lock` snapshot
   instead of relying on `HEAD`
-- `resolve` also supports a non-mutating `--dry-run` preview that shows the
+- `resolve` generates `Cargo.lock` for the current manifests with `cargo
+  generate-lockfile`, then rechecks newly selected crates.io versions against
+  the pre-resolve `Cargo.lock` snapshot and restores the snapshot on failure
+- `update` also supports a non-mutating `--dry-run` preview that shows the
   would-be `Cargo.lock` diff without changing the working tree
   - the copied workspace preserves relative symlinks only when their resolved
     target remains inside the source workspace and outside skipped `.git` /

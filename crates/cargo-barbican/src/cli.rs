@@ -31,13 +31,17 @@ pub(crate) enum Command {
         #[arg(long, default_value = "Cargo.lock")]
         lockfile: PathBuf,
     },
-    Resolve {
+    Update {
         #[arg(long)]
         dry_run: bool,
         #[arg(long, value_parser = min_age_days_parser())]
         min_age_days: Option<u64>,
         #[arg(required = true)]
         specs: Vec<String>,
+    },
+    Resolve {
+        #[arg(long, value_parser = min_age_days_parser())]
+        min_age_days: Option<u64>,
     },
     Assess {
         #[arg(long, conflicts_with = "base_dir")]

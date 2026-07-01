@@ -111,6 +111,7 @@ struct FakeCommandRunner {
     cargo_update_result: Result<(), String>,
     cargo_update_lockfile_text: Option<String>,
     cargo_generate_lockfile_result: Result<(), String>,
+    cargo_generate_lockfile_text: Option<String>,
     cargo_tree_result: Result<String, String>,
     git_diff_result: Result<String, String>,
     cargo_audit_result: Result<String, String>,
@@ -138,6 +139,7 @@ impl Default for FakeCommandRunner {
             cargo_update_result: Ok(()),
             cargo_update_lockfile_text: None,
             cargo_generate_lockfile_result: Ok(()),
+            cargo_generate_lockfile_text: None,
             cargo_tree_result: Ok(String::new()),
             git_diff_result: Ok(String::new()),
             cargo_audit_result: Ok(String::new()),
@@ -205,6 +207,11 @@ impl FakeCommandRunner {
 
     fn with_cargo_generate_lockfile_error(mut self, detail: &str) -> Self {
         self.cargo_generate_lockfile_result = Err(detail.to_owned());
+        self
+    }
+
+    fn with_generated_lockfile(mut self, text: &str) -> Self {
+        self.cargo_generate_lockfile_text = Some(text.to_owned());
         self
     }
 
@@ -325,7 +332,11 @@ impl CommandRunner for FakeCommandRunner {
             .map_err(runner_exit);
 
         if result.is_ok() {
-            fs::write(current_dir.join("Cargo.lock"), "version = 4\n")
+            let lockfile_text = self
+                .cargo_generate_lockfile_text
+                .as_deref()
+                .unwrap_or("version = 4\n");
+            fs::write(current_dir.join("Cargo.lock"), lockfile_text)
                 .map_err(cargo_barbican::RunnerError::Spawn)?;
         }
 
@@ -518,13 +529,17 @@ fn cli_rejects_excessive_min_age_days() {
     assert!(
         Cli::try_parse_from([
             "cargo-barbican",
-            "resolve",
+            "update",
             "--min-age-days",
             "365001",
             "serde@1.0.228",
         ])
         .is_err()
     );
+    assert!(
+        Cli::try_parse_from(["cargo-barbican", "resolve", "--min-age-days", "365001",]).is_err()
+    );
+    assert!(Cli::try_parse_from(["cargo-barbican", "resolve", "serde@1.0.228"]).is_err());
     assert!(
         Cli::try_parse_from(["cargo-barbican", "assess", "--min-age-days", "365001",]).is_err()
     );
@@ -1091,8 +1106,8 @@ fn age_lock_reports_missing_non_git_base_lockfile() {
 }
 
 #[test]
-fn resolve_updates_selected_package_and_rechecks_the_lockfile_diff() {
-    let cli = Cli::parse_from(["cargo-barbican", "resolve", "serde@1.0.228"]);
+fn update_updates_selected_package_and_rechecks_the_lockfile_diff() {
+    let cli = Cli::parse_from(["cargo-barbican", "update", "serde@1.0.228"]);
     let client =
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-01T00:00:00Z", false);
     let runner = FakeCommandRunner::default()
@@ -1139,10 +1154,10 @@ fn resolve_updates_selected_package_and_rechecks_the_lockfile_diff() {
 }
 
 #[test]
-fn resolve_honours_min_age_override_for_both_age_checks() {
+fn update_honours_min_age_override_for_both_age_checks() {
     let cli = Cli::parse_from([
         "cargo-barbican",
-        "resolve",
+        "update",
         "--min-age-days",
         "3",
         "serde@1.0.228",
@@ -1199,13 +1214,13 @@ fn resolve_honours_min_age_override_for_both_age_checks() {
 }
 
 #[test]
-fn resolve_recheck_flags_too_fresh_transitive_selection_under_injected_clock() {
+fn update_recheck_flags_too_fresh_transitive_selection_under_injected_clock() {
     // The explicit spec is old enough against `fixed_now()` (2020-06-01), but the
     // update pulls in a transitive crate published only 6 days earlier. Only the
-    // post-update recheck can catch that, so this guards the resolve recheck call
+    // post-update recheck can catch that, so this guards the update recheck call
     // site's clock wiring: a regression reading the wall clock would see a
     // years-old release and let it through.
-    let cli = Cli::parse_from(["cargo-barbican", "resolve", "serde@1.0.228"]);
+    let cli = Cli::parse_from(["cargo-barbican", "update", "serde@1.0.228"]);
     let client = FakeCratesIoClient::default()
         .with_release("serde@1.0.228", "2020-05-01T00:00:00Z", false)
         .with_release("freshdep@1.0.0", "2020-05-26T00:00:00Z", false);
@@ -1255,8 +1270,8 @@ fn resolve_recheck_flags_too_fresh_transitive_selection_under_injected_clock() {
 }
 
 #[test]
-fn resolve_dry_run_previews_lockfile_diff_without_mutating_repo() {
-    let cli = Cli::parse_from(["cargo-barbican", "resolve", "--dry-run", "serde@1.0.228"]);
+fn update_dry_run_previews_lockfile_diff_without_mutating_repo() {
+    let cli = Cli::parse_from(["cargo-barbican", "update", "--dry-run", "serde@1.0.228"]);
     let client =
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-01T00:00:00Z", false);
     let runner = FakeCommandRunner::default()
@@ -1299,8 +1314,8 @@ fn resolve_dry_run_previews_lockfile_diff_without_mutating_repo() {
 }
 
 #[test]
-fn resolve_dry_run_escapes_bidi_and_zero_width_controls_in_lockfile_diff() {
-    let cli = Cli::parse_from(["cargo-barbican", "resolve", "--dry-run", "serde@1.0.228"]);
+fn update_dry_run_escapes_bidi_and_zero_width_controls_in_lockfile_diff() {
+    let cli = Cli::parse_from(["cargo-barbican", "update", "--dry-run", "serde@1.0.228"]);
     let client =
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-01T00:00:00Z", false);
     let spoofed_source = format!(
@@ -1344,8 +1359,8 @@ fn resolve_dry_run_escapes_bidi_and_zero_width_controls_in_lockfile_diff() {
 }
 
 #[test]
-fn resolve_dry_run_reports_when_no_lockfile_change_would_be_made() {
-    let cli = Cli::parse_from(["cargo-barbican", "resolve", "--dry-run", "serde@1.0.228"]);
+fn update_dry_run_reports_when_no_lockfile_change_would_be_made() {
+    let cli = Cli::parse_from(["cargo-barbican", "update", "--dry-run", "serde@1.0.228"]);
     let lockfile = lockfile_with_packages(&[("serde", "1.0.228", true)]);
     let client =
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2026-05-01T00:00:00Z", false);
@@ -1375,6 +1390,93 @@ fn resolve_dry_run_reports_when_no_lockfile_change_would_be_made() {
         String::from_utf8(stdout)
             .expect("stdout should be utf8")
             .contains("Dry run: no Cargo.lock changes would be made.")
+    );
+}
+
+#[test]
+fn resolve_generates_current_manifest_lockfile_and_checks_selected_versions() {
+    let cli = Cli::parse_from(["cargo-barbican", "resolve"]);
+    let generated_lockfile = lockfile_with_packages(&[("serde", "1.0.228", true)]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-01T00:00:00Z", false);
+    let runner = FakeCommandRunner::default().with_generated_lockfile(&generated_lockfile);
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(temp_dir.join("Cargo.lock"), "version = 4\n").expect("base lockfile should write");
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("Cargo.lock")).expect("generated lockfile should read"),
+        generated_lockfile
+    );
+    assert_eq!(runner.recorded_generate_lockfile_calls(), vec![temp_dir]);
+    assert_eq!(client.recorded_fetches(), vec!["serde@1.0.228".to_owned()]);
+    assert!(
+        String::from_utf8(stdout)
+            .expect("stdout should be utf8")
+            .contains("OK   serde@1.0.228")
+    );
+}
+
+#[test]
+fn resolve_restores_original_lockfile_when_age_gate_fails() {
+    let cli = Cli::parse_from(["cargo-barbican", "resolve"]);
+    let generated_lockfile = lockfile_with_packages(&[("freshdep", "1.0.0", true)]);
+    let client =
+        FakeCratesIoClient::default().with_release("freshdep@1.0.0", "2020-05-26T00:00:00Z", false);
+    let runner = FakeCommandRunner::default().with_generated_lockfile(&generated_lockfile);
+    let temp_dir = fresh_temp_dir();
+    let original_lockfile = lockfile_with_packages(&[("serde", "1.0.227", true)]);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nfreshdep = \"1\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(temp_dir.join("Cargo.lock"), &original_lockfile).expect("base lockfile should write");
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("Cargo.lock")).expect("restored lockfile should read"),
+        original_lockfile
+    );
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("FAIL freshdep@1.0.0: published 2020-05-26T00:00:00Z")
     );
 }
 

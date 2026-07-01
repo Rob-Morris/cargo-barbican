@@ -81,6 +81,7 @@ current implemented surface is:
 - `cargo barbican age`
 - `cargo barbican age-lock`
 - `cargo barbican resolve`
+- `cargo barbican update`
 - `cargo barbican assess`
 - `cargo barbican inspect`
 - `cargo barbican gatehouse candidate`
@@ -104,9 +105,12 @@ The current comparative baseline behaviour is:
   directory with `--base-dir`
 - `review` keeps the git-backed default path but can compare against an
   explicit baseline directory with `--base-dir`
-- `resolve` rechecks against an internal pre-update `Cargo.lock` snapshot
+- `resolve` generates `Cargo.lock` for the current manifests and rechecks newly
+  selected crates.io versions against an internal pre-resolve `Cargo.lock`
+  snapshot
+- `update` rechecks against an internal pre-update `Cargo.lock` snapshot
   rather than a git ref
-- `resolve --dry-run` now previews the would-be `Cargo.lock` diff without
+- `update --dry-run` now previews the would-be `Cargo.lock` diff without
   mutating the working tree
   - the copied workspace preserves relative symlinks only when their resolved
     target stays inside the source workspace and outside skipped `.git` /

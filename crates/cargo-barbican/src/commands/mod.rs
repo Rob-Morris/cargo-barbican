@@ -11,6 +11,7 @@ mod policy;
 mod resolve;
 mod review;
 mod scratch_dir;
+mod update;
 mod verify;
 
 use std::collections::BTreeSet;
@@ -146,14 +147,23 @@ where
             stdout,
             stderr,
         ),
-        Command::Resolve {
+        Command::Update {
             dry_run,
             min_age_days,
             specs,
-        } => resolve::run_resolve(
+        } => update::run_update(
             dry_run,
             min_age_days,
             specs,
+            current_dir,
+            client,
+            runner,
+            now,
+            stdout,
+            stderr,
+        ),
+        Command::Resolve { min_age_days } => resolve::run_resolve(
+            min_age_days,
             current_dir,
             client,
             runner,

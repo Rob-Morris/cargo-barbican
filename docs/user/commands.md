@@ -19,7 +19,8 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican age` | Base evidence | Check release age for exact crates.io versions. |
 | `cargo barbican age-lock` | Base evidence | Check new lockfile selections against a baseline. |
 | `cargo barbican inspect` | Base evidence | Inspect exact crates.io candidates before adding them. |
-| `cargo barbican resolve` | Base action | Update existing locked dependencies to exact versions. |
+| `cargo barbican resolve` | Base action | Generate `Cargo.lock` for current manifests under release-age policy. |
+| `cargo barbican update` | Base action | Update existing locked dependencies to exact versions. |
 | `cargo barbican assess` | Base assessment | Classify a dependency diff. |
 | `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption. |
 | `cargo barbican inventory` | Base audit | Report dependency inventory and reviewed-policy coverage. |
@@ -75,10 +76,11 @@ cargo barbican inspect fast_log@1.7.7
 `age` answers the narrow release-age question. `inspect` gathers static
 artefact evidence from crates.io and the published `.crate` tarball.
 
-After adding the dependency or changing the manifest, use the base post-add
-commands:
+After adding the dependency or changing the manifest, resolve the workspace
+lockfile under policy and then use the base post-add commands:
 
 ```bash
+cargo barbican resolve
 cargo barbican age-lock
 cargo barbican assess
 cargo barbican review
@@ -133,13 +135,13 @@ code, unusual provenance, or advisory history.
 Preview the exact update first:
 
 ```bash
-cargo barbican resolve --dry-run serde@1.0.228
+cargo barbican update --dry-run serde@1.0.228
 ```
 
 Apply the update when the preview is acceptable:
 
 ```bash
-cargo barbican resolve serde@1.0.228
+cargo barbican update serde@1.0.228
 ```
 
 Then classify and review the resulting dependency state:
@@ -157,7 +159,7 @@ cargo barbican audit
 cargo barbican verify
 ```
 
-`resolve` mutates `Cargo.lock` unless `--dry-run` is present. The dry-run path
+`update` mutates `Cargo.lock` unless `--dry-run` is present. The dry-run path
 uses an internal temporary workspace and prints a lockfile diff preview instead
 of changing the repo.
 
@@ -203,9 +205,9 @@ serde = "1.0.228"
 The crate must already be present in the same family `resolved` map with
 `checksum_sha256`. Release-age-aware commands honour the exception only when
 the family review record exists and the fetched crates.io checksum matches the
-reviewed checksum. `age`, `age-lock`, `resolve`, and `assess` use crates.io's
-published checksum metadata; `inspect` and `gatehouse candidate` also verify
-downloaded tarball bytes.
+reviewed checksum. `age`, `age-lock`, `resolve`, `update`, and `assess` use
+crates.io's published checksum metadata; `inspect` and `gatehouse candidate`
+also verify downloaded tarball bytes.
 
 Run `pin-check` after editing `reviewed-targets.toml`:
 
@@ -303,8 +305,9 @@ Prints the shipped cargo-barbican version.
 | `age-lock` | No | Reads current and baseline lockfiles. |
 | `inspect` | No | Fetches and inspects published crates.io artefacts. |
 | `gatehouse` | No | Workflow namespace. Supported workflows may create temporary sandboxes outside the repo. |
-| `resolve` | Yes | Updates `Cargo.lock` through Cargo. |
-| `resolve --dry-run` | No | Uses a temporary workspace and prints a preview. |
+| `resolve` | Yes | Runs `cargo generate-lockfile`; restores `Cargo.lock` if release-age policy fails. |
+| `update` | Yes | Updates `Cargo.lock` through Cargo. |
+| `update --dry-run` | No | Uses a temporary workspace and prints a preview. |
 | `assess` | No | Reads manifests, lockfiles, policy files, and inspection evidence. |
 | `inventory` | No | Reads manifests, lockfile, and reviewed-target policy to report findings and coverage gaps. |
 | `pin-check` | No | Local-only reviewed-target enforcement. |
@@ -476,11 +479,38 @@ Currently supported workflows:
 
 ### `cargo barbican resolve`
 
+Generates `Cargo.lock` for the current manifests while preserving the
+release-age gate after Cargo resolution.
+
+```bash
+cargo barbican resolve [--min-age-days N]
+```
+
+Use this after editing manifests or adding dependencies.
+
+Examples:
+
+```bash
+cargo barbican resolve
+cargo barbican resolve --min-age-days 30
+```
+
+What it does:
+
+- snapshots the current `Cargo.lock`
+- runs `cargo generate-lockfile` against the current manifests
+- rechecks newly selected crates.io versions against the pre-resolve
+  `Cargo.lock`
+- restores the original `Cargo.lock` and exits 1 when the selected versions
+  violate release-age policy
+
+### `cargo barbican update`
+
 Updates existing locked dependencies to exact versions while preserving the
 release-age gate before and after Cargo resolution.
 
 ```bash
-cargo barbican resolve [--dry-run] [--min-age-days N] <crate@version>...
+cargo barbican update [--dry-run] [--min-age-days N] <crate@version>...
 ```
 
 Use this for routine exact-version dependency updates.
@@ -488,9 +518,9 @@ Use this for routine exact-version dependency updates.
 Examples:
 
 ```bash
-cargo barbican resolve --dry-run serde@1.0.228
-cargo barbican resolve serde@1.0.228
-cargo barbican resolve serde@1.0.228 toml@0.9.8
+cargo barbican update --dry-run serde@1.0.228
+cargo barbican update serde@1.0.228
+cargo barbican update serde@1.0.228 toml@0.9.8
 ```
 
 What it does:
