@@ -1,134 +1,4 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::ExitCode;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use barbican::{CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, OffsetDateTime};
-use cargo_barbican::{
-    Cli, CommandRunner, RunnerError, run_cli_with_runner, run_cli_with_runner_at,
-};
-use clap::Parser;
-
-#[derive(Default)]
-struct FakeCratesIoClient;
-
-impl CratesIoClient for FakeCratesIoClient {
-    fn fetch_release(&self, spec: &ExactCrateSpec) -> Result<CrateRelease, CratesIoClientError> {
-        Err(CratesIoClientError::Transport {
-            reason: format!("unexpected fetch for {spec}"),
-        })
-    }
-}
-
-struct FakeCommandRunner {
-    frozen_metadata_result: Result<String, String>,
-    frozen_metadata_calls: AtomicU64,
-}
-
-impl Default for FakeCommandRunner {
-    fn default() -> Self {
-        Self {
-            frozen_metadata_result: Ok(default_metadata_json().to_owned()),
-            frozen_metadata_calls: AtomicU64::new(0),
-        }
-    }
-}
-
-impl FakeCommandRunner {
-    fn with_frozen_metadata(metadata: impl Into<String>) -> Self {
-        Self {
-            frozen_metadata_result: Ok(metadata.into()),
-            frozen_metadata_calls: AtomicU64::new(0),
-        }
-    }
-
-    fn with_frozen_metadata_error(message: impl Into<String>) -> Self {
-        Self {
-            frozen_metadata_result: Err(message.into()),
-            frozen_metadata_calls: AtomicU64::new(0),
-        }
-    }
-
-    fn frozen_metadata_calls(&self) -> u64 {
-        self.frozen_metadata_calls.load(Ordering::Relaxed)
-    }
-}
-
-impl CommandRunner for FakeCommandRunner {
-    fn git_show(&self, _current_dir: &Path, object: &str) -> Result<String, RunnerError> {
-        Err(runner_error(format!("unexpected git show for {object}")))
-    }
-
-    fn cargo_metadata(&self, _current_dir: &Path) -> Result<String, RunnerError> {
-        Err(runner_error("unexpected cargo metadata"))
-    }
-
-    fn cargo_metadata_frozen(&self, _current_dir: &Path) -> Result<String, RunnerError> {
-        self.frozen_metadata_calls.fetch_add(1, Ordering::Relaxed);
-        self.frozen_metadata_result.clone().map_err(runner_error)
-    }
-
-    fn cargo_update_precise(
-        &self,
-        _current_dir: &Path,
-        package_id: &str,
-        version: &str,
-    ) -> Result<(), RunnerError> {
-        Err(runner_error(format!(
-            "unexpected cargo update for {package_id}@{version}"
-        )))
-    }
-
-    fn cargo_generate_lockfile(&self, _current_dir: &Path) -> Result<(), RunnerError> {
-        Err(runner_error("unexpected cargo generate-lockfile"))
-    }
-
-    fn cargo_tree(&self, _current_dir: &Path) -> Result<String, RunnerError> {
-        Err(runner_error("unexpected cargo tree"))
-    }
-
-    fn git_diff(&self, _current_dir: &Path, _paths: &[PathBuf]) -> Result<String, RunnerError> {
-        Err(runner_error("unexpected git diff"))
-    }
-
-    fn cargo_audit(&self, _current_dir: &Path) -> Result<String, RunnerError> {
-        Err(runner_error("unexpected cargo audit"))
-    }
-
-    fn cargo_audit_json(
-        &self,
-        _controlled_cwd: &Path,
-        _lockfile_path: &Path,
-    ) -> Result<cargo_barbican::CommandOutput, RunnerError> {
-        Err(runner_error("unexpected cargo audit json"))
-    }
-
-    fn cargo_deny_json(
-        &self,
-        _current_dir: &Path,
-        _config_path: &Path,
-        _checks: &[barbican::CargoDenyCheck],
-    ) -> Result<cargo_barbican::CommandOutput, RunnerError> {
-        Err(runner_error("unexpected cargo deny json"))
-    }
-
-    fn cargo_build_locked(&self, _current_dir: &Path) -> Result<(), RunnerError> {
-        Err(runner_error("unexpected cargo build"))
-    }
-
-    fn cargo_test_locked(&self, _current_dir: &Path) -> Result<(), RunnerError> {
-        Err(runner_error("unexpected cargo test"))
-    }
-}
-
-fn runner_error(message: impl Into<String>) -> RunnerError {
-    RunnerError::Exited {
-        code: Some(1),
-        stdout: String::new(),
-        stderr: message.into(),
-    }
-}
+use super::common::*;
 
 #[test]
 fn inventory_reports_policy_coverage_and_gaps() {
@@ -155,7 +25,7 @@ serde = ["proc-macro"]
     )
     .expect("reviewed targets should write");
 
-    let runner = FakeCommandRunner::with_frozen_metadata(surface_metadata_json());
+    let runner = FakeCommandRunner::default().with_frozen_metadata(surface_metadata_json());
     let (exit_code, stdout, stderr) = run_inventory_with_runner(&temp_dir, &runner);
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
@@ -388,7 +258,7 @@ fn inventory_without_reviewed_targets_reports_no_policy() {
     let temp_dir = fresh_temp_dir();
     write_inventory_fixture(&temp_dir);
 
-    let runner = FakeCommandRunner::with_frozen_metadata(surface_metadata_json());
+    let runner = FakeCommandRunner::default().with_frozen_metadata(surface_metadata_json());
     let (exit_code, stdout, stderr) = run_inventory_with_runner(&temp_dir, &runner);
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
@@ -544,8 +414,8 @@ fn inventory_renders_offline_report_when_frozen_metadata_fails() {
     let temp_dir = fresh_temp_dir();
     write_inventory_fixture(&temp_dir);
     let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
-    let client = FakeCratesIoClient;
-    let runner = FakeCommandRunner::with_frozen_metadata_error(
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_frozen_metadata_error(
         "the lock file needs to be updated but --frozen was passed\u{9b}[2K",
     );
     let mut stdout = Vec::new();
@@ -566,7 +436,7 @@ fn inventory_renders_offline_report_when_frozen_metadata_fails() {
         )
     );
     assert!(stdout.contains(
-        "live graph surface status: not collected; live graph surface collection failed: the lock file needs to be updated but --frozen was passed\\x9b[2K"
+        "live graph surface status: not collected; live graph surface collection failed: command exited with status 1; stderr: the lock file needs to be updated but --frozen was passed\\x9b[2K"
     ));
     assert!(stdout.contains(
         "live graph surface remediation: resolve the reported graph or metadata issue, then rerun inventory"
@@ -586,7 +456,8 @@ fn inventory_not_collected_state_prevents_clean_next_action() {
     write_workspace_only_fixture(&temp_dir);
     fs::write(temp_dir.join("reviewed-targets.toml"), "[rust]\n").expect("policy should write");
 
-    let runner = FakeCommandRunner::with_frozen_metadata_error("invalid metadata package: évil");
+    let runner =
+        FakeCommandRunner::default().with_frozen_metadata_error("invalid metadata package: évil");
     let (exit_code, stdout, stderr) = run_inventory_with_runner(&temp_dir, &runner);
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
@@ -600,7 +471,7 @@ fn inventory_not_collected_state_prevents_clean_next_action() {
         )
     );
     assert!(stdout.contains(
-        "live graph surface status: not collected; live graph surface collection failed: invalid metadata package: évil"
+        "live graph surface status: not collected; live graph surface collection failed: command exited with status 1; stderr: invalid metadata package: évil"
     ));
     assert!(
         stdout.contains(
@@ -621,17 +492,19 @@ fn inventory_fails_on_malformed_reviewed_targets() {
     fs::write(temp_dir.join("reviewed-targets.toml"), "not toml").expect("policy should write");
 
     let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
-    let client = FakeCratesIoClient;
+    let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
-    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-        .expect_err("command should fail");
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
 
-    assert!(error.to_string().contains("reviewed-targets.toml"));
+    assert_eq!(exit_code, ExitCode::from(1));
     assert!(stdout.is_empty());
-    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.starts_with("FAIL "));
+    assert!(rendered.contains("reviewed-targets.toml"));
 }
 
 #[test]
@@ -645,21 +518,22 @@ fn inventory_escapes_malformed_reviewed_targets_parse_diagnostics() {
     .expect("policy should write");
 
     let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
-    let client = FakeCratesIoClient;
+    let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
-    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-        .expect_err("command should fail");
-    let rendered = error.to_string();
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
 
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let rendered = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.starts_with("FAIL "));
     assert!(rendered.contains("reviewed-targets.toml"));
     assert!(!rendered.contains('\u{001b}'));
     assert!(rendered.contains("\\x1b"));
     assert!(rendered.contains('\n'));
-    assert!(stdout.is_empty());
-    assert!(stderr.is_empty());
 }
 
 #[test]
@@ -672,489 +546,18 @@ fn inventory_fails_when_lockfile_is_missing() {
     .expect("manifest should write");
 
     let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
-    let client = FakeCratesIoClient;
+    let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
-    let error = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-        .expect_err("command should fail");
-
-    assert_eq!(error.to_string(), "Cargo.lock: lockfile not found");
-    assert!(stdout.is_empty());
-    assert!(stderr.is_empty());
-}
-
-fn run_inventory(temp_dir: &Path) -> (ExitCode, String, String) {
-    let runner = FakeCommandRunner::default();
-
-    run_inventory_with_runner(temp_dir, &runner)
-}
-
-fn run_inventory_with_runner(
-    temp_dir: &Path,
-    runner: &FakeCommandRunner,
-) -> (ExitCode, String, String) {
-    let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
-    let client = FakeCratesIoClient;
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-
-    let exit_code = run_cli_with_runner(cli, temp_dir, &client, runner, &mut stdout, &mut stderr)
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
         .expect("command should run");
-    assert_eq!(runner.frozen_metadata_calls(), 1);
 
-    (
-        exit_code,
-        String::from_utf8(stdout).expect("stdout should be utf8"),
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert_eq!(
         String::from_utf8(stderr).expect("stderr should be utf8"),
-    )
-}
-
-fn run_inventory_with_runner_at(
-    temp_dir: &Path,
-    runner: &FakeCommandRunner,
-    now: OffsetDateTime,
-) -> (ExitCode, String, String) {
-    let cli = Cli::parse_from(["cargo-barbican", "inventory"]);
-    let client = FakeCratesIoClient;
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-
-    let exit_code = run_cli_with_runner_at(
-        cli,
-        temp_dir,
-        &client,
-        runner,
-        now,
-        &mut stdout,
-        &mut stderr,
-    )
-    .expect("command should run");
-    assert_eq!(runner.frozen_metadata_calls(), 1);
-
-    (
-        exit_code,
-        String::from_utf8(stdout).expect("stdout should be utf8"),
-        String::from_utf8(stderr).expect("stderr should be utf8"),
-    )
-}
-
-fn default_metadata_json() -> &'static str {
-    r#"{
-  "packages": [],
-  "workspace_members": [],
-  "resolve": {"nodes": []}
-}"#
-}
-
-fn surface_metadata_json() -> &'static str {
-    r#"{
-  "packages": [
-    {
-      "name": "app",
-      "id": "path+file:///workspace/crates/app#app@0.1.0",
-      "version": "0.1.0",
-      "targets": [{"kind": ["custom-build"]}]
-    },
-    {
-      "name": "explicit-app",
-      "id": "path+file:///workspace/app#explicit-app@0.1.0",
-      "version": "0.1.0",
-      "targets": []
-    },
-    {
-      "name": "serde",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
-      "version": "1.0.228",
-      "targets": [{"kind": ["proc-macro"]}]
-    },
-    {
-      "name": "loose",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#loose@0.1.0",
-      "version": "0.1.0",
-      "targets": [{"kind": ["custom-build"]}]
-    },
-    {
-      "name": "local",
-      "id": "path+file:///workspace/crates/local#local@0.1.0",
-      "version": "0.1.0",
-      "links": "local",
-      "targets": []
-    }
-  ],
-  "workspace_members": ["path+file:///workspace/crates/app#app@0.1.0"],
-  "resolve": {"nodes": []}
-}"#
-}
-
-fn write_inventory_fixture(root: &Path) {
-    fs::create_dir_all(root.join("crates/app")).expect("app dir should create");
-    fs::create_dir_all(root.join("app")).expect("explicit app dir should create");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*", "app"]
-resolver = "3"
-
-[workspace.package]
-version = "0.1.0"
-
-[workspace.dependencies]
-serde = "=1.0.228"
-"#,
-    )
-    .expect("root manifest should write");
-    fs::write(
-        root.join("crates/app/Cargo.toml"),
-        r#"
-[package]
-name = "app"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-alt = { version = "1", registry = "internal" }
-serde = { workspace = true }
-local = { path = "../local" }
-
-[dev-dependencies]
-loose = "0.1"
-"#,
-    )
-    .expect("member manifest should write");
-    fs::write(
-        root.join("app/Cargo.toml"),
-        r#"
-[package]
-name = "explicit-app"
-version = { workspace = true }
-edition = "2024"
-"#,
-    )
-    .expect("explicit member manifest should write");
-    fs::write(
-        root.join("Cargo.lock"),
-        r#"
-version = 4
-
-[[package]]
-name = "app"
-version = "0.1.0"
-
-[[package]]
-name = "app"
-version = "0.2.0"
-
-[[package]]
-name = "app"
-version = "0.1.0"
-source = "git+https://example.invalid/app"
-
-[[package]]
-name = "git-crate"
-version = "0.1.0"
-source = "git+https://example.invalid/git-crate"
-
-[[package]]
-name = "explicit-app"
-version = "0.1.0"
-
-[[package]]
-name = "serde"
-version = "1.0.228"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-
-[[package]]
-name = "loose"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1111111111111111111111111111111111111111111111111111111111111111"
-
-[[package]]
-name = "local"
-version = "0.1.0"
-"#,
-    )
-    .expect("lockfile should write");
-}
-
-fn write_workspace_only_fixture(root: &Path) {
-    fs::create_dir_all(root.join("crates/app")).expect("app dir should create");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "3"
-"#,
-    )
-    .expect("root manifest should write");
-    fs::write(
-        root.join("crates/app/Cargo.toml"),
-        r#"
-[package]
-name = "app"
-version = "0.1.0"
-edition = "2024"
-"#,
-    )
-    .expect("member manifest should write");
-    fs::write(
-        root.join("Cargo.lock"),
-        r#"
-version = 4
-
-[[package]]
-name = "app"
-version = "0.1.0"
-"#,
-    )
-    .expect("lockfile should write");
-}
-
-fn write_libs_glob_fixture(root: &Path) {
-    fs::create_dir_all(root.join("libs/glob-member")).expect("member dir should create");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["libs/*"]
-resolver = "3"
-"#,
-    )
-    .expect("root manifest should write");
-    fs::write(
-        root.join("libs/glob-member/Cargo.toml"),
-        r#"
-[package]
-name = "glob-member"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-glob-member = "=0.1.0"
-"#,
-    )
-    .expect("member manifest should write");
-    fs::write(
-        root.join("Cargo.lock"),
-        r#"
-version = 4
-
-[[package]]
-name = "glob-member"
-version = "0.1.0"
-"#,
-    )
-    .expect("lockfile should write");
-}
-
-fn write_pruned_dirs_fixture(root: &Path) {
-    fs::create_dir_all(root.join("crates/real-member")).expect("member dir should create");
-    fs::create_dir_all(root.join("crates/real-member/target/phantom"))
-        .expect("target phantom dir should create");
-    fs::create_dir_all(root.join("crates/real-member/.git/phantom"))
-        .expect("git phantom dir should create");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "3"
-"#,
-    )
-    .expect("root manifest should write");
-    fs::write(
-        root.join("crates/real-member/Cargo.toml"),
-        r#"
-[package]
-name = "real-member"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-real-member = "=0.1.0"
-"#,
-    )
-    .expect("member manifest should write");
-    fs::write(
-        root.join("crates/real-member/target/phantom/Cargo.toml"),
-        r#"
-[package]
-name = "target-phantom"
-version = "0.1.0"
-edition = "2024"
-"#,
-    )
-    .expect("target phantom manifest should write");
-    fs::write(
-        root.join("crates/real-member/.git/phantom/Cargo.toml"),
-        r#"
-[package]
-name = "git-phantom"
-version = "0.1.0"
-edition = "2024"
-"#,
-    )
-    .expect("git phantom manifest should write");
-    fs::write(
-        root.join("Cargo.lock"),
-        r#"
-version = 4
-
-[[package]]
-name = "real-member"
-version = "0.1.0"
-
-[[package]]
-name = "target-phantom"
-version = "0.1.0"
-
-[[package]]
-name = "git-phantom"
-version = "0.1.0"
-"#,
-    )
-    .expect("lockfile should write");
-}
-
-fn write_nested_non_member_fixture(root: &Path) {
-    fs::create_dir_all(root.join("crates/member/examples/nested-fixture"))
-        .expect("nested fixture dir should create");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "3"
-"#,
-    )
-    .expect("root manifest should write");
-    fs::write(
-        root.join("crates/member/Cargo.toml"),
-        r#"
-[package]
-name = "member"
-version = "0.1.0"
-edition = "2024"
-"#,
-    )
-    .expect("member manifest should write");
-    fs::write(
-        root.join("crates/member/examples/nested-fixture/Cargo.toml"),
-        r#"
-[package]
-name = "nested-fixture"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-nested-fixture = "0.1"
-"#,
-    )
-    .expect("nested manifest should write");
-    fs::write(
-        root.join("Cargo.lock"),
-        r#"
-version = 4
-
-[[package]]
-name = "member"
-version = "0.1.0"
-
-[[package]]
-name = "nested-fixture"
-version = "0.1.0"
-"#,
-    )
-    .expect("lockfile should write");
-}
-
-fn write_control_character_fixture(root: &Path) {
-    fs::create_dir_all(root.join("crates/app")).expect("app dir should create");
-    fs::write(
-        root.join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "3"
-"#,
-    )
-    .expect("root manifest should write");
-    fs::write(
-        root.join("crates/app/Cargo.toml"),
-        r#"
-[package]
-name = "app"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-control_dep = "0.1\n  none"
-"#,
-    )
-    .expect("member manifest should write");
-    fs::write(
-        root.join("Cargo.lock"),
-        r#"
-version = 4
-
-[[package]]
-name = "app"
-version = "0.1.0"
-
-[[package]]
-name = "control-source"
-version = "0.1.0"
-source = "git+https://example.invalid/control\u001b[1A\u001b[2K\n  none\u2028\u2029"
-
-[[package]]
-name = "serde"
-version = "1.0.228"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-"#,
-    )
-    .expect("lockfile should write");
-    fs::write(
-        root.join("reviewed-targets.toml"),
-        r#"
-[rust]
-
-[[rust.families]]
-name = "policy-family"
-review_record = "docs/dependency-reviews/control-record.md"
-
-[rust.families.direct]
-serde = "=1.0.228"
-
-[rust.families.resolved]
-serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
-"#,
-    )
-    .expect("reviewed targets should write");
-}
-
-fn fresh_temp_dir() -> PathBuf {
-    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-    let mut path = std::env::temp_dir();
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock should be after epoch")
-        .as_nanos();
-    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    path.push(format!("cargo-barbican-inventory-test-{nanos}-{id}"));
-    fs::create_dir_all(&path).expect("temp dir should create");
-    path
-}
-
-fn section_between<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
-    let section_start = text.find(start).expect("section should start");
-    let after_start = &text[section_start + start.len()..];
-    let section_end = after_start.find(end).expect("section should end");
-
-    &after_start[..section_end]
+        "FAIL Cargo.lock: lockfile not found\n"
+    );
 }

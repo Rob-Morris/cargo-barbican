@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.19.0](changelog/v0.19.0.md) | 2026-07-06 | Harden reviewed-target gates and CLI output contracts |
 | [v0.18.0](changelog/v0.18.0.md) | 2026-07-06 | Add pin add and harden verify gating |
 | [v0.17.0](changelog/v0.17.0.md) | 2026-07-01 | Add pick command for semver version discovery |
 | [v0.16.0](changelog/v0.16.0.md) | 2026-07-01 | Rename resolve to update and reclaim resolve |

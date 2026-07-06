@@ -2,6 +2,7 @@ use semver::{Version, VersionReq};
 use thiserror::Error;
 use time::OffsetDateTime;
 
+use crate::spec::{VersionMarker, split_crate_version_spec};
 use crate::{
     CrateRelease, ExactCrateSpec, ReleaseAgeOutcome, ReleaseAgeReport, ReviewedReleaseAgeException,
     VersionInfo, evaluate_release_age,
@@ -34,17 +35,13 @@ pub enum PickSpecError {
 }
 
 pub fn parse_pick_spec(input: &str) -> Result<PickSpec, PickSpecError> {
-    if input.is_empty() || input.starts_with('-') {
+    let Some(shape) = split_crate_version_spec(input, VersionMarker::Optional) else {
         return Err(PickSpecError::InvalidShape(input.to_owned()));
-    }
-
-    let (crate_name, requirement) = match input.rsplit_once('@') {
-        Some((crate_name, requirement)) if !crate_name.is_empty() && !requirement.is_empty() => {
-            (crate_name, requirement)
-        }
-        Some(_) => return Err(PickSpecError::InvalidShape(input.to_owned())),
-        None => (input, "*"),
     };
+    let crate_name = shape.crate_name;
+    // Preserve a leading '=' on the requirement: it is a meaningful exact-pin
+    // marker for a semver range, not exact-spec noise to strip.
+    let requirement = shape.version.unwrap_or("*");
 
     // ExactCrateSpec validates the crate-name character set; the version is a dummy.
     ExactCrateSpec::from_parts(crate_name, "0.0.0")

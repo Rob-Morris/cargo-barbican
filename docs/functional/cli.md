@@ -260,19 +260,48 @@ cargo barbican pin check [--config reviewed-targets.toml]
     - checks that each active `review_record` path exists in the repo
     - checks optional exact direct manifest requirements, including the leading `=`
     - checks exact resolved `Cargo.lock` versions for every active reviewed family
+    - for every `Cargo.lock` entry whose name matches a reviewed family's
+      resolved crate, requires a crates.io source; a git, path, alternate-registry,
+      or sourceless (workspace/path member) entry is a blocking mismatch, even
+      when another entry for the same name and version carries the expected
+      crates.io source and checksum — this closes a doppelgaenger hole where a
+      second, non-crates.io locked entry for a reviewed crate name previously
+      went unnoticed
     - for structured crates.io `resolved` entries, also checks the reviewed
-      `checksum_sha256` against the resolved `Cargo.lock` checksum chain
+      `checksum_sha256` against the resolved `Cargo.lock` checksum chain; a
+      matching-version `Cargo.lock` entry with no checksum is a distinct
+      mismatching observation, not an absent one, and fails the check even if
+      another entry for the same name and version carries the expected checksum
     - validates any `allowed_surfaces` entries point at crates in the same
       family `resolved` map
     - validates any `allowed_age_exceptions` entries point at crates in the
       same family `resolved` map and that the referenced resolved target
       carries `checksum_sha256`
+    - fails closed when any workspace manifest `[patch]` table (under any
+      registry key, for example `[patch.crates-io]`) targets a crate name
+      covered by an active reviewed family's `resolved` or `direct` map, since
+      a patch repoints an already-reviewed crate at a different source without
+      touching `Cargo.lock`
+    - fails closed when a repo-root `.cargo/config.toml` (or legacy
+      `.cargo/config`) declares a `[source]` table, a config-defined `[patch]`
+      table (stable since Rust 1.56, works exactly like a manifest `[patch]`),
+      or a top-level `paths` dependency override, while any reviewed family is
+      active, since each of these can repoint a reviewed crate name away from
+      crates.io — or substitute local source code for it, with `Cargo.lock`
+      keeping its crates.io source and checksum — without any change to
+      `Cargo.toml` or `Cargo.lock`; this check only reads the repo-root file —
+      hierarchical cargo config in parent directories or `CARGO_HOME` is a
+      documented residual boundary, not inspected
     The first slice treats exact `Cargo.lock` parity as the load-bearing
     execution gate. It does not yet verify installed-tree or stronger
     build-input parity.
     Structured crates.io reviewed-artefact form:
     - `serde = { version = "1.0.228", checksum_sha256 = "..." }`
-    - legacy string entries such as `serde = "1.0.228"` remain accepted
+    - legacy string entries such as `serde = "1.0.228"` remain accepted; both
+      forms now require every matching `Cargo.lock` entry to be crates.io
+      sourced, but only the structured form binds the resolved artefact
+      checksum — the structured form is the stronger guarantee and is
+      recommended
     - execution-surface allowances are declared separately, for example:
       `serde = ["build-rs", "proc-macro"]` under
       `[rust.families.allowed_surfaces]`
@@ -281,7 +310,8 @@ cargo barbican pin check [--config reviewed-targets.toml]
       they require the same family's structured `resolved` entry to carry
       `checksum_sha256`
     - stronger installed-tree or broader non-crates.io artefact parity remains
-      out of scope for this slice
+      out of scope for this slice; `[replace]` manifest tables are also out of
+      scope and are not yet detected
 
 cargo barbican review [--base-dir PATH]
     Print a diff of policy-relevant files with a checklist printed above.
@@ -330,6 +360,61 @@ optional leading `=` on the version is accepted for CLI ergonomics:
 - `0` — success
 - `1` — blocking policy failure, such as an age-gate failure, advisory finding, disallowed source, or fail-closed inspection failure
 - `2` — usage error
+
+## Output-stability contract
+
+Exit codes (above) and the following terminal tokens on stdout are stable
+parse targets. A script or CI step may match on these literal strings; a
+future change to the wording of any of them is a breaking change to the CLI
+contract, not a routine rewording.
+
+- `Pin check: PASS` / `Pin check: FAIL` — printed by `pin check` (and reused
+  by `verify`, which calls the same reviewed-target check before its build
+  and test steps)
+- `Audit: PASS` / `Audit: FAIL` — printed by `audit`
+- `Verify: PASS` — printed by `verify` on success; there is no matching
+  `Verify: FAIL` token. A failing `verify` run stops at the failing step
+  (`pin check`, `cargo build --locked`, or `cargo test --locked`), reports the
+  failure through that step's own output — `Pin check: FAIL` on stdout for a
+  reviewed-target failure, or a build/test error on stderr — and exits `1`
+  without printing a `Verify:` line at all.
+
+All other output — evidence reports, dossiers, inventory findings, review
+diffs, and human-oriented notes such as `verify`'s scope-honesty pointer to
+`audit` — is not a stable parse target and may change wording or formatting
+between versions. Match on the tokens above and the exit code, not on other
+output text.
+
+## Stream discipline
+
+Every command follows one rule for where output goes:
+
+- **stdout** carries reports and evidence: structured findings, dossiers, and
+  every per-finding detail line that is part of a report body, including
+  lines that themselves start with `FAIL` or `OK` — for example, the
+  per-finding lines inside `audit`, `pin check`, and `gatehouse candidate`
+  reports, and the per-candidate release-age lines `age`, `age-lock`,
+  `inspect`, and `assess` print for each spec or finding they evaluate. These
+  lines are evidence, not the terminal failure signal, and are covered by the
+  output-stability contract above only where explicitly listed.
+- **stderr** carries the terminal failure line and every propagated error.
+  Any `CommandError` that reaches the top of a command — a missing or
+  malformed input file, a failed `git`/`cargo` subprocess, an invalid
+  environment variable, or any other internal failure a command does not
+  render itself — is rendered by one central renderer as a single
+  `FAIL <detail>` line on stderr. Commands that choose to report a blocking
+  condition directly, without a stdout report body (invalid candidate specs,
+  release-age gate failures reported outside a report, fetch failures), also
+  write their `FAIL` line to stderr, matching the same stream.
+
+Because every failure path funnels through that one renderer (or writes to
+stderr directly using the same `FAIL` token), grepping stderr for `FAIL`
+reliably surfaces every failure, not just the ones a given command happened
+to render itself. The renderer also escapes the detail through the same
+terminal-injection guard used for evidence fields — untrusted crate names,
+requirements, network-sourced strings, and policy file paths cannot inject
+ANSI or bidi control sequences into the terminal — and never changes the exit
+code: a propagated error still exits `1`.
 
 ## Behavioural boundaries
 

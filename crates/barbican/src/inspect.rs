@@ -12,7 +12,7 @@ use toml::Value;
 use crate::assessment::RustAssessmentClassification;
 use crate::{
     CrateRelease, ExactCrateSpec, ReleaseAgeReport, ReviewedReleaseAgeException,
-    evaluate_release_age,
+    evaluate_release_age, is_native_sys_execution_surface,
 };
 
 const GZIP_HEADER_LEN: usize = 10;
@@ -182,22 +182,6 @@ impl fmt::Display for IocHit {
     }
 }
 
-pub fn inspect_published_crate(
-    spec: ExactCrateSpec,
-    release: CrateRelease,
-    tarball_bytes: &[u8],
-    minimum_days: u64,
-) -> RustInspectReport {
-    inspect_published_crate_at(
-        spec,
-        release,
-        tarball_bytes,
-        OffsetDateTime::now_utc(),
-        minimum_days,
-        None,
-    )
-}
-
 pub fn inspect_published_crate_at(
     spec: ExactCrateSpec,
     release: CrateRelease,
@@ -279,7 +263,10 @@ fn has_execution_surface(
     has_package_links: bool,
     has_native_source: bool,
 ) -> bool {
-    has_build_script || proc_macro || native_sys_crate || has_package_links || has_native_source
+    has_build_script
+        || proc_macro
+        || is_native_sys_execution_surface(native_sys_crate, has_package_links)
+        || has_native_source
 }
 
 fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> TarballInspection {
@@ -661,28 +648,88 @@ mod tests {
     };
 
     fn build_crate_tarball(files: &[(&str, &str)]) -> Vec<u8> {
+        let prefixed = files
+            .iter()
+            .map(|(path, contents)| (format!("sample-0.1.0/{path}"), *contents))
+            .collect::<Vec<_>>();
+        let entries = prefixed
+            .iter()
+            .map(|(path, contents)| (path.as_str(), contents.as_bytes()))
+            .collect::<Vec<_>>();
+
+        gzip_wrap(&build_tar(&entries))
+    }
+
+    /// Builds a tar archive from entries whose paths are used verbatim (no
+    /// `sample-0.1.0/` prefix), via `append_data`. `append_data` validates
+    /// paths (rejecting `..` and leading `/`) before writing, so this is
+    /// only suitable for well-formed relative names; hostile paths need
+    /// [`append_entry_with_raw_name`] instead.
+    fn build_tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut tarball = Vec::new();
         {
             let mut builder = Builder::new(&mut tarball);
-            for (path, contents) in files {
-                let full_path = format!("sample-0.1.0/{path}");
-                let bytes = contents.as_bytes();
+            for (path, bytes) in entries {
                 let mut header = Header::new_gnu();
                 header.set_size(bytes.len() as u64);
                 header.set_mode(0o644);
                 header.set_cksum();
                 builder
-                    .append_data(&mut header, full_path, bytes)
+                    .append_data(&mut header, *path, *bytes)
                     .expect("fixture tar append should succeed");
             }
             builder.finish().expect("fixture tar should finish");
         }
+        tarball
+    }
 
-        let deflated = miniz_oxide::deflate::compress_to_vec(&tarball, 6);
+    /// Writes a tar header whose name field is the raw bytes given, bypassing
+    /// `tar`'s own `set_path` validation (which refuses `..` and absolute
+    /// paths at write time). This is how a hostile archive is simulated: a
+    /// real attacker's encoder is not bound by this crate's writer safety
+    /// checks, only the parser's.
+    fn append_entry_with_raw_name(builder: &mut Builder<&mut Vec<u8>>, name: &[u8], data: &[u8]) {
+        let mut header = Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.as_old_mut().name[..name.len()].copy_from_slice(name);
+        header.set_cksum();
+        builder
+            .append(&header, data)
+            .expect("raw-named fixture entry should append");
+    }
+
+    /// Writes a tar header whose declared `size` does not match the number
+    /// of content bytes actually written, simulating a header that lies
+    /// about how much data follows it.
+    fn append_entry_with_lying_size(
+        builder: &mut Builder<&mut Vec<u8>>,
+        name: &str,
+        declared_size: u64,
+        actual_data: &[u8],
+    ) {
+        let mut header = Header::new_gnu();
+        header.set_size(declared_size);
+        header.set_mode(0o644);
+        header
+            .set_path(name)
+            .expect("fixture entry name should be a valid tar path");
+        header.set_cksum();
+        builder
+            .append(&header, actual_data)
+            .expect("lying-size fixture entry should append");
+    }
+
+    fn gzip_wrap(tar_bytes: &[u8]) -> Vec<u8> {
+        let deflated = miniz_oxide::deflate::compress_to_vec(tar_bytes, 6);
+        gzip_wrap_deflated(&deflated, tar_bytes.len())
+    }
+
+    fn gzip_wrap_deflated(deflated: &[u8], decompressed_len: usize) -> Vec<u8> {
         let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
-        gzip.extend(deflated);
+        gzip.extend_from_slice(deflated);
         gzip.extend([0, 0, 0, 0]);
-        gzip.extend((tarball.len() as u32).to_le_bytes());
+        gzip.extend((decompressed_len as u32).to_le_bytes());
         gzip
     }
 
@@ -966,5 +1013,187 @@ mod tests {
             hit.path() == "src/tests/payload.rs"
                 && hit.indicator().contains("std::process::Command")
         }));
+    }
+
+    fn inspect_hostile(spec_name: &str, tarball_bytes: &[u8]) -> RustInspectReport {
+        inspect(spec(spec_name), tarball_bytes)
+    }
+
+    #[test]
+    fn truncated_gzip_header_fails_closed_without_panic() {
+        // Shorter than the fixed 10-byte gzip header plus 8-byte footer:
+        // `decompress_crate_gzip` must reject this before ever touching a
+        // tar reader, not panic on an out-of-bounds slice.
+        let tarball_bytes = vec![0x1f, 0x8b, 8, 0, 0];
+
+        let report = inspect_hostile("sample", &tarball_bytes);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.inspection_failures().len(), 1);
+        assert!(
+            report.inspection_failures()[0]
+                .contains("unable to decode crate tarball: truncated gzip stream")
+        );
+    }
+
+    #[test]
+    fn corrupt_deflate_stream_fails_closed_without_panic() {
+        // A structurally valid gzip envelope (correct magic, method, header
+        // length, and footer size) wrapped around bytes that are not a
+        // valid deflate stream.
+        let mut tarball_bytes = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+        tarball_bytes.extend([0xff, 0x00, 0xff, 0x00, 0xff, 0x00, 0xff, 0x00]);
+        tarball_bytes.extend([0, 0, 0, 0]);
+        tarball_bytes.extend(4u32.to_le_bytes());
+
+        let report = inspect_hostile("sample", &tarball_bytes);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.inspection_failures().len(), 1);
+        assert!(report.inspection_failures()[0].starts_with("unable to decode crate tarball: "));
+    }
+
+    #[test]
+    fn decompression_exceeding_max_size_fails_closed_without_panic() {
+        // A highly compressible payload (all zero bytes) whose decompressed
+        // size sits just past `MAX_DECOMPRESSED_CRATE_BYTES`, but whose
+        // compressed form is tiny — the classic decompression-bomb shape.
+        const MAX_DECOMPRESSED_CRATE_BYTES: usize = 128 * 1024 * 1024;
+        let oversized = vec![0u8; MAX_DECOMPRESSED_CRATE_BYTES + 4096];
+        let deflated = miniz_oxide::deflate::compress_to_vec(&oversized, 1);
+        assert!(
+            deflated.len() < oversized.len() / 100,
+            "fixture should compress far smaller than its decompressed size"
+        );
+        let tarball_bytes = gzip_wrap_deflated(&deflated, oversized.len());
+
+        let report = inspect_hostile("sample", &tarball_bytes);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.inspection_failures().len(), 1);
+        assert!(report.inspection_failures()[0].starts_with("unable to decode crate tarball: "));
+    }
+
+    #[test]
+    fn tar_entries_with_traversal_and_absolute_paths_fail_closed_without_panic() {
+        let mut tarball = Vec::new();
+        {
+            let mut builder = Builder::new(&mut tarball);
+            append_entry_with_raw_name(
+                &mut builder,
+                b"../../etc/passwd\0",
+                b"attacker-controlled\n",
+            );
+            builder.finish().expect("fixture tar should finish");
+        }
+        let tarball_bytes = gzip_wrap(&tarball);
+
+        let report = inspect_hostile("sample", &tarball_bytes);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.inspection_failures().len(), 1);
+        assert!(report.inspection_failures()[0].starts_with("unable to inspect crate archive: "));
+    }
+
+    #[test]
+    fn tar_entry_with_absolute_path_fails_closed_without_panic() {
+        let mut tarball = Vec::new();
+        {
+            let mut builder = Builder::new(&mut tarball);
+            append_entry_with_raw_name(&mut builder, b"/etc/passwd\0", b"attacker-controlled\n");
+            builder.finish().expect("fixture tar should finish");
+        }
+        let tarball_bytes = gzip_wrap(&tarball);
+
+        let report = inspect_hostile("sample", &tarball_bytes);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.inspection_failures().len(), 1);
+        assert!(report.inspection_failures()[0].starts_with("unable to inspect crate archive: "));
+    }
+
+    #[test]
+    fn tar_header_size_lying_about_content_length_fails_closed_without_panic() {
+        let mut tarball = Vec::new();
+        {
+            let mut builder = Builder::new(&mut tarball);
+            // Header claims far more content follows than the handful of
+            // bytes actually written; a reader that trusts the declared
+            // size will run past the real data.
+            append_entry_with_lying_size(
+                &mut builder,
+                "sample-0.1.0/Cargo.toml",
+                64 * 1024 * 1024,
+                b"[package]\nname = \"sample\"\n",
+            );
+            builder.finish().expect("fixture tar should finish");
+        }
+        let tarball_bytes = gzip_wrap(&tarball);
+
+        let report = inspect_hostile("sample", &tarball_bytes);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.inspection_failures().len(), 1);
+        // The declared size exceeds the archive's real remaining bytes, so
+        // the tar reader hits end-of-stream while skipping ahead to where
+        // it expects the next header (or archive end) to be.
+        assert!(
+            report.inspection_failures()[0].starts_with("unable to inspect crate archive: ")
+                && report.inspection_failures()[0].contains("EOF")
+        );
+    }
+
+    #[test]
+    fn non_utf8_cargo_toml_contents_fail_closed_without_panic() {
+        let entries: [(&str, &[u8]); 1] = [("sample-0.1.0/Cargo.toml", &[0xff, 0xfe, 0x00, 0xff])];
+        let tarball_bytes = gzip_wrap(&build_tar(&entries));
+
+        let report = inspect_hostile("sample", &tarball_bytes);
+
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(report.inspection_failures().len(), 1);
+        assert!(report.inspection_failures()[0].starts_with("published Cargo.toml is invalid: "));
+    }
+
+    #[test]
+    fn non_utf8_source_file_contents_are_lossily_scanned_without_panic() {
+        // A non-UTF8 `.rs` file alongside a valid manifest: `from_utf8_lossy`
+        // must substitute replacement characters rather than panicking, and
+        // inspection must still complete deterministically.
+        let entries: [(&str, &[u8]); 2] = [
+            (
+                "sample-0.1.0/Cargo.toml",
+                b"[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+            ),
+            ("sample-0.1.0/src/lib.rs", &[0xff, 0xfe, b'x', 0x00]),
+        ];
+        let tarball_bytes = gzip_wrap(&build_tar(&entries));
+
+        let report = inspect_hostile("sample", &tarball_bytes);
+
+        assert!(report.checksum_matches());
+        assert!(report.inspection_failures().is_empty());
+        assert!(report.ioc_hits().is_empty());
     }
 }

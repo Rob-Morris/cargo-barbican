@@ -7,17 +7,16 @@ use barbican::{
     CratesIoClient, OffsetDateTime, parse_cargo_metadata, parse_lockfile, select_package_id,
 };
 
-use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
 use super::age_lock::recheck_lockfile_age_against_lockfiles;
 use super::diff_render::render_unified_file_diff;
-use super::lockfile_ops::{MemoizingCratesIoClient, restore_base_lockfile};
+use super::lockfile_ops::{LockfileRestoreGuard, MemoizingCratesIoClient};
 use super::scratch_dir::ScratchDir;
 use super::{
-    CommandError, escape_diagnostic_for_terminal, fail, finish_release_age_checks, load_config,
-    load_current_lockfile_text, load_current_lockfile_with_text,
-    load_reviewed_release_age_exceptions, parse_specs,
+    CommandError, escape_diagnostic_for_terminal, fail, finish_release_age_checks,
+    load_current_lockfile_text, load_current_lockfile_with_text, load_release_age_context,
+    parse_specs,
 };
 
 pub(super) fn run_update<C, R>(
@@ -36,9 +35,8 @@ where
     R: CommandRunner + ?Sized,
 {
     let memoized_client = MemoizingCratesIoClient::new(client);
-    let minimum_days = min_age_days.unwrap_or(load_config(current_dir)?.release_age.minimum_days);
-    let reviewed_release_age_exceptions =
-        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
+    let (minimum_days, reviewed_release_age_exceptions) =
+        load_release_age_context(current_dir, min_age_days)?;
     let parse_result = parse_specs(raw_specs, stderr)?;
     let age_exit = finish_release_age_checks(
         &parse_result.specs,
@@ -87,6 +85,13 @@ where
         .as_ref()
         .map(DryRunWorkspace::path)
         .unwrap_or(current_dir);
+    // Dry runs mutate the scratch copy at resolve_dir, never current_dir, so
+    // the guard stays disarmed for the whole dry-run path: there is nothing
+    // in the working tree to restore.
+    let mut restore_guard = LockfileRestoreGuard::new(current_dir, &base_lockfile_text);
+    if dry_run {
+        restore_guard.disarm();
+    }
 
     let metadata_text = match runner.cargo_metadata(resolve_dir) {
         Ok(text) => text,
@@ -108,7 +113,7 @@ where
     for (spec, package_id) in selections {
         if let Err(error) = runner.cargo_update_precise(resolve_dir, &package_id, spec.version()) {
             if !dry_run {
-                restore_base_lockfile(current_dir, &base_lockfile_text)?;
+                restore_guard.restore_now()?;
             }
             return fail(
                 stderr,
@@ -125,7 +130,7 @@ where
             Ok(lockfile_with_text) => lockfile_with_text,
             Err(error) => {
                 if !dry_run {
-                    restore_base_lockfile(current_dir, &base_lockfile_text)?;
+                    restore_guard.restore_now()?;
                 }
                 return fail(stderr, error);
             }
@@ -136,7 +141,7 @@ where
         None
     };
 
-    let age_recheck_exit = recheck_lockfile_age_against_lockfiles(
+    let age_recheck_exit = match recheck_lockfile_age_against_lockfiles(
         &current_lockfile,
         &base_lockfile,
         "Cargo.lock",
@@ -147,11 +152,21 @@ where
         now,
         stdout,
         stderr,
-    )?;
+    ) {
+        Ok(exit_code) => exit_code,
+        Err(error) => {
+            if !dry_run {
+                restore_guard.restore_now()?;
+            }
+            return Err(error);
+        }
+    };
 
     if !dry_run {
-        if age_recheck_exit != ExitCode::SUCCESS {
-            restore_base_lockfile(current_dir, &base_lockfile_text)?;
+        if age_recheck_exit == ExitCode::SUCCESS {
+            restore_guard.disarm();
+        } else {
+            restore_guard.restore_now()?;
         }
         return Ok(age_recheck_exit);
     }

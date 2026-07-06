@@ -47,6 +47,11 @@ where
         return fail(stderr, format!("cargo test --locked: {error}"));
     }
     writeln!(stdout, "OK   cargo test --locked").map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "note: advisory audit is a separate gate; run cargo barbican audit"
+    )
+    .map_err(CommandError::Io)?;
     writeln!(stdout, "Verify: PASS").map_err(CommandError::Io)?;
 
     Ok(ExitCode::SUCCESS)

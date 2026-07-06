@@ -1,8 +1,9 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Component;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::{Date, Month};
 
@@ -27,6 +28,7 @@ impl ReviewedTargets {
         self.rust_families
             .iter()
             .flat_map(ReviewedRustFamily::execution_surface_allowances)
+            .cloned()
             .collect()
     }
 
@@ -34,18 +36,22 @@ impl ReviewedTargets {
         self.rust_families
             .iter()
             .flat_map(ReviewedRustFamily::release_age_exceptions)
+            .cloned()
             .collect()
     }
 
-    /// Returns raw configured advisory exceptions with no resolved-target,
-    /// review-record, or expiry binding applied.
+    /// Returns configured advisory exceptions, each already bound to its
+    /// family's resolved target (spec, family, and review record are joined
+    /// at parse time).
     ///
-    /// Callers must enforce resolved-target match, review-record success, and
-    /// `review_by` expiry before using these exceptions to suppress findings.
+    /// Callers must still verify the resolved target matches the current
+    /// `Cargo.lock`, and enforce review-record success and `review_by`
+    /// expiry, before using these exceptions to suppress findings.
     pub fn advisory_exceptions(&self) -> Vec<ReviewedAdvisoryException> {
         self.rust_families
             .iter()
             .flat_map(ReviewedRustFamily::advisory_exceptions)
+            .cloned()
             .collect()
     }
 }
@@ -56,9 +62,9 @@ pub struct ReviewedRustFamily {
     review_record: String,
     direct: BTreeMap<String, String>,
     resolved: BTreeMap<String, ReviewedResolvedTarget>,
-    allowed_surfaces: BTreeMap<String, BTreeSet<ExecutionSurfaceKind>>,
-    allowed_age_exceptions: BTreeMap<String, String>,
-    allowed_advisories: BTreeMap<String, Vec<ReviewedAdvisory>>,
+    execution_surface_allowances: Vec<ReviewedExecutionSurfaceAllowance>,
+    release_age_exceptions: Vec<ReviewedReleaseAgeException>,
+    advisory_exceptions: Vec<ReviewedAdvisoryException>,
 }
 
 impl ReviewedRustFamily {
@@ -78,88 +84,22 @@ impl ReviewedRustFamily {
         &self.resolved
     }
 
-    pub fn allowed_surfaces(&self) -> &BTreeMap<String, BTreeSet<ExecutionSurfaceKind>> {
-        &self.allowed_surfaces
+    pub(crate) fn execution_surface_allowances(&self) -> &[ReviewedExecutionSurfaceAllowance] {
+        &self.execution_surface_allowances
     }
 
-    pub fn allowed_age_exceptions(&self) -> &BTreeMap<String, String> {
-        &self.allowed_age_exceptions
+    fn release_age_exceptions(&self) -> &[ReviewedReleaseAgeException] {
+        &self.release_age_exceptions
     }
 
-    pub fn allowed_advisories(&self) -> &BTreeMap<String, Vec<ReviewedAdvisory>> {
-        &self.allowed_advisories
-    }
-
-    pub(crate) fn execution_surface_allowances(&self) -> Vec<ReviewedExecutionSurfaceAllowance> {
-        self.allowed_surfaces
-            .iter()
-            .flat_map(|(crate_name, surfaces)| {
-                let target = self
-                    .resolved
-                    .get(crate_name)
-                    .expect("parse_reviewed_targets_toml validates allowance targets");
-                surfaces
-                    .iter()
-                    .map(|surface| ReviewedExecutionSurfaceAllowance {
-                        spec: ExactCrateSpec::from_parts(crate_name, target.version())
-                            .expect("parse_reviewed_targets_toml validates exact specs"),
-                        surface: *surface,
-                        family: self.name.clone(),
-                        review_record: self.review_record.clone(),
-                    })
-            })
-            .collect()
-    }
-
-    fn release_age_exceptions(&self) -> Vec<ReviewedReleaseAgeException> {
-        self.allowed_age_exceptions
-            .iter()
-            .map(|(crate_name, version)| {
-                let target = self
-                    .resolved
-                    .get(crate_name)
-                    .expect("parse_reviewed_targets_toml validates age exception targets");
-                ReviewedReleaseAgeException {
-                    spec: ExactCrateSpec::from_parts(crate_name, version)
-                        .expect("parse_reviewed_targets_toml validates exact specs"),
-                    checksum_sha256: target
-                        .checksum_sha256()
-                        .expect("parse_reviewed_targets_toml validates age exception checksums")
-                        .clone(),
-                    family: self.name.clone(),
-                    review_record: self.review_record.clone(),
-                }
-            })
-            .collect()
-    }
-
-    /// Returns raw configured advisory exceptions with no resolved-target,
-    /// review-record, or expiry binding applied.
+    /// Returns configured advisory exceptions, already bound to a resolved
+    /// target from the same family (spec, family, and review record are
+    /// joined at parse time).
     ///
-    /// Callers must enforce resolved-target match, review-record success, and
-    /// `review_by` expiry before using these exceptions to suppress findings.
-    pub fn advisory_exceptions(&self) -> Vec<ReviewedAdvisoryException> {
-        self.allowed_advisories
-            .iter()
-            .flat_map(|(crate_name, advisories)| {
-                let target = self
-                    .resolved
-                    .get(crate_name)
-                    .expect("parse_reviewed_targets_toml validates advisory targets");
-                advisories.iter().map(|advisory| ReviewedAdvisoryException {
-                    advisory_id: advisory.id.clone(),
-                    spec: ExactCrateSpec::from_parts(crate_name, target.version())
-                        .expect("parse_reviewed_targets_toml validates exact specs"),
-                    checksum_sha256: target
-                        .checksum_sha256()
-                        .expect("parse_reviewed_targets_toml validates advisory checksums")
-                        .clone(),
-                    review_by: advisory.review_by,
-                    family: self.name.clone(),
-                    review_record: self.review_record.clone(),
-                })
-            })
-            .collect()
+    /// Callers must still enforce review-record success and `review_by`
+    /// expiry before using these exceptions to suppress findings.
+    pub fn advisory_exceptions(&self) -> &[ReviewedAdvisoryException] {
+        &self.advisory_exceptions
     }
 }
 
@@ -191,17 +131,40 @@ impl fmt::Display for ExecutionSurfaceKind {
     }
 }
 
+/// Shared spec/family/review-record binding underlying every reviewed
+/// allowance kind (execution-surface, release-age, advisory). Unifying the
+/// binding here means each allowance kind only adds its own payload on top,
+/// instead of re-declaring and re-constructing these three fields.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ReviewedExecutionSurfaceAllowance {
+struct ReviewedAllowanceBinding {
     spec: ExactCrateSpec,
-    surface: ExecutionSurfaceKind,
     family: String,
     review_record: String,
 }
 
+impl ReviewedAllowanceBinding {
+    fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
+    fn family(&self) -> &str {
+        &self.family
+    }
+
+    fn review_record(&self) -> &str {
+        &self.review_record
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewedExecutionSurfaceAllowance {
+    binding: ReviewedAllowanceBinding,
+    surface: ExecutionSurfaceKind,
+}
+
 impl ReviewedExecutionSurfaceAllowance {
     pub fn spec(&self) -> &ExactCrateSpec {
-        &self.spec
+        self.binding.spec()
     }
 
     pub fn surface(&self) -> ExecutionSurfaceKind {
@@ -209,11 +172,37 @@ impl ReviewedExecutionSurfaceAllowance {
     }
 
     pub fn family(&self) -> &str {
-        &self.family
+        self.binding.family()
     }
 
     pub fn review_record(&self) -> &str {
-        &self.review_record
+        self.binding.review_record()
+    }
+}
+
+/// Orders by (spec, surface, family, review_record), matching the historical
+/// field order predating the shared `ReviewedAllowanceBinding`: nesting the
+/// binding must not silently reorder rendered allowance lists.
+impl PartialOrd for ReviewedExecutionSurfaceAllowance {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ReviewedExecutionSurfaceAllowance {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (
+            self.spec(),
+            self.surface,
+            self.family(),
+            self.review_record(),
+        )
+            .cmp(&(
+                other.spec(),
+                other.surface,
+                other.family(),
+                other.review_record(),
+            ))
     }
 }
 
@@ -222,22 +211,23 @@ impl fmt::Display for ReviewedExecutionSurfaceAllowance {
         write!(
             formatter,
             "{} {} allowed by reviewed family {} ({})",
-            self.spec, self.surface, self.family, self.review_record
+            self.spec(),
+            self.surface,
+            self.family(),
+            self.review_record()
         )
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewedReleaseAgeException {
-    spec: ExactCrateSpec,
+    binding: ReviewedAllowanceBinding,
     checksum_sha256: Sha256Digest,
-    family: String,
-    review_record: String,
 }
 
 impl ReviewedReleaseAgeException {
     pub fn spec(&self) -> &ExactCrateSpec {
-        &self.spec
+        self.binding.spec()
     }
 
     pub fn checksum_sha256(&self) -> &Sha256Digest {
@@ -245,11 +235,36 @@ impl ReviewedReleaseAgeException {
     }
 
     pub fn family(&self) -> &str {
-        &self.family
+        self.binding.family()
     }
 
     pub fn review_record(&self) -> &str {
-        &self.review_record
+        self.binding.review_record()
+    }
+}
+
+/// Orders by (spec, checksum, family, review_record), matching the historical
+/// field order predating the shared `ReviewedAllowanceBinding`.
+impl PartialOrd for ReviewedReleaseAgeException {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ReviewedReleaseAgeException {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (
+            self.spec(),
+            self.checksum_sha256(),
+            self.family(),
+            self.review_record(),
+        )
+            .cmp(&(
+                other.spec(),
+                other.checksum_sha256(),
+                other.family(),
+                other.review_record(),
+            ))
     }
 }
 
@@ -258,7 +273,9 @@ impl fmt::Display for ReviewedReleaseAgeException {
         write!(
             formatter,
             "{} release age allowed by reviewed family {} ({})",
-            self.spec, self.family, self.review_record
+            self.spec(),
+            self.family(),
+            self.review_record()
         )
     }
 }
@@ -298,29 +315,42 @@ impl fmt::Display for RustSecAdvisoryId {
 pub struct RustSecAdvisoryIdError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReviewedAdvisory {
-    id: RustSecAdvisoryId,
-    review_by: Date,
-}
-
-impl ReviewedAdvisory {
-    pub fn id(&self) -> &RustSecAdvisoryId {
-        &self.id
-    }
-
-    pub fn review_by(&self) -> Date {
-        self.review_by
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReviewedAdvisoryException {
+    binding: ReviewedAllowanceBinding,
     advisory_id: RustSecAdvisoryId,
-    spec: ExactCrateSpec,
     checksum_sha256: Sha256Digest,
     review_by: Date,
-    family: String,
-    review_record: String,
+    expected_target: ReviewedResolvedTarget,
+}
+
+/// Orders by (advisory_id, spec, checksum, review_by, family, review_record),
+/// matching the historical field declaration order predating the shared
+/// `ReviewedAllowanceBinding` and the `expected_target` join.
+impl PartialOrd for ReviewedAdvisoryException {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ReviewedAdvisoryException {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (
+            &self.advisory_id,
+            self.spec(),
+            self.checksum_sha256(),
+            self.review_by,
+            self.family(),
+            self.review_record(),
+        )
+            .cmp(&(
+                &other.advisory_id,
+                other.spec(),
+                other.checksum_sha256(),
+                other.review_by,
+                other.family(),
+                other.review_record(),
+            ))
+    }
 }
 
 impl ReviewedAdvisoryException {
@@ -329,7 +359,7 @@ impl ReviewedAdvisoryException {
     }
 
     pub fn spec(&self) -> &ExactCrateSpec {
-        &self.spec
+        self.binding.spec()
     }
 
     pub fn checksum_sha256(&self) -> &Sha256Digest {
@@ -341,11 +371,18 @@ impl ReviewedAdvisoryException {
     }
 
     pub fn family(&self) -> &str {
-        &self.family
+        self.binding.family()
     }
 
     pub fn review_record(&self) -> &str {
-        &self.review_record
+        self.binding.review_record()
+    }
+
+    /// The resolved target this exception is bound to, for joining against a
+    /// `Cargo.lock`-derived observation. The binding is resolved once, at
+    /// parse time, against the same family's `resolved` map.
+    pub(crate) fn expected_target(&self) -> &ReviewedResolvedTarget {
+        &self.expected_target
     }
 }
 
@@ -354,18 +391,30 @@ impl fmt::Display for ReviewedAdvisoryException {
         write!(
             formatter,
             "{} {} accepted by reviewed family {} ({}), review by {}",
-            self.spec, self.advisory_id, self.family, self.review_record, self.review_by
+            self.spec(),
+            self.advisory_id,
+            self.family(),
+            self.review_record(),
+            self.review_by
         )
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewedResolvedTarget {
+    spec: ExactCrateSpec,
     version: String,
     checksum_sha256: Option<Sha256Digest>,
 }
 
 impl ReviewedResolvedTarget {
+    /// The exact crate spec for this target, parsed once at
+    /// `parse_reviewed_targets_toml` time from the same crate name and
+    /// version that produced this target.
+    pub fn spec(&self) -> &ExactCrateSpec {
+        &self.spec
+    }
+
     pub fn version(&self) -> &str {
         &self.version
     }
@@ -377,15 +426,17 @@ impl ReviewedResolvedTarget {
     pub(crate) fn is_satisfied_by(&self, observed: &ObservedResolvedTarget) -> bool {
         let version_matches =
             observed.versions.len() == 1 && observed.versions.contains(self.version());
+        let source_matches = observed.non_crates_io_sources.is_empty();
         let checksum_matches = match self.checksum_sha256() {
             Some(expected_checksum) => {
-                observed.checksums_sha256.len() == 1
+                !observed.has_checksumless_entry
+                    && observed.checksums_sha256.len() == 1
                     && observed.checksums_sha256.contains(expected_checksum)
             }
             None => true,
         };
 
-        version_matches && checksum_matches
+        version_matches && source_matches && checksum_matches
     }
 }
 
@@ -393,6 +444,17 @@ impl ReviewedResolvedTarget {
 pub(crate) struct ObservedResolvedTarget {
     pub(crate) versions: BTreeSet<String>,
     pub(crate) checksums_sha256: BTreeSet<Sha256Digest>,
+    /// Every non-crates.io source string observed for this crate name across
+    /// all matching `Cargo.lock` entries, including `None` rendered as
+    /// `"(no source)"` for path/workspace members. Non-empty means a
+    /// doppelgaenger or unpinnable source is present alongside (or instead
+    /// of) the reviewed crates.io artefact.
+    pub(crate) non_crates_io_sources: BTreeSet<String>,
+    /// True when at least one matching `Cargo.lock` entry carries no
+    /// checksum. A reviewed entry that expects `checksum_sha256` must not be
+    /// satisfied by a checksum-less lockfile entry, even if another entry for
+    /// the same name/version does carry the expected checksum.
+    pub(crate) has_checksumless_entry: bool,
 }
 
 pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, ReviewedTargetsError> {
@@ -478,7 +540,7 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
                 }
             };
 
-            ExactCrateSpec::from_parts(crate_name, &version).map_err(|source| {
+            let spec = ExactCrateSpec::from_parts(crate_name, &version).map_err(|source| {
                 ReviewedTargetsError::InvalidResolvedVersion {
                     family: family.name.clone(),
                     crate_name: crate_name.clone(),
@@ -490,24 +552,26 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
             resolved.insert(
                 crate_name.clone(),
                 ReviewedResolvedTarget {
+                    spec,
                     version,
                     checksum_sha256,
                 },
             );
         }
 
-        let mut allowed_surfaces = BTreeMap::new();
+        let mut execution_surface_allowances = Vec::new();
         for (crate_name, raw_surfaces) in family.allowed_surfaces {
-            if !resolved.contains_key(&crate_name) {
-                return Err(ReviewedTargetsError::AllowedSurfaceTargetMissing {
-                    family: family.name.clone(),
-                    crate_name,
-                });
-            }
+            let target = resolve_allowance_target(
+                &resolved,
+                &family.name,
+                ALLOWED_SURFACES_TABLE,
+                crate_name,
+            )?;
             if raw_surfaces.is_empty() {
-                return Err(ReviewedTargetsError::EmptyAllowedSurfaces {
+                return Err(ReviewedTargetsError::EmptyAllowedTargetList {
                     family: family.name.clone(),
-                    crate_name,
+                    table: ALLOWED_SURFACES_TABLE,
+                    crate_name: target.crate_name,
                 });
             }
 
@@ -516,70 +580,86 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
                 let surface = ExecutionSurfaceKind::parse(&raw_surface).ok_or_else(|| {
                     ReviewedTargetsError::InvalidAllowedSurface {
                         family: family.name.clone(),
-                        crate_name: crate_name.clone(),
+                        crate_name: target.crate_name.clone(),
                         surface: raw_surface,
                     }
                 })?;
                 surfaces.insert(surface);
             }
 
-            allowed_surfaces.insert(crate_name, surfaces);
-        }
-
-        let mut allowed_age_exceptions = BTreeMap::new();
-        for (crate_name, version) in family.allowed_age_exceptions {
-            let Some(target) = resolved.get(&crate_name) else {
-                return Err(ReviewedTargetsError::AllowedAgeExceptionTargetMissing {
-                    family: family.name.clone(),
-                    crate_name,
-                });
-            };
-            if target.checksum_sha256().is_none() {
-                return Err(ReviewedTargetsError::AllowedAgeExceptionChecksumMissing {
-                    family: family.name.clone(),
-                    crate_name,
+            for surface in surfaces {
+                execution_surface_allowances.push(ReviewedExecutionSurfaceAllowance {
+                    binding: ReviewedAllowanceBinding {
+                        spec: target.target.spec().clone(),
+                        family: family.name.clone(),
+                        review_record: family.review_record.clone(),
+                    },
+                    surface,
                 });
             }
-            if target.version() != version {
+        }
+
+        let mut release_age_exceptions = Vec::new();
+        for (crate_name, version) in family.allowed_age_exceptions {
+            let target = resolve_allowance_target(
+                &resolved,
+                &family.name,
+                ALLOWED_AGE_EXCEPTIONS_TABLE,
+                crate_name,
+            )?;
+            let checksum_sha256 = resolve_allowance_checksum(
+                target.target,
+                &family.name,
+                ALLOWED_AGE_EXCEPTIONS_TABLE,
+                &target.crate_name,
+            )?;
+            if target.target.version() != version {
                 return Err(ReviewedTargetsError::AllowedAgeExceptionVersionMismatch {
                     family: family.name.clone(),
-                    crate_name,
+                    crate_name: target.crate_name,
                     exception_version: version,
-                    resolved_version: target.version().to_owned(),
+                    resolved_version: target.target.version().to_owned(),
                 });
             }
 
-            allowed_age_exceptions.insert(crate_name, version);
+            release_age_exceptions.push(ReviewedReleaseAgeException {
+                binding: ReviewedAllowanceBinding {
+                    spec: target.target.spec().clone(),
+                    family: family.name.clone(),
+                    review_record: family.review_record.clone(),
+                },
+                checksum_sha256: checksum_sha256.clone(),
+            });
         }
 
-        let mut allowed_advisories = BTreeMap::new();
+        let mut advisory_exceptions = Vec::new();
         for (crate_name, raw_advisories) in family.allowed_advisories {
-            let Some(target) = resolved.get(&crate_name) else {
-                return Err(ReviewedTargetsError::AllowedAdvisoryTargetMissing {
-                    family: family.name.clone(),
-                    crate_name,
-                });
-            };
+            let target = resolve_allowance_target(
+                &resolved,
+                &family.name,
+                ALLOWED_ADVISORIES_TABLE,
+                crate_name,
+            )?;
             if raw_advisories.is_empty() {
-                return Err(ReviewedTargetsError::EmptyAllowedAdvisories {
+                return Err(ReviewedTargetsError::EmptyAllowedTargetList {
                     family: family.name.clone(),
-                    crate_name,
+                    table: ALLOWED_ADVISORIES_TABLE,
+                    crate_name: target.crate_name,
                 });
             }
-            if target.checksum_sha256().is_none() {
-                return Err(ReviewedTargetsError::AllowedAdvisoryChecksumMissing {
-                    family: family.name.clone(),
-                    crate_name,
-                });
-            }
+            let checksum_sha256 = resolve_allowance_checksum(
+                target.target,
+                &family.name,
+                ALLOWED_ADVISORIES_TABLE,
+                &target.crate_name,
+            )?;
 
-            let mut advisories = Vec::with_capacity(raw_advisories.len());
             let mut advisory_ids = BTreeSet::new();
             for raw_advisory in raw_advisories {
                 let id = RustSecAdvisoryId::parse(&raw_advisory.id).map_err(|source| {
                     ReviewedTargetsError::InvalidAllowedAdvisoryId {
                         family: family.name.clone(),
-                        crate_name: crate_name.clone(),
+                        crate_name: target.crate_name.clone(),
                         advisory_id: raw_advisory.id.clone(),
                         source,
                     }
@@ -587,12 +667,11 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
                 if !advisory_ids.insert(id.clone()) {
                     return Err(ReviewedTargetsError::DuplicateAllowedAdvisory {
                         family: family.name.clone(),
-                        crate_name: crate_name.clone(),
+                        crate_name: target.crate_name.clone(),
                         advisory_id: id,
                     });
                 }
-                let spec = ExactCrateSpec::from_parts(&crate_name, target.version())
-                    .expect("parse_reviewed_targets_toml validates exact specs");
+                let spec = target.target.spec().clone();
                 if let Some(existing_family) =
                     advisory_bindings.insert((id.clone(), spec.clone()), family.name.clone())
                 {
@@ -606,17 +685,25 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
                 let review_by = parse_iso_date(&raw_advisory.review_by).map_err(|source| {
                     ReviewedTargetsError::InvalidAllowedAdvisoryReviewBy {
                         family: family.name.clone(),
-                        crate_name: crate_name.clone(),
+                        crate_name: target.crate_name.clone(),
                         advisory_id: raw_advisory.id.clone(),
                         review_by: raw_advisory.review_by.clone(),
                         source,
                     }
                 })?;
 
-                advisories.push(ReviewedAdvisory { id, review_by });
+                advisory_exceptions.push(ReviewedAdvisoryException {
+                    binding: ReviewedAllowanceBinding {
+                        spec,
+                        family: family.name.clone(),
+                        review_record: family.review_record.clone(),
+                    },
+                    advisory_id: id,
+                    checksum_sha256: checksum_sha256.clone(),
+                    review_by,
+                    expected_target: target.target.clone(),
+                });
             }
-
-            allowed_advisories.insert(crate_name, advisories);
         }
 
         rust_families.push(ReviewedRustFamily {
@@ -624,13 +711,60 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
             review_record: family.review_record,
             direct: family.direct,
             resolved,
-            allowed_surfaces,
-            allowed_age_exceptions,
-            allowed_advisories,
+            execution_surface_allowances,
+            release_age_exceptions,
+            advisory_exceptions,
         });
     }
 
     Ok(ReviewedTargets { rust_families })
+}
+
+const ALLOWED_SURFACES_TABLE: &str = "allowed_surfaces";
+const ALLOWED_AGE_EXCEPTIONS_TABLE: &str = "allowed_age_exceptions";
+const ALLOWED_ADVISORIES_TABLE: &str = "allowed_advisories";
+
+struct ResolvedAllowanceTarget<'a> {
+    crate_name: String,
+    target: &'a ReviewedResolvedTarget,
+}
+
+/// Looks up the resolved target an allowance entry references, failing
+/// closed with the table-specific "target missing" error if the crate name
+/// is absent from the family's `resolved` map.
+fn resolve_allowance_target<'a>(
+    resolved: &'a BTreeMap<String, ReviewedResolvedTarget>,
+    family: &str,
+    table: &'static str,
+    crate_name: String,
+) -> Result<ResolvedAllowanceTarget<'a>, ReviewedTargetsError> {
+    match resolved.get(&crate_name) {
+        Some(target) => Ok(ResolvedAllowanceTarget { crate_name, target }),
+        None => Err(ReviewedTargetsError::AllowedTargetMissing {
+            family: family.to_owned(),
+            table,
+            crate_name,
+        }),
+    }
+}
+
+/// Requires the resolved target carry a checksum, failing closed with the
+/// table-specific "checksum missing" error otherwise. Release-age and
+/// advisory exceptions are checksum-bound: an artefact swap on crates.io
+/// must not silently keep matching a version-only reviewed target.
+fn resolve_allowance_checksum<'a>(
+    target: &'a ReviewedResolvedTarget,
+    family: &str,
+    table: &'static str,
+    crate_name: &str,
+) -> Result<&'a Sha256Digest, ReviewedTargetsError> {
+    target
+        .checksum_sha256()
+        .ok_or_else(|| ReviewedTargetsError::AllowedTargetChecksumMissing {
+            family: family.to_owned(),
+            table,
+            crate_name: crate_name.to_owned(),
+        })
 }
 
 fn parse_iso_date(value: &str) -> Result<Date, IsoDateError> {
@@ -757,12 +891,20 @@ pub enum ReviewedTargetsError {
         family: String,
         review_record: String,
     },
-    #[error("family {family:?} allowed_surfaces entry for {crate_name:?} is empty")]
-    EmptyAllowedSurfaces { family: String, crate_name: String },
+    #[error("family {family:?} {table} entry for {crate_name:?} is empty")]
+    EmptyAllowedTargetList {
+        family: String,
+        table: &'static str,
+        crate_name: String,
+    },
     #[error(
-        "family {family:?} allowed_surfaces entry for {crate_name:?} references a crate absent from the same resolved map"
+        "family {family:?} {table} entry for {crate_name:?} references a crate absent from the same resolved map"
     )]
-    AllowedSurfaceTargetMissing { family: String, crate_name: String },
+    AllowedTargetMissing {
+        family: String,
+        table: &'static str,
+        crate_name: String,
+    },
     #[error(
         "family {family:?} allowed_surfaces entry for {crate_name:?} has unknown surface {surface:?}"
     )]
@@ -772,13 +914,13 @@ pub enum ReviewedTargetsError {
         surface: String,
     },
     #[error(
-        "family {family:?} allowed_age_exceptions entry for {crate_name:?} references a crate absent from the same resolved map"
+        "family {family:?} {table} entry for {crate_name:?} requires the resolved target to carry checksum_sha256"
     )]
-    AllowedAgeExceptionTargetMissing { family: String, crate_name: String },
-    #[error(
-        "family {family:?} allowed_age_exceptions entry for {crate_name:?} requires the resolved target to carry checksum_sha256"
-    )]
-    AllowedAgeExceptionChecksumMissing { family: String, crate_name: String },
+    AllowedTargetChecksumMissing {
+        family: String,
+        table: &'static str,
+        crate_name: String,
+    },
     #[error(
         "family {family:?} allowed_age_exceptions entry for {crate_name:?} version {exception_version:?} does not match resolved version {resolved_version:?}"
     )]
@@ -788,8 +930,6 @@ pub enum ReviewedTargetsError {
         exception_version: String,
         resolved_version: String,
     },
-    #[error("family {family:?} allowed_advisories entry for {crate_name:?} is empty")]
-    EmptyAllowedAdvisories { family: String, crate_name: String },
     #[error(
         "family {family:?} allowed_advisories entry for {crate_name:?} contains duplicate advisory {advisory_id}"
     )]
@@ -807,14 +947,6 @@ pub enum ReviewedTargetsError {
         first_family: String,
         second_family: String,
     },
-    #[error(
-        "family {family:?} allowed_advisories entry for {crate_name:?} references a crate absent from the same resolved map"
-    )]
-    AllowedAdvisoryTargetMissing { family: String, crate_name: String },
-    #[error(
-        "family {family:?} allowed_advisories entry for {crate_name:?} requires the resolved target to carry checksum_sha256"
-    )]
-    AllowedAdvisoryChecksumMissing { family: String, crate_name: String },
     #[error(
         "family {family:?} allowed_advisories entry for {crate_name:?} has invalid advisory id {advisory_id:?}: {source}"
     )]
@@ -838,47 +970,47 @@ pub enum ReviewedTargetsError {
     },
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
-struct RawReviewedTargets {
+pub(crate) struct RawReviewedTargets {
     #[serde(default)]
-    rust: RawRustReviewedTargets,
+    pub(crate) rust: RawRustReviewedTargets,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
-struct RawRustReviewedTargets {
+pub(crate) struct RawRustReviewedTargets {
     #[serde(default)]
-    families: Vec<RawReviewedRustFamily>,
+    pub(crate) families: Vec<RawReviewedRustFamily>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawReviewedRustFamily {
-    name: String,
-    review_record: String,
-    #[serde(default)]
-    direct: BTreeMap<String, String>,
-    #[serde(default)]
-    resolved: BTreeMap<String, RawReviewedResolvedTarget>,
-    #[serde(default)]
-    allowed_surfaces: BTreeMap<String, Vec<String>>,
-    #[serde(default)]
-    allowed_age_exceptions: BTreeMap<String, String>,
-    #[serde(default)]
-    allowed_advisories: BTreeMap<String, Vec<RawReviewedAdvisory>>,
+pub(crate) struct RawReviewedRustFamily {
+    pub(crate) name: String,
+    pub(crate) review_record: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) direct: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) resolved: BTreeMap<String, RawReviewedResolvedTarget>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) allowed_surfaces: BTreeMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) allowed_age_exceptions: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) allowed_advisories: BTreeMap<String, Vec<RawReviewedAdvisory>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawReviewedAdvisory {
+pub(crate) struct RawReviewedAdvisory {
     id: String,
     review_by: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
-enum RawReviewedResolvedTarget {
+pub(crate) enum RawReviewedResolvedTarget {
     Version(String),
     RegistryArtifact {
         version: String,
@@ -888,7 +1020,10 @@ enum RawReviewedResolvedTarget {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExecutionSurfaceKind, ReviewedTargetsError, parse_reviewed_targets_toml};
+    use super::{
+        ExecutionSurfaceKind, ReviewedExecutionSurfaceAllowance, ReviewedTargetsError,
+        parse_reviewed_targets_toml,
+    };
     use crate::Sha256Digest;
     use time::{Date, Month};
 
@@ -952,21 +1087,18 @@ serde = [
                 .and_then(|target| target.checksum_sha256()),
             None
         );
+        let allowances = targets.execution_surface_allowances();
+        assert_eq!(allowances.len(), 2);
         assert_eq!(
-            family
-                .allowed_surfaces()
-                .get("serde")
-                .expect("allowance should parse")
+            allowances
                 .iter()
-                .copied()
+                .map(ReviewedExecutionSurfaceAllowance::surface)
                 .collect::<Vec<_>>(),
             vec![
                 ExecutionSurfaceKind::BuildRs,
                 ExecutionSurfaceKind::ProcMacro
             ]
         );
-        let allowances = targets.execution_surface_allowances();
-        assert_eq!(allowances.len(), 2);
         assert_eq!(allowances[0].spec().to_string(), "serde@1.0.228");
         assert_eq!(allowances[0].family(), "serde-family");
         assert_eq!(
@@ -985,17 +1117,7 @@ serde = [
             age_exceptions[0].review_record(),
             "docs/dependency-reviews/2026-05-27-serde.md"
         );
-        let advisories = family
-            .allowed_advisories()
-            .get("serde")
-            .expect("advisory exception should parse");
-        assert_eq!(advisories.len(), 1);
-        assert_eq!(advisories[0].id().as_str(), "RUSTSEC-2026-0001");
-        assert_eq!(
-            advisories[0].review_by(),
-            Date::from_calendar_date(2026, Month::September, 21)
-                .expect("test date should be valid")
-        );
+        assert_eq!(family.advisory_exceptions().len(), 1);
         let advisory_exceptions = targets.advisory_exceptions();
         assert_eq!(advisory_exceptions.len(), 1);
         assert_eq!(
@@ -1425,7 +1547,7 @@ native-sys = []
 
         assert!(matches!(
             error,
-            ReviewedTargetsError::EmptyAllowedSurfaces { .. }
+            ReviewedTargetsError::EmptyAllowedTargetList { .. }
         ));
     }
 
@@ -1450,7 +1572,7 @@ native-sys = ["native-sys"]
 
         assert!(matches!(
             error,
-            ReviewedTargetsError::AllowedSurfaceTargetMissing { .. }
+            ReviewedTargetsError::AllowedTargetMissing { .. }
         ));
     }
 
@@ -1475,7 +1597,7 @@ other = "1.0.0"
 
         assert!(matches!(
             error,
-            ReviewedTargetsError::AllowedAgeExceptionTargetMissing { .. }
+            ReviewedTargetsError::AllowedTargetMissing { .. }
         ));
     }
 
@@ -1500,7 +1622,7 @@ serde = "1.0.228"
 
         assert!(matches!(
             error,
-            ReviewedTargetsError::AllowedAgeExceptionChecksumMissing { .. }
+            ReviewedTargetsError::AllowedTargetChecksumMissing { .. }
         ));
     }
 
@@ -1578,7 +1700,7 @@ serde = []
 
         assert!(matches!(
             error,
-            ReviewedTargetsError::EmptyAllowedAdvisories { .. }
+            ReviewedTargetsError::EmptyAllowedTargetList { .. }
         ));
     }
 
@@ -1605,7 +1727,7 @@ other = [
 
         assert!(matches!(
             error,
-            ReviewedTargetsError::AllowedAdvisoryTargetMissing { .. }
+            ReviewedTargetsError::AllowedTargetMissing { .. }
         ));
     }
 
@@ -1632,7 +1754,7 @@ serde = [
 
         assert!(matches!(
             error,
-            ReviewedTargetsError::AllowedAdvisoryChecksumMissing { .. }
+            ReviewedTargetsError::AllowedTargetChecksumMissing { .. }
         ));
     }
 

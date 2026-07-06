@@ -7,7 +7,8 @@ use crate::reviewed_targets::ExecutionSurfaceKind;
 use crate::{
     CargoManifestDependency, CargoMetadata, CratesIoClient, ExactCrateSpec, HighScrutinyConfig,
     Lockfile, ReleaseAgeOutcome, ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException,
-    Sha256Digest, changed_crates_io_checksums, check_release_age_at, package_surfaces,
+    Sha256Digest, changed_crates_io_checksums, check_release_age_at,
+    is_native_sys_execution_surface, package_surfaces,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -261,27 +262,84 @@ impl fmt::Display for InspectionFailure {
     }
 }
 
+/// A single detected item from a Rust dependency-update assessment.
+///
+/// Every item is recorded regardless of the `HighScrutinyConfig` toggles: the
+/// per-category accessors on `RustAssessmentReport` always report the full
+/// detected set, so the "Rust Assessment" detail block never hides what was
+/// found. Only [`RustAssessmentReport::classification`] and the aggregated
+/// [`RustAssessmentReport::findings`] apply the high-scrutiny gate, and that
+/// gate is applied once, at construction, rather than at every accessor call.
+///
+/// Declaration order matches the fixed rendering order of the blocking, then
+/// elevated, finding sections: adding a new gate means adding one variant
+/// here and one push site in [`assess_rust_update_at`].
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum RustAssessmentItem {
+    AgeViolation(ReleaseAgeViolation),
+    YankedVersion(ExactCrateSpec),
+    ReleaseAgeExceptionArtefactMismatch(ReleaseAgeExceptionArtefactMismatch),
+    LockedChecksumDrift(LockedChecksumDrift),
+    InspectionFailure(InspectionFailure),
+    NewDirectDependency(CargoManifestDependency),
+    NonCratesIoSourceChange(NonCratesIoSourceChange),
+    NativeSysCrate(ExactCrateSpec),
+    BuildRsSurface(ExactCrateSpec),
+    ProcMacroSurface(ExactCrateSpec),
+}
+
+impl RustAssessmentItem {
+    fn category(&self) -> RustAssessmentFindingCategory {
+        match self {
+            Self::AgeViolation(_) => RustAssessmentFindingCategory::AgeViolations,
+            Self::YankedVersion(_) => RustAssessmentFindingCategory::YankedVersions,
+            Self::ReleaseAgeExceptionArtefactMismatch(_) => {
+                RustAssessmentFindingCategory::ReleaseAgeExceptionArtefactMismatches
+            }
+            Self::LockedChecksumDrift(_) => RustAssessmentFindingCategory::LockedChecksumDrifts,
+            Self::InspectionFailure(_) => RustAssessmentFindingCategory::InspectionFailures,
+            Self::NewDirectDependency(_) => RustAssessmentFindingCategory::NewDirectDependencies,
+            Self::NonCratesIoSourceChange(_) => {
+                RustAssessmentFindingCategory::NonCratesIoSourceChanges
+            }
+            Self::NativeSysCrate(_) => RustAssessmentFindingCategory::NativeSysCrates,
+            Self::BuildRsSurface(_) => RustAssessmentFindingCategory::BuildRsSurfaces,
+            Self::ProcMacroSurface(_) => RustAssessmentFindingCategory::ProcMacroSurfaces,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustAssessmentReport {
     newly_selected_lock_entries: usize,
     newly_introduced_crate_names: usize,
-    new_direct_dependencies: Vec<CargoManifestDependency>,
-    non_crates_io_direct_dependencies: Vec<CargoManifestDependency>,
-    age_violations: Vec<ReleaseAgeViolation>,
-    yanked_versions: Vec<ExactCrateSpec>,
-    release_age_exception_mismatches: Vec<ReleaseAgeExceptionArtefactMismatch>,
-    locked_checksum_drifts: Vec<LockedChecksumDrift>,
-    non_crates_io_source_changes: Vec<NonCratesIoSourceChange>,
-    native_sys_crates: Vec<ExactCrateSpec>,
-    build_rs_surfaces: Vec<ExactCrateSpec>,
-    proc_macro_surfaces: Vec<ExactCrateSpec>,
+    items: Vec<RustAssessmentItem>,
     allowed_execution_surfaces: Vec<ReviewedExecutionSurfaceAllowance>,
     allowed_release_age_exceptions: Vec<ReviewedReleaseAgeException>,
-    inspection_failures: Vec<InspectionFailure>,
     findings: Vec<RustAssessmentFinding>,
 }
 
 impl RustAssessmentReport {
+    fn new(
+        newly_selected_lock_entries: usize,
+        newly_introduced_crate_names: usize,
+        items: Vec<RustAssessmentItem>,
+        allowed_execution_surfaces: Vec<ReviewedExecutionSurfaceAllowance>,
+        allowed_release_age_exceptions: Vec<ReviewedReleaseAgeException>,
+        high_scrutiny: &HighScrutinyConfig,
+    ) -> Self {
+        let findings = aggregate_findings(&items, high_scrutiny);
+
+        Self {
+            newly_selected_lock_entries,
+            newly_introduced_crate_names,
+            items,
+            allowed_execution_surfaces,
+            allowed_release_age_exceptions,
+            findings,
+        }
+    }
+
     pub fn classification(&self) -> RustAssessmentClassification {
         if self
             .findings
@@ -304,44 +362,101 @@ impl RustAssessmentReport {
         self.newly_introduced_crate_names
     }
 
-    pub fn new_direct_dependencies(&self) -> &[CargoManifestDependency] {
-        &self.new_direct_dependencies
+    pub fn new_direct_dependencies(&self) -> Vec<&CargoManifestDependency> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::NewDirectDependency(dependency) => Some(dependency),
+                _ => None,
+            })
+            .collect()
     }
 
-    pub fn non_crates_io_direct_dependencies(&self) -> &[CargoManifestDependency] {
-        &self.non_crates_io_direct_dependencies
+    pub fn non_crates_io_direct_dependencies(&self) -> Vec<&CargoManifestDependency> {
+        self.new_direct_dependencies()
+            .into_iter()
+            .filter(|dependency| dependency.source_kind().is_non_crates_io())
+            .collect()
     }
 
-    pub fn age_violations(&self) -> &[ReleaseAgeViolation] {
-        &self.age_violations
+    pub fn age_violations(&self) -> Vec<&ReleaseAgeViolation> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::AgeViolation(violation) => Some(violation),
+                _ => None,
+            })
+            .collect()
     }
 
-    pub fn yanked_versions(&self) -> &[ExactCrateSpec] {
-        &self.yanked_versions
+    pub fn yanked_versions(&self) -> Vec<&ExactCrateSpec> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::YankedVersion(spec) => Some(spec),
+                _ => None,
+            })
+            .collect()
     }
 
-    pub fn release_age_exception_mismatches(&self) -> &[ReleaseAgeExceptionArtefactMismatch] {
-        &self.release_age_exception_mismatches
+    pub fn release_age_exception_mismatches(&self) -> Vec<&ReleaseAgeExceptionArtefactMismatch> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::ReleaseAgeExceptionArtefactMismatch(mismatch) => Some(mismatch),
+                _ => None,
+            })
+            .collect()
     }
 
-    pub fn locked_checksum_drifts(&self) -> &[LockedChecksumDrift] {
-        &self.locked_checksum_drifts
+    pub fn locked_checksum_drifts(&self) -> Vec<&LockedChecksumDrift> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::LockedChecksumDrift(drift) => Some(drift),
+                _ => None,
+            })
+            .collect()
     }
 
-    pub fn non_crates_io_source_changes(&self) -> &[NonCratesIoSourceChange] {
-        &self.non_crates_io_source_changes
+    pub fn non_crates_io_source_changes(&self) -> Vec<&NonCratesIoSourceChange> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::NonCratesIoSourceChange(change) => Some(change),
+                _ => None,
+            })
+            .collect()
     }
 
-    pub fn native_sys_crates(&self) -> &[ExactCrateSpec] {
-        &self.native_sys_crates
+    pub fn native_sys_crates(&self) -> Vec<&ExactCrateSpec> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::NativeSysCrate(spec) => Some(spec),
+                _ => None,
+            })
+            .collect()
     }
 
-    pub fn build_rs_surfaces(&self) -> &[ExactCrateSpec] {
-        &self.build_rs_surfaces
+    pub fn build_rs_surfaces(&self) -> Vec<&ExactCrateSpec> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::BuildRsSurface(spec) => Some(spec),
+                _ => None,
+            })
+            .collect()
     }
 
-    pub fn proc_macro_surfaces(&self) -> &[ExactCrateSpec] {
-        &self.proc_macro_surfaces
+    pub fn proc_macro_surfaces(&self) -> Vec<&ExactCrateSpec> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::ProcMacroSurface(spec) => Some(spec),
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn allowed_execution_surfaces(&self) -> &[ReviewedExecutionSurfaceAllowance] {
@@ -352,8 +467,14 @@ impl RustAssessmentReport {
         &self.allowed_release_age_exceptions
     }
 
-    pub fn inspection_failures(&self) -> &[InspectionFailure] {
-        &self.inspection_failures
+    pub fn inspection_failures(&self) -> Vec<&InspectionFailure> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                RustAssessmentItem::InspectionFailure(failure) => Some(failure),
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn findings(&self) -> &[RustAssessmentFinding] {
@@ -361,32 +482,81 @@ impl RustAssessmentReport {
     }
 }
 
-pub fn assess_rust_update<C>(
-    client: &C,
-    current_lockfile: &Lockfile,
-    base_lockfile: &Lockfile,
-    current_direct_dependencies: &[CargoManifestDependency],
-    base_direct_dependencies: &[CargoManifestDependency],
-    metadata: &CargoMetadata,
-    minimum_days: u64,
+/// Aggregates detected items into the coarse per-category findings that drive
+/// classification and the blocking/elevated summary sections.
+///
+/// Blocking categories count whenever their item is present; elevated
+/// categories additionally require the matching `high_scrutiny` toggle. This
+/// runs once, after every item has been detected, rather than being decided
+/// item-by-item at push time, so a category either counts in full or not at
+/// all -- matching the historical behaviour where high-scrutiny toggles are
+/// per-category switches, not per-item ones.
+fn aggregate_findings(
+    items: &[RustAssessmentItem],
     high_scrutiny: &HighScrutinyConfig,
-) -> RustAssessmentReport
-where
-    C: CratesIoClient + ?Sized,
-{
-    assess_rust_update_at(
-        client,
-        current_lockfile,
-        base_lockfile,
-        current_direct_dependencies,
-        base_direct_dependencies,
-        metadata,
-        minimum_days,
-        high_scrutiny,
-        &[],
-        &[],
-        OffsetDateTime::now_utc(),
-    )
+) -> Vec<RustAssessmentFinding> {
+    let has = |category: RustAssessmentFindingCategory| {
+        items.iter().any(|item| item.category() == category)
+    };
+    let has_non_crates_io_direct = || {
+        items.iter().any(|item| match item {
+            RustAssessmentItem::NewDirectDependency(dependency) => {
+                dependency.source_kind().is_non_crates_io()
+            }
+            _ => false,
+        })
+    };
+
+    let mut findings = Vec::new();
+
+    for category in [
+        RustAssessmentFindingCategory::AgeViolations,
+        RustAssessmentFindingCategory::YankedVersions,
+        RustAssessmentFindingCategory::ReleaseAgeExceptionArtefactMismatches,
+        RustAssessmentFindingCategory::LockedChecksumDrifts,
+        RustAssessmentFindingCategory::InspectionFailures,
+    ] {
+        if has(category) {
+            findings.push(RustAssessmentFinding::blocking(category));
+        }
+    }
+
+    if high_scrutiny.new_direct_dependencies
+        && has(RustAssessmentFindingCategory::NewDirectDependencies)
+    {
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::NewDirectDependencies,
+        ));
+    }
+    if high_scrutiny.non_crates_io_direct_dependencies && has_non_crates_io_direct() {
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::NonCratesIoDirectDependencies,
+        ));
+    }
+    if high_scrutiny.non_crates_io_source_changes
+        && has(RustAssessmentFindingCategory::NonCratesIoSourceChanges)
+    {
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::NonCratesIoSourceChanges,
+        ));
+    }
+    if high_scrutiny.native_sys_crates && has(RustAssessmentFindingCategory::NativeSysCrates) {
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::NativeSysCrates,
+        ));
+    }
+    if high_scrutiny.build_rs_changes && has(RustAssessmentFindingCategory::BuildRsSurfaces) {
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::BuildRsSurfaces,
+        ));
+    }
+    if high_scrutiny.proc_macro_changes && has(RustAssessmentFindingCategory::ProcMacroSurfaces) {
+        findings.push(RustAssessmentFinding::elevated(
+            RustAssessmentFindingCategory::ProcMacroSurfaces,
+        ));
+    }
+
+    findings
 }
 
 /// Assess a Rust dependency update at a fixed timestamp.
@@ -438,44 +608,37 @@ where
         current_direct_dependencies.iter().cloned().collect();
     let base_direct: HashSet<CargoManifestDependency> =
         base_direct_dependencies.iter().cloned().collect();
-    let mut new_direct_dependencies = current_direct
+
+    let mut items = current_direct
         .difference(&base_direct)
         .cloned()
-        .collect::<Vec<_>>();
-    let mut non_crates_io_direct_dependencies = current_direct
-        .difference(&base_direct)
-        .filter(|dependency| dependency.source_kind().is_non_crates_io())
-        .cloned()
+        .map(RustAssessmentItem::NewDirectDependency)
         .collect::<Vec<_>>();
 
-    let mut age_violations = Vec::new();
-    let mut yanked_versions = Vec::new();
-    let mut release_age_exception_mismatches = Vec::new();
-    let mut locked_checksum_drifts = changed_crates_io_checksums(current_lockfile, base_lockfile)
-        .into_iter()
-        .map(|change| {
-            LockedChecksumDrift::new(
-                change.spec().clone(),
-                change.base_checksum().clone(),
-                change.current_checksum().clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let mut non_crates_io_source_changes = Vec::new();
-    let mut native_sys_crates = Vec::new();
-    let mut build_rs_surfaces = Vec::new();
-    let mut proc_macro_surfaces = Vec::new();
+    items.extend(
+        changed_crates_io_checksums(current_lockfile, base_lockfile)
+            .into_iter()
+            .map(|change| {
+                RustAssessmentItem::LockedChecksumDrift(LockedChecksumDrift::new(
+                    change.spec().clone(),
+                    change.base_checksum().clone(),
+                    change.current_checksum().clone(),
+                ))
+            }),
+    );
+
     let mut allowed_execution_surfaces = Vec::new();
     let mut allowed_release_age_exceptions = Vec::new();
-    let mut inspection_failures = Vec::new();
 
     for package in &added_packages {
         let spec = package.exact_spec().clone();
 
         if !package.is_crates_io() {
-            non_crates_io_source_changes.push(NonCratesIoSourceChange::new(
-                spec.clone(),
-                package.source.clone().unwrap_or_else(|| "none".to_owned()),
+            items.push(RustAssessmentItem::NonCratesIoSourceChange(
+                NonCratesIoSourceChange::new(
+                    spec.clone(),
+                    package.source.clone().unwrap_or_else(|| "none".to_owned()),
+                ),
             ));
         } else {
             let age_exception = reviewed_release_age_exceptions
@@ -490,16 +653,20 @@ where
                         allowed_release_age_exceptions.push(exception.clone());
                     }
                     ReleaseAgeOutcome::TooFresh => {
-                        age_violations
-                            .push(ReleaseAgeViolation::new(spec.clone(), report.age_seconds()));
+                        items.push(RustAssessmentItem::AgeViolation(ReleaseAgeViolation::new(
+                            spec.clone(),
+                            report.age_seconds(),
+                        )));
                     }
-                    ReleaseAgeOutcome::Yanked => yanked_versions.push(spec.clone()),
+                    ReleaseAgeOutcome::Yanked => {
+                        items.push(RustAssessmentItem::YankedVersion(spec.clone()));
+                    }
                     ReleaseAgeOutcome::ExceptionArtefactMismatch {
                         family,
                         review_record,
                         expected,
                         found,
-                    } => release_age_exception_mismatches.push(
+                    } => items.push(RustAssessmentItem::ReleaseAgeExceptionArtefactMismatch(
                         ReleaseAgeExceptionArtefactMismatch::new(
                             spec.clone(),
                             family.clone(),
@@ -507,24 +674,27 @@ where
                             expected.clone(),
                             found.clone(),
                         ),
-                    ),
+                    )),
                 },
                 Err(error) => {
-                    inspection_failures
-                        .push(InspectionFailure::new(spec.clone(), error.to_string()));
+                    items.push(RustAssessmentItem::InspectionFailure(
+                        InspectionFailure::new(spec.clone(), error.to_string()),
+                    ));
                 }
             }
         }
 
         match package_surfaces(metadata, &spec) {
             Ok(surfaces) => {
-                if surfaces.has_native_links || spec.is_native_sys() {
+                if is_native_sys_execution_surface(spec.is_native_sys(), surfaces.has_native_links)
+                {
                     push_execution_surface(
                         &spec,
                         ExecutionSurfaceKind::NativeSys,
                         reviewed_execution_surface_allowances,
-                        &mut native_sys_crates,
+                        &mut items,
                         &mut allowed_execution_surfaces,
+                        RustAssessmentItem::NativeSysCrate,
                     );
                 }
                 if surfaces.has_build_rs {
@@ -532,8 +702,9 @@ where
                         &spec,
                         ExecutionSurfaceKind::BuildRs,
                         reviewed_execution_surface_allowances,
-                        &mut build_rs_surfaces,
+                        &mut items,
                         &mut allowed_execution_surfaces,
+                        RustAssessmentItem::BuildRsSurface,
                     );
                 }
                 if surfaces.is_proc_macro {
@@ -541,124 +712,48 @@ where
                         &spec,
                         ExecutionSurfaceKind::ProcMacro,
                         reviewed_execution_surface_allowances,
-                        &mut proc_macro_surfaces,
+                        &mut items,
                         &mut allowed_execution_surfaces,
+                        RustAssessmentItem::ProcMacroSurface,
                     );
                 }
             }
             Err(error) => {
-                inspection_failures.push(InspectionFailure::new(spec, error.to_string()));
+                items.push(RustAssessmentItem::InspectionFailure(
+                    InspectionFailure::new(spec, error.to_string()),
+                ));
             }
         }
     }
 
-    new_direct_dependencies.sort();
-    non_crates_io_direct_dependencies.sort();
-    age_violations.sort();
-    yanked_versions.sort();
-    release_age_exception_mismatches.sort();
-    locked_checksum_drifts.sort();
-    non_crates_io_source_changes.sort();
-    native_sys_crates.sort();
-    build_rs_surfaces.sort();
-    proc_macro_surfaces.sort();
+    items.sort();
     allowed_execution_surfaces.sort();
     allowed_release_age_exceptions.sort();
-    inspection_failures.sort();
 
-    let mut findings = Vec::new();
-
-    if !age_violations.is_empty() {
-        findings.push(RustAssessmentFinding::blocking(
-            RustAssessmentFindingCategory::AgeViolations,
-        ));
-    }
-    if !yanked_versions.is_empty() {
-        findings.push(RustAssessmentFinding::blocking(
-            RustAssessmentFindingCategory::YankedVersions,
-        ));
-    }
-    if !release_age_exception_mismatches.is_empty() {
-        findings.push(RustAssessmentFinding::blocking(
-            RustAssessmentFindingCategory::ReleaseAgeExceptionArtefactMismatches,
-        ));
-    }
-    if !locked_checksum_drifts.is_empty() {
-        findings.push(RustAssessmentFinding::blocking(
-            RustAssessmentFindingCategory::LockedChecksumDrifts,
-        ));
-    }
-    if !inspection_failures.is_empty() {
-        findings.push(RustAssessmentFinding::blocking(
-            RustAssessmentFindingCategory::InspectionFailures,
-        ));
-    }
-    if high_scrutiny.new_direct_dependencies && !new_direct_dependencies.is_empty() {
-        findings.push(RustAssessmentFinding::elevated(
-            RustAssessmentFindingCategory::NewDirectDependencies,
-        ));
-    }
-    if high_scrutiny.non_crates_io_direct_dependencies
-        && !non_crates_io_direct_dependencies.is_empty()
-    {
-        findings.push(RustAssessmentFinding::elevated(
-            RustAssessmentFindingCategory::NonCratesIoDirectDependencies,
-        ));
-    }
-    if high_scrutiny.non_crates_io_source_changes && !non_crates_io_source_changes.is_empty() {
-        findings.push(RustAssessmentFinding::elevated(
-            RustAssessmentFindingCategory::NonCratesIoSourceChanges,
-        ));
-    }
-    if high_scrutiny.native_sys_crates && !native_sys_crates.is_empty() {
-        findings.push(RustAssessmentFinding::elevated(
-            RustAssessmentFindingCategory::NativeSysCrates,
-        ));
-    }
-    if high_scrutiny.build_rs_changes && !build_rs_surfaces.is_empty() {
-        findings.push(RustAssessmentFinding::elevated(
-            RustAssessmentFindingCategory::BuildRsSurfaces,
-        ));
-    }
-    if high_scrutiny.proc_macro_changes && !proc_macro_surfaces.is_empty() {
-        findings.push(RustAssessmentFinding::elevated(
-            RustAssessmentFindingCategory::ProcMacroSurfaces,
-        ));
-    }
-
-    RustAssessmentReport {
-        newly_selected_lock_entries: added_packages.len(),
-        newly_introduced_crate_names: newly_introduced_crate_names.len(),
-        new_direct_dependencies,
-        non_crates_io_direct_dependencies,
-        age_violations,
-        yanked_versions,
-        release_age_exception_mismatches,
-        locked_checksum_drifts,
-        non_crates_io_source_changes,
-        native_sys_crates,
-        build_rs_surfaces,
-        proc_macro_surfaces,
+    RustAssessmentReport::new(
+        added_packages.len(),
+        newly_introduced_crate_names.len(),
+        items,
         allowed_execution_surfaces,
         allowed_release_age_exceptions,
-        inspection_failures,
-        findings,
-    }
+        high_scrutiny,
+    )
 }
 
 fn push_execution_surface(
     spec: &ExactCrateSpec,
     surface: ExecutionSurfaceKind,
     allowances: &[ReviewedExecutionSurfaceAllowance],
-    elevated_surfaces: &mut Vec<ExactCrateSpec>,
+    items: &mut Vec<RustAssessmentItem>,
     allowed_surfaces: &mut Vec<ReviewedExecutionSurfaceAllowance>,
+    make_item: impl FnOnce(ExactCrateSpec) -> RustAssessmentItem,
 ) {
     match allowances
         .iter()
         .find(|allowance| allowance.spec() == spec && allowance.surface() == surface)
     {
         Some(allowance) => allowed_surfaces.push(allowance.clone()),
-        None => elevated_surfaces.push(spec.clone()),
+        None => items.push(make_item(spec.clone())),
     }
 }
 
@@ -1092,7 +1187,7 @@ version = "0.1.0"
         assert_eq!(report.non_crates_io_source_changes()[0].source(), "none");
         assert_eq!(
             report.build_rs_surfaces(),
-            &[crate::ExactCrateSpec::from_parts("local-build", "0.1.0").expect("valid spec")]
+            vec![&crate::ExactCrateSpec::from_parts("local-build", "0.1.0").expect("valid spec")]
         );
     }
 
@@ -1144,7 +1239,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         assert_eq!(report.inspection_failures().len(), 1);
         assert_eq!(
             report.build_rs_surfaces(),
-            &[crate::ExactCrateSpec::from_parts("demo", "1.2.3").expect("valid spec")]
+            vec![&crate::ExactCrateSpec::from_parts("demo", "1.2.3").expect("valid spec")]
         );
     }
 
@@ -1198,7 +1293,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         );
         assert_eq!(
             report.native_sys_crates(),
-            &[crate::ExactCrateSpec::from_parts("native-link", "1.2.3").expect("valid spec")]
+            vec![&crate::ExactCrateSpec::from_parts("native-link", "1.2.3").expect("valid spec")]
         );
     }
 
@@ -1254,7 +1349,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
         assert_eq!(
             report.native_sys_crates(),
-            &[crate::ExactCrateSpec::from_parts("native-sys", "1.2.4").expect("valid spec")]
+            vec![&crate::ExactCrateSpec::from_parts("native-sys", "1.2.4").expect("valid spec")]
         );
     }
 
@@ -1326,13 +1421,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         );
         assert_eq!(
             report.proc_macro_surfaces(),
-            &[crate::ExactCrateSpec::from_parts("demo-sys", "1.2.3").expect("valid spec")]
+            vec![&crate::ExactCrateSpec::from_parts("demo-sys", "1.2.3").expect("valid spec")]
         );
         assert_eq!(
             report.native_sys_crates(),
-            &[
-                crate::ExactCrateSpec::from_parts("demo-sys", "1.2.3").expect("valid spec"),
-                crate::ExactCrateSpec::from_parts("drift-sys", "1.2.4").expect("valid spec"),
+            vec![
+                &crate::ExactCrateSpec::from_parts("demo-sys", "1.2.3").expect("valid spec"),
+                &crate::ExactCrateSpec::from_parts("drift-sys", "1.2.4").expect("valid spec"),
             ]
         );
         assert_eq!(report.allowed_execution_surfaces().len(), 1);

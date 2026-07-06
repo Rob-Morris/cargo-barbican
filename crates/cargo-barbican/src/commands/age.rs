@@ -4,11 +4,9 @@ use std::process::ExitCode;
 
 use barbican::{CratesIoClient, OffsetDateTime};
 
-use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
-
 use super::{
-    CommandError, exit_code_from_policy_failures, finish_release_age_checks, load_config,
-    load_reviewed_release_age_exceptions, parse_specs,
+    CommandError, exit_code_from_policy_failures, finish_release_age_checks,
+    load_release_age_context, parse_specs,
 };
 
 pub(super) fn run_age<C>(
@@ -23,9 +21,8 @@ pub(super) fn run_age<C>(
 where
     C: CratesIoClient + ?Sized,
 {
-    let minimum_days = min_age_days.unwrap_or(load_config(current_dir)?.release_age.minimum_days);
-    let reviewed_release_age_exceptions =
-        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
+    let (minimum_days, reviewed_release_age_exceptions) =
+        load_release_age_context(current_dir, min_age_days)?;
     let parse_result = parse_specs(raw_specs, stderr)?;
     let age_exit = finish_release_age_checks(
         &parse_result.specs,

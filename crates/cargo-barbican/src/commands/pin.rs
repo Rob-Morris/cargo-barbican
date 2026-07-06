@@ -4,17 +4,17 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CargoManifestDirectRequirement, ExactCrateSpec, LockedPackage, OffsetDateTime, PinAddTarget,
-    ReviewedTargets, compose_pin_family_stub, compose_pin_review_record, parse_pin_add_target,
-    parse_reviewed_targets_toml, pin_family_name, pin_review_record_path,
+    OffsetDateTime, PinAddRejection, parse_pin_add_target, parse_reviewed_targets_toml,
+    pin_family_name, pin_review_record_path, plan_pin_add,
 };
 
 use crate::cli::{PinCommand, REVIEWED_TARGETS_CONFIG_FILE};
 
+use super::lockfile_ops::write_file_atomically;
 use super::scaffold_fs::{ScaffoldState, confined_scaffold_state, write_new_file};
 use super::{
     CommandError, REVIEW_RECORDS_DIR, fail, load_current_manifest_direct_requirements,
-    load_reviewed_targets,
+    load_reviewed_targets, read_optional_text_no_symlink,
 };
 
 pub(super) fn run_pin(
@@ -55,99 +55,59 @@ fn run_pin_add(
     };
 
     let lockfile = super::load_current_lockfile(current_dir, Path::new("Cargo.lock"))?;
-    let matching_packages = lockfile
-        .packages()
-        .iter()
-        .filter(|package| package.name == target.crate_name())
-        .collect::<Vec<_>>();
-    if matching_packages.is_empty() {
-        return fail(
-            stderr,
-            format!(
-                "pin add {}: not present in Cargo.lock; add the dependency and run `cargo barbican resolve` first",
-                target.crate_name()
-            ),
-        );
-    }
-
-    let package = match select_locked_package(&matching_packages, &target) {
-        Ok(package) => package,
-        Err(message) => return fail(stderr, message),
-    };
-
-    if let Some(covering_family) = family_covering_crate(&reviewed_targets, target.crate_name()) {
-        return fail(
-            stderr,
-            format!(
-                "pin add {}: crate is already covered by reviewed family \"{covering_family}\" in {REVIEWED_TARGETS_CONFIG_FILE}",
-                target.crate_name()
-            ),
-        );
-    }
-
+    let manifest_requirements = load_current_manifest_direct_requirements(current_dir)?;
     let date = now.date();
     let family_name = pin_family_name(target.crate_name(), date);
-    if reviewed_targets
-        .rust_families()
-        .iter()
-        .any(|family| family.name() == family_name)
-    {
-        return fail(
-            stderr,
-            format!(
-                "pin add {}: reviewed family \"{family_name}\" already exists in {REVIEWED_TARGETS_CONFIG_FILE}",
-                target.crate_name()
-            ),
-        );
-    }
-
     let review_record = pin_review_record_path(REVIEW_RECORDS_DIR, target.crate_name(), date);
-    match confined_scaffold_state(current_dir, Path::new(&review_record))? {
+
+    let plan = match plan_pin_add(
+        &lockfile,
+        &reviewed_targets,
+        &manifest_requirements,
+        &target,
+        family_name,
+        review_record,
+        date,
+    ) {
+        Ok(plan) => plan,
+        Err(rejection) => return fail(stderr, render_pin_add_rejection(&rejection)),
+    };
+
+    match confined_scaffold_state(current_dir, Path::new(plan.review_record()))? {
         ScaffoldState::Missing => {}
         _ => {
             return fail(
                 stderr,
                 format!(
-                    "pin add {}: review record path already exists at {review_record}; refusing to overwrite",
-                    target.crate_name()
+                    "pin add {}: review record path already exists at {}; refusing to overwrite",
+                    target.crate_name(),
+                    plan.review_record()
                 ),
             );
         }
     }
 
-    let manifest_requirements = load_current_manifest_direct_requirements(current_dir)?;
-    let observed_direct = manifest_requirements
-        .iter()
-        .filter(|requirement| requirement.name() == package.name)
-        .collect::<Vec<_>>();
-    let exact = package.exact_spec();
-    let exact_requirement = format!("={}", exact.version());
-    let direct_requirement = exact_direct_requirement(&observed_direct, exact);
-
-    let family_stub = compose_pin_family_stub(
-        &family_name,
-        &review_record,
-        exact,
-        package.checksum(),
-        direct_requirement.as_deref(),
-    );
-    let record_stub = compose_pin_review_record(
-        exact,
-        package.checksum(),
-        package.is_crates_io(),
-        &family_name,
-        direct_requirement.as_deref(),
-        date,
-    );
-
+    // Re-reads via the same symlink-refusing helper load_reviewed_targets used
+    // above rather than a plain fs::read_to_string, so a symlink swapped in
+    // between the two reads (TOCTOU) is refused here too instead of silently
+    // followed.
     let existing_policy_text =
-        fs::read_to_string(current_dir.join(config_path)).map_err(|source| {
+        read_optional_text_no_symlink(current_dir, config_path).map_err(|source| {
             CommandError::ReviewedTargetsRead {
                 path: config_path.display().to_string(),
                 source,
             }
         })?;
-    let updated_policy_text = format!("{existing_policy_text}{family_stub}");
+    let Some(existing_policy_text) = existing_policy_text else {
+        return Err(CommandError::ReviewedTargetsRead {
+            path: config_path.display().to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{} vanished after the initial read", config_path.display()),
+            ),
+        });
+    };
+    let updated_policy_text = format!("{existing_policy_text}{}", plan.family_stub());
     if let Err(source) = parse_reviewed_targets_toml(&updated_policy_text) {
         return Err(CommandError::ReviewedTargetsParse {
             path: config_path.display().to_string(),
@@ -155,117 +115,102 @@ fn run_pin_add(
         });
     }
 
-    write_new_file(current_dir, Path::new(&review_record), &record_stub)?;
-    if let Err(source) = fs::write(current_dir.join(config_path), updated_policy_text) {
-        let cleanup_source = fs::remove_file(current_dir.join(&review_record)).err();
+    write_new_file(
+        current_dir,
+        Path::new(plan.review_record()),
+        plan.record_stub(),
+    )?;
+    if let Err(source) = write_file_atomically(&current_dir.join(config_path), &updated_policy_text)
+    {
+        let cleanup_source = fs::remove_file(current_dir.join(plan.review_record())).err();
         return Err(CommandError::PinAddConfigWrite {
             config_path: config_path.display().to_string(),
-            review_record_path: review_record,
+            review_record_path: plan.review_record().to_owned(),
             source,
             cleanup_source,
         });
     }
 
     writeln!(stdout, "Pin add:").map_err(CommandError::Io)?;
-    writeln!(stdout, "- {review_record}: created").map_err(CommandError::Io)?;
+    writeln!(stdout, "- {}: created", plan.review_record()).map_err(CommandError::Io)?;
     writeln!(
         stdout,
-        "- {REVIEWED_TARGETS_CONFIG_FILE}: appended reviewed family \"{family_name}\" for {}@{}",
-        package.name, package.version
+        "- {REVIEWED_TARGETS_CONFIG_FILE}: appended reviewed family \"{}\" for {}",
+        plan.family_name(),
+        plan.exact()
     )
     .map_err(CommandError::Io)?;
-    if package.checksum().is_none() {
+    if plan.checksum().is_none() {
         writeln!(
             stdout,
-            "- note: no Cargo.lock checksum for {}@{}; the family pins by exact version only",
-            package.name, package.version
+            "- note: no Cargo.lock checksum for {}; the family pins by exact version only",
+            plan.exact()
         )
         .map_err(CommandError::Io)?;
     }
-    if direct_requirement.is_some() {
+    let exact_requirement = format!("={}", plan.exact().version());
+    if plan.direct_requirement().is_some() {
         writeln!(
             stdout,
             "- note: exact direct manifest pin \"{exact_requirement}\" included in the family"
         )
         .map_err(CommandError::Io)?;
-    } else if !observed_direct.is_empty() {
+    } else if plan.has_non_conforming_direct_requirement() {
         writeln!(
             stdout,
             "- note: {} is a direct dependency but its manifest requirement is not uniformly the exact pin \"{exact_requirement}\"; no direct entry scaffolded — consider exact-pinning the manifest",
-            package.name
+            plan.exact().crate_name()
         )
         .map_err(CommandError::Io)?;
     }
     writeln!(
         stdout,
-        "\nNext steps:\n- Complete the review record at {review_record}; the scaffold is not a completed review.\n- Run `cargo barbican pin check`, then `cargo barbican verify`."
+        "\nNext steps:\n- Complete the review record at {}; the scaffold is not a completed review.\n- Run `cargo barbican pin check`, then `cargo barbican audit`, then `cargo barbican verify`.",
+        plan.review_record()
     )
     .map_err(CommandError::Io)?;
 
     Ok(ExitCode::SUCCESS)
 }
 
-fn select_locked_package<'a>(
-    matching_packages: &[&'a LockedPackage],
-    target: &PinAddTarget,
-) -> Result<&'a LockedPackage, String> {
-    match target.version() {
-        Some(version) => matching_packages
-            .iter()
-            .copied()
-            .find(|package| package.version == version)
-            .ok_or_else(|| {
-                format!(
-                    "pin add {}@{version}: Cargo.lock resolves {} to {}; pass one of those exact versions",
-                    target.crate_name(),
-                    target.crate_name(),
-                    render_versions(matching_packages)
-                )
-            }),
-        None => {
-            if matching_packages.len() > 1 {
-                Err(format!(
-                    "pin add {}: multiple resolved versions in Cargo.lock {}; pass an exact crate@version",
-                    target.crate_name(),
-                    render_versions(matching_packages)
-                ))
-            } else {
-                Ok(matching_packages[0])
-            }
-        }
+fn render_pin_add_rejection(rejection: &PinAddRejection) -> String {
+    match rejection {
+        PinAddRejection::NotInLockfile { crate_name } => format!(
+            "pin add {crate_name}: not present in Cargo.lock; add the dependency and run `cargo barbican resolve` first"
+        ),
+        PinAddRejection::VersionNotResolved {
+            crate_name,
+            version,
+            resolved_versions,
+        } => format!(
+            "pin add {crate_name}@{version}: Cargo.lock resolves {crate_name} to {}; pass one of those exact versions",
+            render_versions(resolved_versions)
+        ),
+        PinAddRejection::AmbiguousVersion {
+            crate_name,
+            resolved_versions,
+        } => format!(
+            "pin add {crate_name}: multiple resolved versions in Cargo.lock {}; pass an exact crate@version",
+            render_versions(resolved_versions)
+        ),
+        PinAddRejection::AlreadyCovered { crate_name, family } => format!(
+            "pin add {crate_name}: crate is already covered by reviewed family \"{family}\" in {REVIEWED_TARGETS_CONFIG_FILE}"
+        ),
+        PinAddRejection::FamilyAlreadyExists {
+            crate_name,
+            family_name,
+        } => format!(
+            "pin add {crate_name}: reviewed family \"{family_name}\" already exists in {REVIEWED_TARGETS_CONFIG_FILE}"
+        ),
     }
 }
 
-fn exact_direct_requirement(
-    observed_direct: &[&CargoManifestDirectRequirement],
-    exact: &ExactCrateSpec,
-) -> Option<String> {
-    let exact_requirement = format!("={}", exact.version());
-    (!observed_direct.is_empty()
-        && observed_direct.iter().all(|requirement| {
-            requirement.source_kind().requires_exact_pin()
-                && requirement.version_requirement() == Some(exact_requirement.as_str())
-        }))
-    .then_some(exact_requirement)
-}
-
-fn family_covering_crate<'a>(
-    reviewed_targets: &'a ReviewedTargets,
-    crate_name: &str,
-) -> Option<&'a str> {
-    reviewed_targets
-        .rust_families()
-        .iter()
-        .find(|family| family.resolved().contains_key(crate_name))
-        .map(|family| family.name())
-}
-
-fn render_versions(packages: &[&barbican::LockedPackage]) -> String {
+fn render_versions(versions: &[String]) -> String {
     format!(
         "[{}]",
-        packages
+        versions
             .iter()
-            .map(|package| format!("\"{}\"", package.version))
+            .map(|version| format!("\"{version}\""))
             .collect::<Vec<_>>()
             .join(", ")
     )

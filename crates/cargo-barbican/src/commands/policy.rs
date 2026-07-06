@@ -268,7 +268,7 @@ impl InitReport {
         } else {
             writeln!(
                 stdout,
-                "\nNext steps:\n- Review the manual adoption guide: {ADOPTION_GUIDE_PATH}\n- Review current dependencies and write dependency review records.\n- Populate reviewed-targets.toml only for deliberately reviewed families.\n- Run `cargo barbican pin check`, then `cargo barbican verify`."
+                "\nNext steps:\n- Review the manual adoption guide: {ADOPTION_GUIDE_PATH}\n- Review current dependencies and write dependency review records.\n- Populate reviewed-targets.toml only for deliberately reviewed families.\n- Run `cargo barbican pin check`, then `cargo barbican audit`, then `cargo barbican verify`."
             )
             .map_err(CommandError::Io)?;
         }

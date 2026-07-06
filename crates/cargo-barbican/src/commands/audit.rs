@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use barbican::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
     AdvisoryFindingId, CargoDenyNoAdvisoryDiagnostic, LockfileAdvisoryScanner, OffsetDateTime,
-    ReviewedAdvisoryException, ReviewedTargets, RustReviewedTargetsReport,
+    ReviewRecordFact, ReviewedAdvisoryException, ReviewedTargets, RustReviewedTargetsReport,
     UnmanagedDelegatedPolicyMode, check_reviewed_rust_targets, evaluate_advisory_audit,
     generate_cargo_deny_runtime_config, parse_cargo_audit_json, parse_cargo_deny_json_lines,
 };
@@ -16,8 +16,8 @@ use crate::command_runner::CommandRunner;
 
 use super::scratch_dir::ScratchDir;
 use super::{
-    CommandError, NativeDelegatedIgnore, ReviewRecordCheck, check_review_record_paths,
-    escape_diagnostic_for_terminal, escape_render_field, fail, load_config, load_current_lockfile,
+    CommandError, NativeDelegatedIgnore, check_review_record_paths, escape_diagnostic_for_terminal,
+    escape_render_field, fail, load_config, load_current_lockfile,
     load_current_manifest_direct_requirements, load_native_delegated_ignores,
     load_reviewed_targets, read_optional_text_no_symlink, render_allowed_policy_exceptions,
 };
@@ -127,7 +127,7 @@ where
 fn load_review_evidence(
     current_dir: &Path,
     reviewed_targets: Option<&ReviewedTargets>,
-) -> Result<(Option<RustReviewedTargetsReport>, Vec<ReviewRecordCheck>), CommandError> {
+) -> Result<(Option<RustReviewedTargetsReport>, Vec<ReviewRecordFact>), CommandError> {
     let Some(reviewed_targets) = reviewed_targets else {
         return Ok((None, Vec::new()));
     };
@@ -143,22 +143,13 @@ fn load_review_evidence(
 
 fn bound_advisory_exceptions<'a>(
     pin_report: &'a Option<RustReviewedTargetsReport>,
-    review_record_checks: &[ReviewRecordCheck],
+    review_record_checks: &[ReviewRecordFact],
 ) -> Vec<&'a ReviewedAdvisoryException> {
     let Some(pin_report) = pin_report else {
         return Vec::new();
     };
 
-    pin_report
-        .families()
-        .iter()
-        .filter(|family| {
-            review_record_checks
-                .iter()
-                .any(|check| check.family_name() == family.name() && check.is_success())
-        })
-        .flat_map(|family| family.advisory_exceptions_with_matching_resolved_target())
-        .collect()
+    pin_report.advisory_exceptions_bound_to_reviewed_records(review_record_checks)
 }
 
 fn render_audit_report(

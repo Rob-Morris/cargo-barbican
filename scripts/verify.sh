@@ -58,8 +58,22 @@ off_main() {
   [ -n "$BRANCH" ] && [ "$BRANCH" != "main" ]
 }
 
+# The escape-hatch branch guard runs before anything else — including the
+# commit-message tests and clippy below — so a rejected `--vanilla`/`--skip`
+# on main never runs any of this script's other checks first.
+if { [ "$MODE" = vanilla ] || [ "$MODE" = skip ]; } && ! off_main; then
+  printf >&2 'verify: --%s is allowed only on a known non-main branch\n' "$MODE"
+  exit 1
+fi
+
 if [ "$MODE" != skip ]; then
   sh scripts/tests/check_commit_msg_test.sh
+  # verify_branch_guard_test.sh drives this very script (including its
+  # off-main `--vanilla` success path), so it sets this sentinel on its own
+  # nested invocations to stop them re-entering this block and recursing.
+  if [ -z "${VERIFY_BRANCH_GUARD_TEST_RUNNING-}" ]; then
+    sh scripts/tests/verify_branch_guard_test.sh
+  fi
   cargo clippy --workspace --all-targets --locked -- -D warnings
 fi
 
@@ -69,10 +83,6 @@ case "$MODE" in
     cargo run --locked --bin cargo-barbican -- verify
     ;;
   vanilla)
-    if ! off_main; then
-      printf >&2 '%s\n' "verify: --vanilla is allowed only on a known non-main branch"
-      exit 1
-    fi
     printf '%s\n' "verify: vanilla fallback on ${BRANCH:-unknown branch}; record the reason in .canary--pre-commit"
     cargo audit
     cargo deny check advisories bans sources
@@ -80,10 +90,6 @@ case "$MODE" in
     cargo test --locked
     ;;
   skip)
-    if ! off_main; then
-      printf >&2 '%s\n' "verify: --skip is allowed only on a known non-main branch"
-      exit 1
-    fi
     printf '%s\n' "verify: skipped on ${BRANCH:-unknown branch}: $SKIP_REASON"
     ;;
 esac

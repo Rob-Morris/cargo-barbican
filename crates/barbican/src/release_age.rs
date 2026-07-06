@@ -22,6 +22,36 @@ pub enum ReleaseAgeOutcome {
     },
 }
 
+/// The one release-age gate precedence rule: a too-fresh release whose
+/// reviewed age exception has no backing review record fails closed as a
+/// missing-review-record verdict, which takes precedence over reporting it as
+/// a plain too-fresh outcome. Shells route their rendering off this verdict
+/// rather than re-deriving the precedence themselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseAgeGateVerdict<'a> {
+    Routine,
+    AllowedByException,
+    MissingReviewRecord(&'a ReviewedReleaseAgeException),
+    Blocked,
+}
+
+pub fn classify_release_age_gate<'a>(
+    outcome: &ReleaseAgeOutcome,
+    missing_exception: Option<&'a ReviewedReleaseAgeException>,
+) -> ReleaseAgeGateVerdict<'a> {
+    match outcome {
+        ReleaseAgeOutcome::Allowed => ReleaseAgeGateVerdict::Routine,
+        ReleaseAgeOutcome::AllowedByException { .. } => ReleaseAgeGateVerdict::AllowedByException,
+        ReleaseAgeOutcome::TooFresh => match missing_exception {
+            Some(exception) => ReleaseAgeGateVerdict::MissingReviewRecord(exception),
+            None => ReleaseAgeGateVerdict::Blocked,
+        },
+        ReleaseAgeOutcome::Yanked | ReleaseAgeOutcome::ExceptionArtefactMismatch { .. } => {
+            ReleaseAgeGateVerdict::Blocked
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseAgeReport {
     spec: ExactCrateSpec,
@@ -58,17 +88,6 @@ impl ReleaseAgeReport {
     pub fn outcome(&self) -> &ReleaseAgeOutcome {
         &self.outcome
     }
-}
-
-pub fn check_release_age<C>(
-    client: &C,
-    spec: &ExactCrateSpec,
-    minimum_days: u64,
-) -> Result<ReleaseAgeReport, CratesIoClientError>
-where
-    C: CratesIoClient + ?Sized,
-{
-    check_release_age_at(client, spec, OffsetDateTime::now_utc(), minimum_days, None)
 }
 
 pub fn check_release_age_at<C>(
@@ -162,7 +181,10 @@ mod tests {
         parse_reviewed_targets_toml,
     };
 
-    use super::{ReleaseAgeOutcome, evaluate_release_age, format_age};
+    use super::{
+        ReleaseAgeGateVerdict, ReleaseAgeOutcome, classify_release_age_gate, evaluate_release_age,
+        format_age,
+    };
 
     fn release(timestamp: &str, yanked: bool) -> CrateRelease {
         release_with_checksum(
@@ -398,5 +420,53 @@ serde = "{version}"
         );
 
         assert_eq!(report.outcome(), &ReleaseAgeOutcome::Allowed);
+    }
+
+    #[test]
+    fn missing_review_record_takes_precedence_over_a_plain_too_fresh_verdict() {
+        let missing = exception(
+            "1.0.228",
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        );
+
+        assert_eq!(
+            classify_release_age_gate(&ReleaseAgeOutcome::TooFresh, Some(&missing)),
+            ReleaseAgeGateVerdict::MissingReviewRecord(&missing)
+        );
+    }
+
+    #[test]
+    fn too_fresh_without_a_missing_exception_is_blocked() {
+        assert_eq!(
+            classify_release_age_gate(&ReleaseAgeOutcome::TooFresh, None),
+            ReleaseAgeGateVerdict::Blocked
+        );
+    }
+
+    #[test]
+    fn a_missing_exception_for_an_unrelated_spec_does_not_leak_into_other_outcomes() {
+        let missing = exception(
+            "1.0.228",
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        );
+
+        assert_eq!(
+            classify_release_age_gate(&ReleaseAgeOutcome::Allowed, Some(&missing)),
+            ReleaseAgeGateVerdict::Routine
+        );
+        assert_eq!(
+            classify_release_age_gate(&ReleaseAgeOutcome::Yanked, Some(&missing)),
+            ReleaseAgeGateVerdict::Blocked
+        );
+        assert_eq!(
+            classify_release_age_gate(
+                &ReleaseAgeOutcome::AllowedByException {
+                    family: "serde-family".to_owned(),
+                    review_record: "docs/dependency-reviews/2026-05-27-serde.md".to_owned(),
+                },
+                Some(&missing)
+            ),
+            ReleaseAgeGateVerdict::AllowedByException
+        );
     }
 }

@@ -6,6 +6,7 @@
 //! See `docs/architecture/overview.md` in the repo root for the design brief.
 pub mod advisory;
 pub mod assessment;
+pub mod cargo_config;
 pub mod config;
 pub mod crates_io;
 pub mod deny_config;
@@ -33,8 +34,9 @@ pub use assessment::{
     InspectionFailure, LockedChecksumDrift, NonCratesIoSourceChange,
     ReleaseAgeExceptionArtefactMismatch, ReleaseAgeViolation, RustAssessmentClassification,
     RustAssessmentFinding, RustAssessmentFindingCategory, RustAssessmentFindingSeverity,
-    RustAssessmentReport, assess_rust_update, assess_rust_update_at,
+    RustAssessmentReport, assess_rust_update_at,
 };
+pub use cargo_config::{CargoConfigError, cargo_config_source_override_key};
 pub use config::{
     AdvisoryDelegatesConfig, BarbicanConfig, CargoDenyCheck, CargoDenyDelegatesConfig,
     ConfigLoadError, DelegatesConfig, HighScrutinyConfig, LockfileAdvisoryScanner,
@@ -47,9 +49,7 @@ pub use crates_io::{
 pub use deny_config::{
     CargoDenyRuntimeConfigError, advisory_ignores_from_toml, generate_cargo_deny_runtime_config,
 };
-pub use inspect::{
-    CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate, inspect_published_crate_at,
-};
+pub use inspect::{CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate_at};
 pub use inventory::{
     GraphSurfaces, INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS, Inventory, InventoryAdvisoryException,
     InventoryAdvisoryExceptionStatus, InventoryDeclaredSurface, InventoryDirectDependency,
@@ -65,8 +65,9 @@ pub use manifest::{
     CargoDependencySourceKind, CargoManifestDependency, CargoManifestDirectRequirement,
     CargoManifestError, CargoManifestPackage, parse_manifest_dependencies,
     parse_manifest_direct_requirements, parse_manifest_package_identity,
-    parse_workspace_dependency_requirements, parse_workspace_member_glob_roots,
-    parse_workspace_member_manifest_paths, parse_workspace_package_version,
+    parse_manifest_patched_crate_names, parse_workspace_dependency_requirements,
+    parse_workspace_member_glob_roots, parse_workspace_member_manifest_paths,
+    parse_workspace_package_version,
 };
 pub use metadata::{
     CargoMetadata, CargoMetadataError, MetadataPackageSurfaces, package_surfaces,
@@ -77,27 +78,28 @@ pub use pick::{
     parse_pick_spec, pick_version,
 };
 pub use pin_check::{
-    ObservedDirectDependency, ReviewedAdvisoryExceptionBinding, ReviewedDirectDependencyCheck,
-    ReviewedResolvedDependencyCheck, RustReviewedFamilyReport, RustReviewedTargetsReport,
-    check_reviewed_rust_targets,
+    ObservedDirectDependency, PatchedReviewedCrate, ReviewedAdvisoryExceptionBinding,
+    ReviewedDirectDependencyCheck, ReviewedResolvedDependencyCheck, RustReviewedFamilyReport,
+    RustReviewedTargetsReport, check_reviewed_rust_targets, patched_reviewed_crates,
 };
 pub use release_age::{
-    ReleaseAgeOutcome, ReleaseAgeReport, check_release_age, check_release_age_at,
-    evaluate_release_age, format_age,
+    ReleaseAgeGateVerdict, ReleaseAgeOutcome, ReleaseAgeReport, check_release_age_at,
+    classify_release_age_gate, evaluate_release_age, format_age,
 };
 pub use reviewed_targets::{
-    ExecutionSurfaceKind, IsoDateError, ReviewedAdvisory, ReviewedAdvisoryException,
+    ExecutionSurfaceKind, IsoDateError, ReviewedAdvisoryException,
     ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException, ReviewedResolvedTarget,
     ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError, RustSecAdvisoryId,
     RustSecAdvisoryIdError, format_iso_date, parse_reviewed_targets_toml,
 };
 pub use scaffold::{
-    PinAddTarget, PinAddTargetError, compose_pin_family_stub, compose_pin_review_record,
-    parse_pin_add_target, pin_family_name, pin_review_record_path,
+    PinAddPlan, PinAddRejection, PinAddTarget, PinAddTargetError, compose_pin_family_stub,
+    compose_pin_review_record, parse_pin_add_target, pin_family_name, pin_review_record_path,
+    plan_pin_add,
 };
 pub use sha256::{Sha256Digest, Sha256DigestError};
 pub use spec::{
     ExactCrateSpec, ExactCrateSpecError, ExactVersionRequirementError,
-    parse_exact_version_requirement,
+    is_native_sys_execution_surface, parse_exact_version_requirement,
 };
 pub use time::{Date, OffsetDateTime};

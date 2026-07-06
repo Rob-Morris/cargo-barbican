@@ -7,11 +7,9 @@ use barbican::{
     pick_version,
 };
 
-use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
-
 use super::{
-    CommandError, escape_render_field, exit_code_from_policy_failures, load_config,
-    load_reviewed_release_age_exceptions, render_release_age_report,
+    CommandError, escape_render_field, exit_code_from_policy_failures, load_release_age_context,
+    render_release_age_report,
 };
 
 pub(super) fn run_pick<C>(
@@ -33,9 +31,8 @@ where
             return Ok(exit_code_from_policy_failures(true));
         }
     };
-    let minimum_days = min_age_days.unwrap_or(load_config(current_dir)?.release_age.minimum_days);
-    let reviewed_release_age_exceptions =
-        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
+    let (minimum_days, reviewed_release_age_exceptions) =
+        load_release_age_context(current_dir, min_age_days)?;
     let versions = match client.fetch_versions(pick_spec.crate_name()) {
         Ok(versions) => versions,
         Err(error) => {

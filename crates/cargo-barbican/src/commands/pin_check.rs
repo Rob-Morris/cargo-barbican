@@ -3,14 +3,15 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    ObservedDirectDependency, ReviewedResolvedTarget, ReviewedTargets, RustReviewedTargetsReport,
-    check_reviewed_rust_targets,
+    ObservedDirectDependency, PatchedReviewedCrate, ReviewRecordFact, ReviewedResolvedTarget,
+    ReviewedTargets, RustReviewedTargetsReport, check_reviewed_rust_targets,
+    patched_reviewed_crates,
 };
 
 use super::{
-    CommandError, ReviewRecordCheck, check_review_record_paths, load_current_lockfile,
-    load_current_manifest_direct_requirements, load_reviewed_targets,
-    render_allowed_policy_exceptions,
+    CommandError, check_review_record_paths, escape_render_field, load_current_lockfile,
+    load_current_manifest_direct_requirements, load_manifest_patched_crate_names,
+    load_reviewed_targets, render_allowed_policy_exceptions, source_replacement_finding,
 };
 
 pub(super) fn run_pin_check(
@@ -50,6 +51,9 @@ pub(super) fn enforce_reviewed_targets(
     let manifest_requirements = load_current_manifest_direct_requirements(current_dir)?;
     let review_record_checks = check_review_record_paths(current_dir, reviewed_targets);
     let lockfile = load_current_lockfile(current_dir, Path::new("Cargo.lock"))?;
+    let patched_crate_names = load_manifest_patched_crate_names(current_dir)?;
+    let patched_reviewed = patched_reviewed_crates(reviewed_targets, &patched_crate_names);
+    let source_replacement = source_replacement_finding(current_dir)?;
 
     let report = check_reviewed_rust_targets(reviewed_targets, &manifest_requirements, &lockfile);
 
@@ -57,14 +61,16 @@ pub(super) fn enforce_reviewed_targets(
         stdout,
         &report,
         &review_record_checks,
+        &patched_reviewed,
+        source_replacement.as_deref(),
         &config_path.display().to_string(),
     )?;
 
     Ok(
         if report.is_success()
-            && review_record_checks
-                .iter()
-                .all(ReviewRecordCheck::is_success)
+            && review_record_checks.iter().all(ReviewRecordFact::exists)
+            && patched_reviewed.is_empty()
+            && source_replacement.is_none()
         {
             ExitCode::SUCCESS
         } else {
@@ -76,19 +82,40 @@ pub(super) fn enforce_reviewed_targets(
 fn render_pin_check_report(
     stdout: &mut dyn Write,
     report: &RustReviewedTargetsReport,
-    review_record_checks: &[ReviewRecordCheck],
+    review_record_checks: &[ReviewRecordFact],
+    patched_reviewed: &[PatchedReviewedCrate],
+    source_replacement: Option<&str>,
     manifest_path: &str,
 ) -> Result<(), CommandError> {
     if report.is_success()
-        && review_record_checks
-            .iter()
-            .all(ReviewRecordCheck::is_success)
+        && review_record_checks.iter().all(ReviewRecordFact::exists)
+        && patched_reviewed.is_empty()
+        && source_replacement.is_none()
     {
         writeln!(stdout, "Pin check: PASS").map_err(CommandError::Io)?;
     } else {
         writeln!(stdout, "Pin check: FAIL").map_err(CommandError::Io)?;
     }
     writeln!(stdout, "  manifest: {manifest_path}").map_err(CommandError::Io)?;
+
+    if let Some(source_replacement) = source_replacement {
+        writeln!(
+            stdout,
+            "  - source replacement detected: {}",
+            escape_render_field(source_replacement)
+        )
+        .map_err(CommandError::Io)?;
+    }
+
+    for patched in patched_reviewed {
+        writeln!(
+            stdout,
+            "  - {}: [patch] targets reviewed crate {}, which bypasses review",
+            escape_render_field(patched.family()),
+            escape_render_field(patched.crate_name())
+        )
+        .map_err(CommandError::Io)?;
+    }
     let review_record_check_for = |name: &str| {
         review_record_checks
             .iter()
@@ -96,51 +123,53 @@ fn render_pin_check_report(
     };
 
     for family in report.families() {
+        let family_name = escape_render_field(family.name());
         writeln!(
             stdout,
             "  family: {} ({})",
-            family.name(),
-            family.review_record()
+            family_name,
+            escape_render_field(family.review_record())
         )
         .map_err(CommandError::Io)?;
 
         if let Some(review_record_check) = review_record_check_for(family.name()) {
-            if review_record_check.is_success() {
+            if review_record_check.exists() {
                 writeln!(
                     stdout,
                     "  - {}: review record ok at {}",
-                    family.name(),
-                    review_record_check.review_record()
+                    family_name,
+                    escape_render_field(review_record_check.review_record())
                 )
                 .map_err(CommandError::Io)?;
             } else {
                 writeln!(
                     stdout,
                     "  - {}: review record missing at {}",
-                    family.name(),
-                    review_record_check.review_record()
+                    family_name,
+                    escape_render_field(review_record_check.review_record())
                 )
                 .map_err(CommandError::Io)?;
             }
         }
 
         for check in family.direct_checks() {
+            let crate_name = escape_render_field(check.crate_name());
             if check.is_success() {
                 writeln!(
                     stdout,
                     "  - {}: direct spec ok for {}{}",
-                    family.name(),
-                    check.crate_name(),
-                    check.expected_requirement()
+                    family_name,
+                    crate_name,
+                    escape_render_field(check.expected_requirement())
                 )
                 .map_err(CommandError::Io)?;
             } else {
                 writeln!(
                     stdout,
                     "  - {}: direct spec mismatch for {}: expected {:?}, found {}",
-                    family.name(),
-                    check.crate_name(),
-                    check.expected_requirement(),
+                    family_name,
+                    crate_name,
+                    escape_render_field(check.expected_requirement()),
                     render_observed_direct_dependencies(check.observed())
                 )
                 .map_err(CommandError::Io)?;
@@ -148,38 +177,41 @@ fn render_pin_check_report(
         }
 
         for check in family.resolved_checks() {
+            let crate_name = escape_render_field(check.crate_name());
             if check.is_success() {
                 writeln!(
                     stdout,
                     "  - {}: Cargo.lock ok for {}: matched {}",
-                    family.name(),
-                    check.crate_name(),
+                    family_name,
+                    crate_name,
                     render_resolved_target(check.expected_target())
                 )
                 .map_err(CommandError::Io)?;
             } else {
                 writeln!(
                     stdout,
-                    "  - {}: Cargo.lock mismatch for {}: expected {}, found versions {}, checksums {}",
-                    family.name(),
-                    check.crate_name(),
+                    "  - {}: Cargo.lock mismatch for {}: expected {}, found versions {}, checksums {}{}{}",
+                    family_name,
+                    crate_name,
                     render_resolved_target(check.expected_target()),
                     render_values(check.actual_versions().iter()),
-                    render_values(check.actual_checksums_sha256().iter())
+                    render_values(check.actual_checksums_sha256().iter()),
+                    render_non_crates_io_sources_suffix(check.non_crates_io_sources()),
+                    if check.expected_target().checksum_sha256().is_some()
+                        && check.has_checksumless_entry()
+                    {
+                        ", checksum-less entry present"
+                    } else {
+                        ""
+                    }
                 )
                 .map_err(CommandError::Io)?;
             }
         }
     }
 
-    let advisory_exceptions = report
-        .families()
-        .iter()
-        .filter(|family| {
-            review_record_check_for(family.name()).is_some_and(ReviewRecordCheck::is_success)
-        })
-        .flat_map(|family| family.advisory_exceptions_with_matching_resolved_target())
-        .collect::<Vec<_>>();
+    let advisory_exceptions =
+        report.advisory_exceptions_bound_to_reviewed_records(review_record_checks);
     render_allowed_policy_exceptions(stdout, advisory_exceptions)?;
 
     Ok(())
@@ -200,15 +232,12 @@ fn render_observed_direct_dependencies(observed: &[ObservedDirectDependency]) ->
 }
 
 fn render_resolved_target(target: &ReviewedResolvedTarget) -> String {
+    let version = escape_render_field(target.version());
     match target.checksum_sha256() {
         Some(checksum) => {
-            format!(
-                "{{version={}, checksum_sha256={}}}",
-                target.version(),
-                checksum
-            )
+            format!("{{version={version}, checksum_sha256={checksum}}}")
         }
-        None => format!("{{version={}}}", target.version()),
+        None => format!("{{version={version}}}"),
     }
 }
 
@@ -219,10 +248,23 @@ where
     format!(
         "[{}]",
         values
-            .map(|value| format!("\"{value}\""))
+            .map(|value| format!("\"{}\"", escape_render_field(&value.to_string())))
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+fn render_non_crates_io_sources_suffix(sources: &std::collections::BTreeSet<String>) -> String {
+    if sources.is_empty() {
+        return String::new();
+    }
+
+    let escaped = sources
+        .iter()
+        .map(|source| escape_render_field(source))
+        .collect::<Vec<_>>();
+
+    format!(", non-crates.io sources {}", render_values(escaped.iter()))
 }
 
 fn render_observed_direct_dependency(entry: &ObservedDirectDependency) -> String {
@@ -230,9 +272,9 @@ fn render_observed_direct_dependency(entry: &ObservedDirectDependency) -> String
 
     format!(
         "{}:{}:{} ({})",
-        entry.manifest_path(),
-        entry.section(),
-        requirement,
+        escape_render_field(entry.manifest_path()),
+        escape_render_field(entry.section()),
+        escape_render_field(requirement),
         entry.source_kind()
     )
 }

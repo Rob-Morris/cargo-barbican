@@ -5,18 +5,19 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, ExactCrateSpec, OffsetDateTime, ReleaseAgeOutcome,
-    RustAssessmentClassification, evaluate_release_age, inspect_published_crate_at,
+    CratesIoClient, ExactCrateSpec, OffsetDateTime, ReleaseAgeGateVerdict,
+    RustAssessmentClassification, classify_release_age_gate, evaluate_release_age,
+    inspect_published_crate_at,
 };
 
-use crate::cli::{GatehouseCandidateArgs, GatehouseCommand, REVIEWED_TARGETS_CONFIG_FILE};
+use crate::cli::{GatehouseCandidateArgs, GatehouseCommand};
 use crate::command_runner::{CommandRunner, RunnerError};
 
 use super::inspect::render_inspect_report;
 use super::scratch_dir::ScratchDir;
 use super::{
-    CommandError, ReviewedReleaseAgeExceptions, fail, load_config,
-    load_reviewed_release_age_exceptions, render_missing_release_age_exception_review_record,
+    CommandError, ReviewedReleaseAgeExceptions, escape_diagnostic_for_terminal, fail,
+    load_release_age_context, render_missing_release_age_exception_review_record,
 };
 
 pub(super) fn run_gatehouse<C, R>(
@@ -56,9 +57,8 @@ where
         Ok(spec) => spec,
         Err(error) => return fail(stderr, error),
     };
-    let minimum_days = load_config(current_dir)?.release_age.minimum_days;
-    let reviewed_release_age_exceptions =
-        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
+    let (minimum_days, reviewed_release_age_exceptions) =
+        load_release_age_context(current_dir, None)?;
     let mut dossier = CandidateDossier::new(&spec);
 
     match render_candidate_inspect(
@@ -154,9 +154,10 @@ where
         minimum_days,
         age_exception,
     );
-    if matches!(release_age.outcome(), ReleaseAgeOutcome::TooFresh)
-        && let Some(exception) = reviewed_release_age_exceptions.missing_for_spec(spec)
-    {
+    if let ReleaseAgeGateVerdict::MissingReviewRecord(exception) = classify_release_age_gate(
+        release_age.outcome(),
+        reviewed_release_age_exceptions.missing_for_spec(spec),
+    ) {
         return Err(render_missing_release_age_exception_review_record(
             exception,
         ));
@@ -251,14 +252,22 @@ impl CandidateDossier {
         if output.trim().is_empty() {
             let _ = writeln!(self.rendered, "  output: none");
         } else {
-            self.push_indented(output);
+            // `output` is `cargo tree`/`cargo audit` stdout — it can carry
+            // unicode from a candidate's transitive dependency source URLs
+            // or RustSec advisory free text, so it is untrusted and routed
+            // through the escape choke point before a reviewer reads it.
+            self.push_indented(&escape_diagnostic_for_terminal(output));
         }
         let _ = writeln!(self.rendered);
     }
 
     fn push_command_failure(&mut self, heading: &str, error: &RunnerError) {
+        // `RunnerError`'s `Display` embeds the failed subprocess's raw
+        // stdout/stderr, which is exactly as untrusted as the success-path
+        // output above, so it is escaped the same way.
+        let error = escape_diagnostic_for_terminal(&error.to_string());
         let _ = writeln!(self.rendered, "{heading}:");
-        let _ = writeln!(self.rendered, "  FAIL {}", render_runner_error(error));
+        let _ = writeln!(self.rendered, "  FAIL {error}");
         let _ = writeln!(self.rendered);
     }
 
@@ -289,30 +298,6 @@ impl CandidateDossier {
     fn push_indented(&mut self, text: &str) {
         for line in text.trim_end().lines() {
             let _ = writeln!(self.rendered, "  {line}");
-        }
-    }
-}
-
-fn render_runner_error(error: &RunnerError) -> String {
-    match error {
-        RunnerError::Spawn(source) => format!("unable to start command: {source}"),
-        RunnerError::Exited {
-            code,
-            stdout,
-            stderr,
-        } => {
-            let status = match code {
-                Some(code) => format!("command exited with status {code}"),
-                None => "command terminated without an exit code".to_owned(),
-            };
-            let mut parts = vec![status];
-            if !stdout.is_empty() {
-                parts.push(format!("stdout: {stdout}"));
-            }
-            if !stderr.is_empty() {
-                parts.push(format!("stderr: {stderr}"));
-            }
-            parts.join("; ")
         }
     }
 }

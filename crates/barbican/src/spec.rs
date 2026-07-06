@@ -27,6 +27,13 @@ impl ExactCrateSpec {
     }
 }
 
+/// The one native-sys execution-surface rule: a crate counts as native-sys
+/// either because cargo metadata reports a native `links` key, or because its
+/// name ends `-sys` by convention even when metadata omits `links`.
+pub fn is_native_sys_execution_surface(is_native_sys_name: bool, has_native_links: bool) -> bool {
+    is_native_sys_name || has_native_links
+}
+
 pub fn parse_exact_version_requirement(
     crate_name: &str,
     requirement: &str,
@@ -51,22 +58,64 @@ impl FromStr for ExactCrateSpec {
     type Err = ExactCrateSpecError;
 
     fn from_str(spec: &str) -> Result<Self, Self::Err> {
-        if spec.starts_with('-') {
-            return Err(ExactCrateSpecError::InvalidShape(spec.to_owned()));
-        }
-
-        let Some((crate_name, version)) = spec.rsplit_once('@') else {
+        let Some(shape) = split_crate_version_spec(spec, VersionMarker::Required) else {
             return Err(ExactCrateSpecError::InvalidShape(spec.to_owned()));
         };
-
+        let version = shape
+            .version
+            .expect("VersionMarker::Required guarantees a version");
         let version = version.strip_prefix('=').unwrap_or(version);
 
-        if crate_name.is_empty() || version.is_empty() {
+        if version.is_empty() {
             return Err(ExactCrateSpecError::InvalidShape(spec.to_owned()));
         }
 
-        Self::validate(crate_name, version, spec.to_owned())
+        Self::validate(shape.crate_name, version, spec.to_owned())
     }
+}
+
+/// Whether the trailing `@version` (or `@range`) part of a `crate[@version]`
+/// spec must be present.
+pub(crate) enum VersionMarker {
+    Required,
+    Optional,
+}
+
+pub(crate) struct CrateVersionShape<'a> {
+    pub(crate) crate_name: &'a str,
+    pub(crate) version: Option<&'a str>,
+}
+
+/// The one `crate[@version]` shape parser: reject a leading `-` (so specs
+/// cannot be confused with a CLI flag), split on the last `@`, and reject
+/// empty crate-name or version parts. Front ends decide whether a version is
+/// required and whether a leading `=` on the version part is stripped here
+/// (an exact pin) or preserved (a semver range, where `=1.2.3` and `1.2.3`
+/// are different requirements).
+pub(crate) fn split_crate_version_spec(
+    spec: &str,
+    version_marker: VersionMarker,
+) -> Option<CrateVersionShape<'_>> {
+    if spec.is_empty() || spec.starts_with('-') {
+        return None;
+    }
+
+    let (crate_name, version) = match spec.rsplit_once('@') {
+        Some((crate_name, version)) => (crate_name, Some(version)),
+        None => match version_marker {
+            VersionMarker::Required => return None,
+            VersionMarker::Optional => (spec, None),
+        },
+    };
+
+    if crate_name.is_empty() || version.is_some_and(str::is_empty) {
+        return None;
+    }
+
+    Some(CrateVersionShape {
+        crate_name,
+        version,
+    })
 }
 
 impl ExactCrateSpec {

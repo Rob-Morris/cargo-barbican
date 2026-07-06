@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashSet};
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{ExactCrateSpec, ExecutionSurfaceKind};
+use crate::{ExactCrateSpec, ExecutionSurfaceKind, is_native_sys_execution_surface};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CargoMetadata {
@@ -203,7 +203,7 @@ impl MetadataPackageSurfaces {
         self.has_native_links |= other.has_native_links;
     }
 
-    pub(crate) fn surface_kinds(&self) -> Vec<ExecutionSurfaceKind> {
+    pub(crate) fn surface_kinds(&self, spec: &ExactCrateSpec) -> Vec<ExecutionSurfaceKind> {
         let mut kinds = Vec::new();
         if self.has_build_rs {
             kinds.push(ExecutionSurfaceKind::BuildRs);
@@ -211,7 +211,7 @@ impl MetadataPackageSurfaces {
         if self.is_proc_macro {
             kinds.push(ExecutionSurfaceKind::ProcMacro);
         }
-        if self.has_native_links {
+        if is_native_sys_execution_surface(spec.is_native_sys(), self.has_native_links) {
             kinds.push(ExecutionSurfaceKind::NativeSys);
         }
 

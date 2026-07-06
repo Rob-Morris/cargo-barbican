@@ -4,13 +4,12 @@ use std::process::ExitCode;
 
 use barbican::{CratesIoClient, Lockfile, OffsetDateTime, added_crates_io_specs};
 
-use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
 use super::{
     CommandError, DEFAULT_BASE_REF, ReviewedReleaseAgeExceptions, fail, finish_release_age_checks,
-    load_config, load_current_lockfile, load_git_base_lockfile, load_lockfile_from_path,
-    load_reviewed_release_age_exceptions,
+    load_current_lockfile, load_git_base_lockfile, load_lockfile_from_path,
+    load_release_age_context,
 };
 
 pub(super) fn run_age_lock<C, R>(
@@ -29,9 +28,8 @@ where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
-    let minimum_days = min_age_days.unwrap_or(load_config(current_dir)?.release_age.minimum_days);
-    let reviewed_release_age_exceptions =
-        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
+    let (minimum_days, reviewed_release_age_exceptions) =
+        load_release_age_context(current_dir, min_age_days)?;
     let current = match load_current_lockfile(current_dir, lockfile) {
         Ok(lockfile) => lockfile,
         Err(error) => return fail(stderr, error),

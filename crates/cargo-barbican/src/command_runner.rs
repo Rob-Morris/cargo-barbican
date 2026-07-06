@@ -49,17 +49,32 @@ pub enum RunnerError {
     },
 }
 
+/// The single `RunnerError` renderer: every failed subprocess call renders
+/// through here, so the exit code is never silently dropped just because
+/// stdout or stderr happened to carry text — the two former sibling
+/// renderers (this one and gatehouse's now-removed `render_runner_error`)
+/// disagreed on exactly that, one keeping the code and one dropping it
+/// whenever output was present.
 impl fmt::Display for RunnerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Spawn(error) => write!(formatter, "{error}"),
-            Self::Exited { stderr, .. } if !stderr.is_empty() => write!(formatter, "{stderr}"),
-            Self::Exited { stdout, .. } if !stdout.is_empty() => write!(formatter, "{stdout}"),
+            Self::Spawn(error) => write!(formatter, "unable to start command: {error}"),
             Self::Exited {
-                code: Some(code), ..
-            } => write!(formatter, "command exited with status {code}"),
-            Self::Exited { code: None, .. } => {
-                write!(formatter, "command terminated without an exit code")
+                code,
+                stdout,
+                stderr,
+            } => {
+                match code {
+                    Some(code) => write!(formatter, "command exited with status {code}")?,
+                    None => write!(formatter, "command terminated without an exit code")?,
+                }
+                if !stdout.is_empty() {
+                    write!(formatter, "; stdout: {stdout}")?;
+                }
+                if !stderr.is_empty() {
+                    write!(formatter, "; stderr: {stderr}")?;
+                }
+                Ok(())
             }
         }
     }

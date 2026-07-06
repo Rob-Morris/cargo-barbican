@@ -4,14 +4,13 @@ use std::process::ExitCode;
 
 use barbican::{CratesIoClient, OffsetDateTime, parse_lockfile};
 
-use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
 use super::age_lock::recheck_lockfile_age_against_lockfiles;
-use super::lockfile_ops::{MemoizingCratesIoClient, restore_base_lockfile};
+use super::lockfile_ops::{LockfileRestoreGuard, MemoizingCratesIoClient};
 use super::{
-    CommandError, fail, load_config, load_current_lockfile_text, load_current_lockfile_with_text,
-    load_reviewed_release_age_exceptions,
+    CommandError, fail, load_current_lockfile_text, load_current_lockfile_with_text,
+    load_release_age_context,
 };
 
 pub(super) fn run_resolve<C, R>(
@@ -28,9 +27,8 @@ where
     R: CommandRunner + ?Sized,
 {
     let memoized_client = MemoizingCratesIoClient::new(client);
-    let minimum_days = min_age_days.unwrap_or(load_config(current_dir)?.release_age.minimum_days);
-    let reviewed_release_age_exceptions =
-        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
+    let (minimum_days, reviewed_release_age_exceptions) =
+        load_release_age_context(current_dir, min_age_days)?;
     let base_lockfile_text = match load_current_lockfile_text(current_dir, Path::new("Cargo.lock"))
     {
         Ok(text) => text,
@@ -49,8 +47,10 @@ where
         }
     };
 
+    let mut restore_guard = LockfileRestoreGuard::new(current_dir, &base_lockfile_text);
+
     if let Err(error) = runner.cargo_generate_lockfile(current_dir) {
-        restore_base_lockfile(current_dir, &base_lockfile_text)?;
+        restore_guard.restore_now()?;
         return fail(stderr, format!("cargo generate-lockfile: {error}"));
     }
 
@@ -58,7 +58,7 @@ where
         match load_current_lockfile_with_text(current_dir, Path::new("Cargo.lock")) {
             Ok(lockfile_with_text) => lockfile_with_text,
             Err(error) => {
-                restore_base_lockfile(current_dir, &base_lockfile_text)?;
+                restore_guard.restore_now()?;
                 return fail(stderr, error);
             }
         };
@@ -77,13 +77,15 @@ where
     ) {
         Ok(exit_code) => exit_code,
         Err(error) => {
-            restore_base_lockfile(current_dir, &base_lockfile_text)?;
+            restore_guard.restore_now()?;
             return Err(error);
         }
     };
 
-    if age_recheck_exit != ExitCode::SUCCESS {
-        restore_base_lockfile(current_dir, &base_lockfile_text)?;
+    if age_recheck_exit == ExitCode::SUCCESS {
+        restore_guard.disarm();
+    } else {
+        restore_guard.restore_now()?;
     }
 
     Ok(age_recheck_exit)

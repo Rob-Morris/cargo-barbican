@@ -4,16 +4,14 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, OffsetDateTime, ReleaseAgeOutcome, RustAssessmentClassification,
-    RustInspectReport, evaluate_release_age, inspect_published_crate_at,
+    CratesIoClient, OffsetDateTime, ReleaseAgeGateVerdict, RustAssessmentClassification,
+    RustInspectReport, classify_release_age_gate, evaluate_release_age, inspect_published_crate_at,
 };
 
-use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
-
 use super::{
-    CommandError, exit_code_from_policy_failures, join_display, load_config,
-    load_reviewed_release_age_exceptions, parse_specs,
-    render_missing_release_age_exception_review_record, render_release_age_report,
+    CommandError, escape_render_field, exit_code_from_policy_failures, join_display,
+    load_release_age_context, parse_specs, render_missing_release_age_exception_review_record,
+    render_release_age_report,
 };
 
 pub(super) fn run_inspect<C>(
@@ -28,9 +26,8 @@ pub(super) fn run_inspect<C>(
 where
     C: CratesIoClient + ?Sized,
 {
-    let minimum_days = min_age_days.unwrap_or(load_config(current_dir)?.release_age.minimum_days);
-    let reviewed_release_age_exceptions =
-        load_reviewed_release_age_exceptions(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
+    let (minimum_days, reviewed_release_age_exceptions) =
+        load_release_age_context(current_dir, min_age_days)?;
     let parse_result = parse_specs(raw_specs, stderr)?;
     let mut failed = parse_result.failed;
 
@@ -54,12 +51,13 @@ where
             minimum_days,
             age_exception,
         );
-        if matches!(release_age.outcome(), ReleaseAgeOutcome::TooFresh)
-            && let Some(exception) = reviewed_release_age_exceptions.missing_for_spec(&spec)
-        {
+        if let ReleaseAgeGateVerdict::MissingReviewRecord(exception) = classify_release_age_gate(
+            release_age.outcome(),
+            reviewed_release_age_exceptions.missing_for_spec(&spec),
+        ) {
             writeln!(
                 stderr,
-                "{}",
+                "FAIL {}",
                 render_missing_release_age_exception_review_record(exception)
             )
             .map_err(CommandError::Io)?;
@@ -79,15 +77,12 @@ where
             inspect_published_crate_at(spec, release, &tarball, now, minimum_days, age_exception);
         let rendered = render_inspect_report(&report);
 
-        match report.classification() {
-            RustAssessmentClassification::RoutineSafe => {
-                write!(stdout, "{rendered}").map_err(CommandError::Io)?;
-            }
-            RustAssessmentClassification::ElevatedRisk
-            | RustAssessmentClassification::PolicyViolating => {
-                write!(stderr, "{rendered}").map_err(CommandError::Io)?;
-                failed = true;
-            }
+        write!(stdout, "{rendered}").map_err(CommandError::Io)?;
+        if !matches!(
+            report.classification(),
+            RustAssessmentClassification::RoutineSafe
+        ) {
+            failed = true;
         }
     }
 
@@ -117,7 +112,14 @@ pub(super) fn render_inspect_report(report: &RustInspectReport) -> String {
     }
 
     match report.vcs_info() {
-        Some(vcs_info) => rendered.push_str(&format!("  provenance: {vcs_info}\n")),
+        // `vcs_info` (git_sha1 / path_in_vcs) is parsed from the published
+        // tarball's `.cargo_vcs_info.json` — network-sourced and untrusted —
+        // so it is escaped before rendering, matching every other untrusted
+        // field in this report.
+        Some(vcs_info) => rendered.push_str(&format!(
+            "  provenance: {}\n",
+            escape_render_field(&vcs_info.to_string())
+        )),
         None => rendered.push_str("  provenance: .cargo_vcs_info.json not present\n"),
     }
 
@@ -152,7 +154,10 @@ fn render_native_ffi_surface(report: &RustInspectReport) -> String {
         parts.push("crate name ends with -sys".to_owned());
     }
     if let Some(links) = report.package_links() {
-        parts.push(format!("package.links={links}"));
+        // `package.links` is parsed from the published `Cargo.toml` —
+        // untrusted, unrestricted TOML string content — so it is escaped
+        // before rendering.
+        parts.push(format!("package.links={}", escape_render_field(links)));
     }
     if !report.native_source_paths().is_empty() {
         parts.push(format!(

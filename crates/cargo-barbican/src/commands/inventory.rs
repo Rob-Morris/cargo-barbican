@@ -7,10 +7,9 @@ use std::collections::BTreeSet;
 use barbican::{
     BarbicanConfig, CargoManifestDirectRequirement, CargoManifestError, CargoManifestPackage,
     Inventory, InventoryAdvisoryExceptionStatus, InventoryDirectRequirements, InventoryGap,
-    OffsetDateTime, ReviewRecordFact, WorkspacePackageIdentity, build_graph_surfaces,
-    build_inventory, check_reviewed_rust_targets, parse_cargo_metadata,
-    parse_manifest_package_identity, parse_workspace_dependency_requirements,
-    parse_workspace_package_version,
+    OffsetDateTime, WorkspacePackageIdentity, build_graph_surfaces, build_inventory,
+    check_reviewed_rust_targets, parse_cargo_metadata, parse_manifest_package_identity,
+    parse_workspace_dependency_requirements, parse_workspace_package_version,
 };
 
 use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
@@ -42,18 +41,7 @@ pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
         load_reviewed_targets(current_dir, Path::new(REVIEWED_TARGETS_CONFIG_FILE))?;
     let review_record_facts = reviewed_targets
         .as_ref()
-        .map(|targets| {
-            check_review_record_paths(current_dir, targets)
-                .into_iter()
-                .map(|check| {
-                    ReviewRecordFact::new(
-                        check.family_name().to_owned(),
-                        check.review_record().to_owned(),
-                        check.is_success(),
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
+        .map(|targets| check_review_record_paths(current_dir, targets))
         .unwrap_or_default();
     let reviewed_report = reviewed_targets
         .as_ref()

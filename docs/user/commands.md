@@ -32,6 +32,36 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican verify` | Base execution gate | Run the final local execution gate. |
 | `cargo barbican gatehouse` | Workflow namespace | Run supported gatehouse workflows over the base commands. |
 
+## Glossary
+
+- **Family** — a named entry under `[[rust.families]]` in
+  `reviewed-targets.toml`, covering one or more crates that were reviewed
+  together and share one checked-in review record. A family carries an exact
+  `resolved` set, optional `direct` requirements, and optional
+  `allowed_surfaces` / `allowed_age_exceptions` / `allowed_advisories`.
+- **Reviewed target** — an exact crate version (and, for the structured
+  crates.io form, a `checksum_sha256`) recorded in a family's `resolved` map.
+  `pin check` and `verify` reconcile the current `Cargo.lock` against these
+  exact targets.
+- **Gate** — a command whose job is to fail closed: `pin check`, `audit`, and
+  `verify`. A gate passes with a stable terminal token (`Pin check: PASS`,
+  `Audit: PASS`, `Verify: PASS`), blocks and explains why, or — for standalone
+  `pin check` only — skips successfully when no reviewed-target policy is
+  configured yet. Evidence and workflow commands (`age`, `inspect`, `assess`,
+  `review`, `inventory`, `gatehouse candidate`) are not gates in this sense,
+  even where they also exit non-zero on failure.
+- **Surface** — an execution surface a dependency's code runs through:
+  `build-rs` (build scripts), `proc-macro`, or `native-sys` (native linking
+  and FFI). Declared per crate under a family's `allowed_surfaces`.
+- **Exception** — a recorded, checksum-bound acceptance of an otherwise
+  blocking finding for a crate already present in a family's `resolved` map:
+  `allowed_age_exceptions` for too-fresh releases, `allowed_advisories` for
+  advisory findings with a `review_by` re-review deadline.
+- **Dossier** — the human-readable pre-add intake report `gatehouse candidate`
+  produces, combining candidate inspection, an isolated sandbox lockfile,
+  `cargo tree`, and `cargo audit` into one document. It is evidence for a
+  review, not itself a policy verdict.
+
 ## Common Workflows
 
 ### Adopting Cargo-Barbican In A Repo
@@ -184,6 +214,16 @@ cargo barbican verify
 `assess` classifies the overall dependency change. `review` prints the files
 that deserve human attention. `audit` delegates to `cargo-audit` and
 `cargo-deny`. `verify` runs the final local execution gate.
+
+A Dependabot or Renovate bump of a crate already covered by a reviewed family
+fails `pin check` by design: the bot moved `Cargo.lock` (and possibly the
+manifest requirement) away from the exact version and checksum the family
+recorded, and that mismatch is exactly what `pin check` exists to catch. This
+is not a false positive to suppress. Treat it as a re-review trigger: review
+the bumped version the same way any other update would be reviewed, then
+update the family's `resolved` entry (and `direct` entry, if pinned) in
+`reviewed-targets.toml` and the review record to match, before merging the
+bot's PR.
 
 ### Maintaining Reviewed Targets
 
@@ -705,6 +745,17 @@ renders the offline sections and marks live graph surfaces as not collected.
 Reported observational findings and policy coverage gaps do not change the
 exit code; this command is an audit view, not an enforcement gate.
 
+Workspace-member discovery for the offline manifest sections is approximate,
+not Cargo-exact: literal `[workspace] members` paths are read directly, but
+glob member patterns are resolved by walking the matched root directories for
+any `Cargo.toml`, not by evaluating the glob pattern itself, and a
+`[workspace] exclude` list is not honoured. `crates/` is always scanned as an
+extra root regardless of whether the workspace declares a glob there. In a
+monorepo with directories that look like workspace members but are excluded,
+or with an unrelated `Cargo.toml` under a scanned root, `inventory` can report
+phantom manifest entries that `cargo metadata` would not consider part of the
+workspace. Cross-check against `cargo metadata` output when the two disagree.
+
 ### `cargo barbican pin add`
 
 Scaffolds a reviewed-target family and a review-record stub for one crate
@@ -777,15 +828,31 @@ Checks include:
 - active review records exist in the repo
 - configured direct requirements match workspace manifests exactly
 - configured resolved versions match `Cargo.lock`
+- every `Cargo.lock` entry sharing a reviewed crate's name is crates.io
+  sourced; a git, path, alternate-registry, or sourceless entry blocks the
+  check even when a sibling entry for the same name and version is a clean
+  crates.io match — this applies to both structured and version-only
+  `resolved` entries
 - configured crates.io checksums match the resolved `Cargo.lock` checksum
-  chain
+  chain; a matching-version entry with no checksum is its own mismatch, not
+  treated as absent
 - allowed execution surfaces reference crates in the same reviewed family
 - allowed release-age exceptions reference crates in the same reviewed family
   and require structured `checksum_sha256` entries
+- no workspace manifest `[patch]` table (any registry key) targets a crate
+  covered by an active reviewed family
+- no repo-root `.cargo/config.toml` / `.cargo/config` declares a `[source]`,
+  `[patch]`, or top-level `paths` table while a reviewed family is active
 
 Standalone `pin check` skips successfully when no reviewed-target manifest is
 present or no active Rust families are configured. `verify` is stricter and
 requires at least one active reviewed family before build/test execution.
+
+Version-only `resolved` entries (for example `serde = "1.0.228"`) now still
+enforce the crates.io source requirement above, but they do not bind an
+artefact checksum. Prefer the structured
+`{ version = "...", checksum_sha256 = "..." }` form so the gate also catches a
+same-version crates.io re-publish with a different checksum.
 
 ### `cargo barbican review`
 
@@ -866,9 +933,30 @@ cargo test --locked
 regular file, or configures no active reviewed family.
 
 On success, `verify` confirms each executed step explicitly (`OK   cargo build
---locked`, `OK   cargo test --locked`) and ends with `Verify: PASS`, so a
-passing run is distinguishable from a skipped one.
+--locked`, `OK   cargo test --locked`), then prints a scope-honesty note —
+`note: advisory audit is a separate gate; run cargo barbican audit` —
+immediately before the final `Verify: PASS` line, so a passing run is
+distinguishable from a skipped one and does not read as an advisory-clean
+verdict on its own.
 
 This command executes normal Cargo build and test behaviour. That can run build
 scripts, proc macros, and tests from the dependency graph. Run it after the
 policy and review steps have made that execution acceptable.
+
+#### `audit` and `verify` are the enforcement gate, kept separate
+
+`cargo barbican audit` plus `cargo barbican verify` together are the
+enforcement gate a repo runs before trusting its dependency state. They are
+kept as two separate commands rather than merged into one because their
+verdicts depend on different things:
+
+- `verify`'s verdict is a pure function of the repo: the same manifests,
+  lockfile, and reviewed-target policy always produce the same result. It is
+  deterministic and reproducible.
+- `audit`'s verdict also depends on the advisory landscape at the moment it
+  runs. A new RustSec advisory against an already-locked crate can flip
+  `audit` from PASS to FAIL with no repo change at all.
+
+A workflow that composes both gates into one step is a possible future
+addition via `gatehouse`, but is not implemented today; run `audit` and
+`verify` as two commands. See [ci.md](ci.md) for how to schedule each in CI.

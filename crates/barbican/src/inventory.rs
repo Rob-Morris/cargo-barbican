@@ -527,13 +527,7 @@ pub fn build_inventory(
             }
 
             for check in family.resolved_checks() {
-                covered_specs.insert(
-                    ExactCrateSpec::from_parts(
-                        check.crate_name(),
-                        check.expected_target().version(),
-                    )
-                    .expect("parse_reviewed_targets_toml validates exact specs"),
-                );
+                covered_specs.insert(check.expected_target().spec().clone());
             }
             reviewed_families.push(InventoryReviewedFamily {
                 name: family.name().to_owned(),
@@ -622,11 +616,7 @@ pub fn build_inventory(
     let live_surfaces = surfaces.map(|surfaces| {
         let mut live_surfaces = Vec::new();
         for (spec, package_surfaces) in surfaces.surfaces() {
-            let mut surface_kinds = package_surfaces.surface_kinds();
-            if spec.is_native_sys() && !surface_kinds.contains(&ExecutionSurfaceKind::NativeSys) {
-                surface_kinds.push(ExecutionSurfaceKind::NativeSys);
-            }
-            for surface in surface_kinds {
+            for surface in package_surfaces.surface_kinds(spec) {
                 let declared = declared_surface_keys.contains(&(spec.clone(), surface));
                 if !declared {
                     gaps.push(InventoryGap::UndeclaredExecutionSurface {

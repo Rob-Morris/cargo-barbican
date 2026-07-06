@@ -4,9 +4,10 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, OffsetDateTime, ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException,
-    RustAssessmentClassification, RustAssessmentFinding, RustAssessmentFindingCategory,
-    RustAssessmentFindingSeverity, RustAssessmentReport, parse_cargo_metadata,
+    CratesIoClient, OffsetDateTime, ReleaseAgeGateVerdict, ReleaseAgeOutcome,
+    ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException, RustAssessmentClassification,
+    RustAssessmentFinding, RustAssessmentFindingCategory, RustAssessmentFindingSeverity,
+    RustAssessmentReport, classify_release_age_gate, parse_cargo_metadata,
 };
 
 use crate::cli::{AssessPolicyMode, REVIEWED_TARGETS_CONFIG_FILE};
@@ -16,7 +17,8 @@ use super::{
     CommandError, DEFAULT_BASE_REF, collect_reviewed_release_age_exceptions, fail, join_display,
     load_base_manifest_dependencies, load_config, load_current_lockfile, load_git_base_lockfile,
     load_lockfile_from_path, load_manifest_dependencies_from_root, load_reviewed_targets,
-    render_missing_release_age_exception_review_record, review_record_exists,
+    render_allowed_policy_exceptions, render_missing_release_age_exception_review_record,
+    review_record_exists,
 };
 
 pub(super) fn run_assess<C, R>(
@@ -127,11 +129,17 @@ where
         );
     }
 
-    if let Some(exception) = report
-        .age_violations()
-        .iter()
-        .find_map(|violation| reviewed_release_age_exceptions.missing_for_spec(violation.spec()))
-    {
+    // Every age_violations() entry is by construction a TooFresh outcome; classify it
+    // against the same precedence rule the age-focused commands use.
+    if let Some(exception) = report.age_violations().iter().find_map(|violation| {
+        match classify_release_age_gate(
+            &ReleaseAgeOutcome::TooFresh,
+            reviewed_release_age_exceptions.missing_for_spec(violation.spec()),
+        ) {
+            ReleaseAgeGateVerdict::MissingReviewRecord(exception) => Some(exception),
+            _ => None,
+        }
+    }) {
         return fail(
             stderr,
             render_missing_release_age_exception_review_record(exception),
@@ -197,42 +205,42 @@ fn render_assessment_report(
     render_assessment_line(
         stdout,
         "new direct dependencies",
-        report.new_direct_dependencies(),
+        &report.new_direct_dependencies(),
     )?;
     render_assessment_line(
         stdout,
         "new non-crates.io direct specs",
         &rendered_non_crates_io_direct_dependencies(report),
     )?;
-    render_assessment_line(stdout, "age violations", report.age_violations())?;
-    render_assessment_line(stdout, "yanked versions", report.yanked_versions())?;
+    render_assessment_line(stdout, "age violations", &report.age_violations())?;
+    render_assessment_line(stdout, "yanked versions", &report.yanked_versions())?;
     render_assessment_line(
         stdout,
         "release-age exception artefact mismatches",
-        report.release_age_exception_mismatches(),
+        &report.release_age_exception_mismatches(),
     )?;
     render_assessment_line(
         stdout,
         "lockfile checksum drifts",
-        report.locked_checksum_drifts(),
+        &report.locked_checksum_drifts(),
     )?;
     render_assessment_line(
         stdout,
         "source changes",
-        report.non_crates_io_source_changes(),
+        &report.non_crates_io_source_changes(),
     )?;
-    render_assessment_line(stdout, "new -sys crates", report.native_sys_crates())?;
+    render_assessment_line(stdout, "new -sys crates", &report.native_sys_crates())?;
     render_assessment_line(
         stdout,
         "new/changed build.rs surface",
-        report.build_rs_surfaces(),
+        &report.build_rs_surfaces(),
     )?;
     render_assessment_line(
         stdout,
         "new/changed proc-macro surface",
-        report.proc_macro_surfaces(),
+        &report.proc_macro_surfaces(),
     )?;
-    render_assessment_line(stdout, "inspection failures", report.inspection_failures())?;
+    render_assessment_line(stdout, "inspection failures", &report.inspection_failures())?;
     writeln!(stdout).map_err(CommandError::Io)?;
 
     render_finding_section(
@@ -269,13 +277,15 @@ fn render_assess_allowed_exceptions(
         return Ok(());
     }
 
-    writeln!(stdout, "Allowed policy exceptions:").map_err(CommandError::Io)?;
-    for allowed_surface in allowed_surfaces {
-        writeln!(stdout, "  - {allowed_surface}").map_err(CommandError::Io)?;
-    }
-    for allowed_exception in allowed_age_exceptions {
-        writeln!(stdout, "  - {allowed_exception}").map_err(CommandError::Io)?;
-    }
+    // Both allowance types embed a policy-owner-controlled reviewed-targets.toml
+    // family name in their Display; route through the shared escaping helper
+    // rather than interpolating them directly, matching how pin check and
+    // audit render the same reviewed-family data.
+    let exceptions = allowed_surfaces
+        .iter()
+        .map(ToString::to_string)
+        .chain(allowed_age_exceptions.iter().map(ToString::to_string));
+    render_allowed_policy_exceptions(stdout, exceptions)?;
     writeln!(stdout).map_err(CommandError::Io)
 }
 
@@ -294,7 +304,7 @@ fn render_assessment_line<T: Display>(
 fn rendered_non_crates_io_direct_dependencies(report: &RustAssessmentReport) -> Vec<String> {
     report
         .non_crates_io_direct_dependencies()
-        .iter()
+        .into_iter()
         .map(|dependency| format!("{dependency} ({})", dependency.source_kind()))
         .collect()
 }
@@ -328,59 +338,47 @@ fn render_finding_summary(report: &RustAssessmentReport, finding: RustAssessment
     match finding.category() {
         RustAssessmentFindingCategory::NewDirectDependencies => format!(
             "new direct Rust dependencies added: {}",
-            join_display(report.new_direct_dependencies(), ", ")
+            join_display(&report.new_direct_dependencies(), ", ")
         ),
         RustAssessmentFindingCategory::NonCratesIoDirectDependencies => format!(
             "new non-crates.io direct Rust dependency specs detected: {}",
-            join_display_with(
-                report.non_crates_io_direct_dependencies(),
-                ", ",
-                |dependency| { format!("{dependency} ({})", dependency.source_kind()) }
-            )
+            join_display(&rendered_non_crates_io_direct_dependencies(report), ", ")
         ),
         RustAssessmentFindingCategory::AgeViolations => format!(
             "newly selected crates.io versions below the minimum age: {}",
-            join_display(report.age_violations(), ", ")
+            join_display(&report.age_violations(), ", ")
         ),
         RustAssessmentFindingCategory::YankedVersions => format!(
             "newly selected yanked crate versions: {}",
-            join_display(report.yanked_versions(), ", ")
+            join_display(&report.yanked_versions(), ", ")
         ),
         RustAssessmentFindingCategory::ReleaseAgeExceptionArtefactMismatches => format!(
             "reviewed release-age exception artefact checksums did not match crates.io: {}",
-            join_display(report.release_age_exception_mismatches(), ", ")
+            join_display(&report.release_age_exception_mismatches(), ", ")
         ),
         RustAssessmentFindingCategory::LockedChecksumDrifts => format!(
             "locked crates.io checksums changed for existing selections: {}",
-            join_display(report.locked_checksum_drifts(), ", ")
+            join_display(&report.locked_checksum_drifts(), ", ")
         ),
         RustAssessmentFindingCategory::NonCratesIoSourceChanges => format!(
             "non-crates.io source changes detected: {}",
-            join_display(report.non_crates_io_source_changes(), ", ")
+            join_display(&report.non_crates_io_source_changes(), ", ")
         ),
         RustAssessmentFindingCategory::NativeSysCrates => format!(
             "new native -sys crates introduced: {}",
-            join_display(report.native_sys_crates(), ", ")
+            join_display(&report.native_sys_crates(), ", ")
         ),
         RustAssessmentFindingCategory::BuildRsSurfaces => format!(
             "new or changed build.rs surface detected: {}",
-            join_display(report.build_rs_surfaces(), ", ")
+            join_display(&report.build_rs_surfaces(), ", ")
         ),
         RustAssessmentFindingCategory::ProcMacroSurfaces => format!(
             "new or changed proc-macro surface detected: {}",
-            join_display(report.proc_macro_surfaces(), ", ")
+            join_display(&report.proc_macro_surfaces(), ", ")
         ),
         RustAssessmentFindingCategory::InspectionFailures => format!(
             "failed to inspect some Rust dependency surfaces: {}",
-            join_display(report.inspection_failures(), "; ")
+            join_display(&report.inspection_failures(), "; ")
         ),
     }
-}
-
-fn join_display_with<T>(values: &[T], separator: &str, render: impl Fn(&T) -> String) -> String {
-    values
-        .iter()
-        .map(render)
-        .collect::<Vec<_>>()
-        .join(separator)
 }

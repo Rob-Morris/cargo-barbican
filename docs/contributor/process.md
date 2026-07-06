@@ -15,6 +15,7 @@ This repo ships opt-in distributed Git hooks:
   - [`scripts/check_commit_msg.sh`](../../scripts/check_commit_msg.sh)
 - behaviour tests for the shell checks:
   - [`scripts/tests/check_commit_msg_test.sh`](../../scripts/tests/check_commit_msg_test.sh)
+  - [`scripts/tests/verify_branch_guard_test.sh`](../../scripts/tests/verify_branch_guard_test.sh)
 
 Enable them locally with:
 

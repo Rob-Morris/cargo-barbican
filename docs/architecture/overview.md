@@ -49,7 +49,8 @@ support is explicitly delivered.
 
 The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
 `update`, `assess`, `inspect`, `gatehouse candidate`, `policy init`,
-`pin check`, `review`, `audit`, and `verify` are implemented.
+`inventory`, `pin add`, `pin check`, `review`, `audit`, and `verify` are
+implemented.
 
 The current intake layer is:
 

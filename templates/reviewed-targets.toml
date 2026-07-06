@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.18.0
+# Synced from cargo-barbican v0.19.0
 # Copy this template into a consumer repo, then edit that repo's
 # reviewed-targets.toml to declare reviewed dependency families.
 
@@ -14,7 +14,11 @@
 # - optional `direct`: exact manifest requirements for direct crates, including
 #   the leading `=`
 # - `resolved`: exact Cargo.lock targets; for crates.io reviewed artefacts the
-#   preferred form is `{ version = "...", checksum_sha256 = "..." }`
+#   preferred form is `{ version = "...", checksum_sha256 = "..." }`. Every
+#   matching Cargo.lock entry must be crates.io sourced regardless of form; the
+#   version-only string form (`some-crate = "1.2.3"`) still enforces that
+#   crates.io source requirement but does not bind the resolved artefact
+#   checksum, so prefer the structured checksum form
 # - optional `allowed_surfaces`: reviewed execution surfaces for crates already
 #   present in the same `resolved` map
 # - optional `allowed_age_exceptions`: reviewed release-age exceptions for

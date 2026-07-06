@@ -126,6 +126,63 @@ impl fmt::Display for CargoManifestDependency {
     }
 }
 
+/// Returns crate names patched under any `[patch.<registry-key>]` table,
+/// regardless of which registry key names the patch (`crates-io` or a named
+/// alternate registry). `[patch]` repoints an already-resolved crate name at
+/// a different source without touching `[dependencies]` or `Cargo.lock`
+/// checksums, so reviewed-target enforcement must see patched names even
+/// though they are not "dependencies" in the ordinary sense.
+pub fn parse_manifest_patched_crate_names(
+    manifest_path: &str,
+    text: &str,
+) -> Result<BTreeSet<String>, CargoManifestError> {
+    let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
+    let mut patched = BTreeSet::new();
+
+    let Some(patch_value) = root_table.get("patch") else {
+        return Ok(patched);
+    };
+    let Some(patch_table) = patch_value.as_table() else {
+        return Err(CargoManifestError::InvalidDependencySection {
+            manifest_path: manifest_path.to_owned(),
+            section: "patch".to_owned(),
+        });
+    };
+
+    for (registry_key, registry_value) in patch_table {
+        let Some(registry_table) = registry_value.as_table() else {
+            return Err(CargoManifestError::InvalidDependencySection {
+                manifest_path: manifest_path.to_owned(),
+                section: format!("patch.{registry_key}"),
+            });
+        };
+
+        for (patch_key, patch_value) in registry_table {
+            patched.insert(patch_key.clone());
+
+            let Some(patch_entry_table) = patch_value.as_table() else {
+                continue;
+            };
+            match patch_entry_table.get("package") {
+                None => {}
+                Some(Value::String(package_name)) => {
+                    patched.insert(package_name.clone());
+                }
+                Some(_) => {
+                    return Err(CargoManifestError::InvalidPatchPackageName {
+                        manifest_path: manifest_path.to_owned(),
+                        section: format!("patch.{registry_key}"),
+                        key: patch_key.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(patched)
+}
+
 pub fn parse_manifest_dependencies(
     manifest_path: &str,
     text: &str,
@@ -528,6 +585,12 @@ pub enum CargoManifestError {
         manifest_path: String,
         section: String,
     },
+    #[error("{manifest_path}: {section}.{key}.package must be a string")]
+    InvalidPatchPackageName {
+        manifest_path: String,
+        section: String,
+        key: String,
+    },
     #[error("{manifest_path}: package section must be a table")]
     InvalidPackageSection { manifest_path: String },
     #[error("{manifest_path}: package name must be a string")]
@@ -555,11 +618,14 @@ pub enum CargoManifestError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::{
         CargoDependencySourceKind, CargoManifestError, parse_manifest_dependencies,
         parse_manifest_direct_requirements, parse_manifest_package_identity,
-        parse_workspace_dependency_requirements, parse_workspace_member_glob_roots,
-        parse_workspace_member_manifest_paths, parse_workspace_package_version,
+        parse_manifest_patched_crate_names, parse_workspace_dependency_requirements,
+        parse_workspace_member_glob_roots, parse_workspace_member_manifest_paths,
+        parse_workspace_package_version,
     };
 
     #[test]
@@ -885,6 +951,104 @@ members = ["/tmp/outside"]
             error,
             CargoManifestError::InvalidWorkspaceMemberPath { member, .. }
                 if member == "/tmp/outside"
+        ));
+    }
+
+    #[test]
+    fn parses_patched_crate_names_from_any_registry_key() {
+        let patched = parse_manifest_patched_crate_names(
+            "Cargo.toml",
+            r#"
+[patch.crates-io]
+serde = { git = "https://example.com/serde.git" }
+
+[patch."https://example.com/registry"]
+other-crate = { git = "https://example.com/other.git" }
+"#,
+        )
+        .expect("manifest should parse");
+
+        assert_eq!(
+            patched,
+            BTreeSet::from(["serde".to_owned(), "other-crate".to_owned()])
+        );
+    }
+
+    #[test]
+    fn parses_patched_crate_names_from_package_rename_form() {
+        let patched = parse_manifest_patched_crate_names(
+            "Cargo.toml",
+            r#"
+[patch.crates-io]
+serde-alias = { package = "serde", git = "https://example.com/serde.git" }
+"#,
+        )
+        .expect("manifest should parse");
+
+        assert_eq!(
+            patched,
+            BTreeSet::from(["serde".to_owned(), "serde-alias".to_owned()])
+        );
+    }
+
+    #[test]
+    fn rejects_non_string_patch_package_name() {
+        let error = parse_manifest_patched_crate_names(
+            "Cargo.toml",
+            r#"
+[patch.crates-io]
+serde-alias = { package = 1, git = "https://example.com/serde.git" }
+"#,
+        )
+        .expect_err("manifest should fail");
+
+        assert!(matches!(
+            error,
+            CargoManifestError::InvalidPatchPackageName { section, key, .. }
+                if section == "patch.crates-io" && key == "serde-alias"
+        ));
+    }
+
+    #[test]
+    fn returns_no_patched_crates_when_patch_table_is_absent() {
+        let patched = parse_manifest_patched_crate_names("Cargo.toml", "[dependencies]\n")
+            .expect("manifest should parse");
+
+        assert!(patched.is_empty());
+    }
+
+    #[test]
+    fn rejects_non_table_patch_section() {
+        let error = parse_manifest_patched_crate_names(
+            "Cargo.toml",
+            r#"
+patch = "not a table"
+"#,
+        )
+        .expect_err("manifest should fail");
+
+        assert!(matches!(
+            error,
+            CargoManifestError::InvalidDependencySection { section, .. }
+                if section == "patch"
+        ));
+    }
+
+    #[test]
+    fn rejects_non_table_patch_registry_entries() {
+        let error = parse_manifest_patched_crate_names(
+            "Cargo.toml",
+            r#"
+[patch]
+crates-io = "not a table"
+"#,
+        )
+        .expect_err("manifest should fail");
+
+        assert!(matches!(
+            error,
+            CargoManifestError::InvalidDependencySection { section, .. }
+                if section == "patch.crates-io"
         ));
     }
 }

@@ -42,7 +42,18 @@ not hidden runtime default state.
 Treat the existing dependency graph as inventory to review, not as already
 trusted state.
 
-For each dependency family you want to bring under reviewed-target policy:
+Run `cargo barbican inventory` first to see the coverage-gap list: direct
+dependencies, non-crates.io sources, and live `build.rs` / proc-macro /
+native-sys execution surfaces that are not yet covered by a reviewed family.
+Triage that list before reviewing crate by crate. Bring direct dependencies
+and elevated-risk execution surfaces under reviewed-target policy first;
+routine transitive crates with no elevated-risk surface can follow later, once
+the direct and high-risk coverage gaps are closed.
+
+For each dependency family (a named group of one or more crates covered by
+one review record and one `reviewed-targets.toml` entry — see the
+[glossary](commands.md#glossary)) you want to bring under reviewed-target
+policy:
 
 1. Identify the direct manifest requirement and resolved `Cargo.lock` version.
 2. Confirm the crates.io checksum from `Cargo.lock` for registry artefacts.
@@ -59,7 +70,12 @@ complete the record before treating the family as reviewed.
 
 Use structured crates.io `resolved` entries with `checksum_sha256` wherever
 possible so `pin check` can reconcile the reviewed artefact against
-`Cargo.lock`.
+`Cargo.lock`. Both structured and version-only `resolved` entries require
+every matching `Cargo.lock` entry to be crates.io sourced — a git, path, or
+alternate-registry entry for the same crate name is a blocking mismatch, even
+alongside a clean crates.io entry at the reviewed version. Only the structured
+checksum form additionally binds the resolved artefact digest, so prefer it
+over the version-only form.
 
 If a reviewed exact crate version is intentionally accepted before the minimum
 release-age window has elapsed, add it under the family's
@@ -90,20 +106,32 @@ cargo barbican pin check
 
 `pin check` is local-only and read-only. It verifies that active reviewed
 families point at real review records and match the current manifests and
-`Cargo.lock`.
+`Cargo.lock`. It also fails closed when a manifest `[patch]` table targets a
+reviewed crate, or when a repo-root `.cargo/config.toml` declares a `[source]`
+table, a config-defined `[patch]` table, or a top-level `paths` override —
+all of these can repoint a reviewed crate at an unreviewed source without
+touching `Cargo.lock`.
 
 ## 4. Run The Enforcement Gate
 
-When reviewed-target policy is ready:
+When reviewed-target policy is ready, run both `audit` and `verify`:
 
 ```bash
+cargo barbican audit
 cargo barbican verify
 ```
 
-`verify` fails closed when `reviewed-targets.toml` is absent, not a regular
-file, or configures no active reviewed family — the gate requires at least one.
-It runs the reviewed-target gate before locked build/test verification and
-confirms each passing step, ending with `Verify: PASS`.
+They stay two separate commands on purpose. `verify`'s verdict is a pure
+function of the repo — the same manifests, lockfile, and reviewed-target
+policy always produce the same result. `audit`'s verdict also depends on the
+advisory landscape at the moment it runs, so a new RustSec advisory can flip
+it from PASS to FAIL with no repo change at all. `verify` fails closed when
+`reviewed-targets.toml` is absent, not a regular file, or configures no active
+reviewed family — the gate requires at least one. It runs the reviewed-target
+gate before locked build/test verification and confirms each passing step,
+ending with `Verify: PASS`; immediately before that line it also prints a note
+pointing at `audit` as the separate advisory gate. See
+[ci.md](ci.md) for how to schedule both in CI.
 
 ## Manual Template Adoption
 
