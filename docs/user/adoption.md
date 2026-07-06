@@ -51,8 +51,14 @@ For each dependency family you want to bring under reviewed-target policy:
 4. Write a checked-in review record under `docs/dependency-reviews/`.
 5. Add the reviewed family to `reviewed-targets.toml`.
 
+`cargo barbican pin add <crate>` scaffolds steps 4 and 5 offline from the
+resolved `Cargo.lock` facts: it appends the family stub (version plus
+`checksum_sha256`) to `reviewed-targets.toml` and creates the review-record
+stub under `docs/dependency-reviews/`. The scaffold is not the review itself —
+complete the record before treating the family as reviewed.
+
 Use structured crates.io `resolved` entries with `checksum_sha256` wherever
-possible so `pin-check` can reconcile the reviewed artefact against
+possible so `pin check` can reconcile the reviewed artefact against
 `Cargo.lock`.
 
 If a reviewed exact crate version is intentionally accepted before the minimum
@@ -79,10 +85,10 @@ regardless of the reporting mode.
 After adding reviewed families and records:
 
 ```bash
-cargo barbican pin-check
+cargo barbican pin check
 ```
 
-`pin-check` is local-only and read-only. It verifies that active reviewed
+`pin check` is local-only and read-only. It verifies that active reviewed
 families point at real review records and match the current manifests and
 `Cargo.lock`.
 
@@ -94,8 +100,10 @@ When reviewed-target policy is ready:
 cargo barbican verify
 ```
 
-`verify` fails closed when `reviewed-targets.toml` is absent or not a regular
-file. It runs the reviewed-target gate before locked build/test verification.
+`verify` fails closed when `reviewed-targets.toml` is absent, not a regular
+file, or configures no active reviewed family — the gate requires at least one.
+It runs the reviewed-target gate before locked build/test verification and
+confirms each passing step, ending with `Verify: PASS`.
 
 ## Manual Template Adoption
 

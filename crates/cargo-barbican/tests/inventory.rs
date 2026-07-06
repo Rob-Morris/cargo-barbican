@@ -460,7 +460,7 @@ fn inventory_reports_configured_empty_policy_without_gaps() {
     assert!(stdout.contains("Policy coverage gaps:\n  none\n"));
     assert!(
         stdout.contains(
-            "Run `cargo barbican pin-check` or `cargo barbican verify` to enforce policy."
+            "Run `cargo barbican pin check` or `cargo barbican verify` to enforce policy."
         )
     );
 }
@@ -609,7 +609,7 @@ fn inventory_not_collected_state_prevents_clean_next_action() {
     );
     assert!(
         !stdout.contains(
-            "Run `cargo barbican pin-check` or `cargo barbican verify` to enforce policy."
+            "Run `cargo barbican pin check` or `cargo barbican verify` to enforce policy."
         )
     );
 }

@@ -23,3 +23,7 @@ system works today. Decision records explain why it ended up that way.
 - [DD-001: CLI Command Vocabulary For Resolution, Lockfile Generation, And Updates](dd-001-cli-command-vocabulary.md)
   — `pick` (discover a version), `resolve` (reclaimed for whole-graph lockfile
   resolution), and `update` (renamed from `resolve`).
+- DD-002 — reserved for the in-flight IOC-as-gated-surface design.
+- [DD-003: The `pin` Command Namespace](dd-003-pin-command-namespace.md)
+  — `pin add` (scaffold a reviewed family) and `pin check` (renamed from
+  `pin-check`).

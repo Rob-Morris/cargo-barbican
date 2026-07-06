@@ -1,13 +1,12 @@
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
-use std::{fs, io};
 
 use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
-use super::pin_check::run_pin_check;
-use super::{CommandError, fail};
+use super::pin_check::enforce_reviewed_targets;
+use super::{CommandError, fail, load_reviewed_targets};
 
 pub(super) fn run_verify<R>(
     current_dir: &Path,
@@ -18,32 +17,24 @@ pub(super) fn run_verify<R>(
 where
     R: CommandRunner + ?Sized,
 {
-    match fs::symlink_metadata(current_dir.join(REVIEWED_TARGETS_CONFIG_FILE)) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => {
-            return fail(
-                stderr,
-                format!("{REVIEWED_TARGETS_CONFIG_FILE}: reviewed-targets policy is not a file"),
-            );
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return fail(
-                stderr,
-                format!(
-                    "{REVIEWED_TARGETS_CONFIG_FILE}: reviewed-targets policy required for verify"
-                ),
-            );
-        }
-        Err(error) => {
-            return fail(
-                stderr,
-                format!("unable to inspect {REVIEWED_TARGETS_CONFIG_FILE}: {error}"),
-            );
-        }
+    let config_path = Path::new(REVIEWED_TARGETS_CONFIG_FILE);
+    let Some(reviewed_targets) = load_reviewed_targets(current_dir, config_path)? else {
+        return fail(
+            stderr,
+            format!("{REVIEWED_TARGETS_CONFIG_FILE}: reviewed-targets policy required for verify"),
+        );
+    };
+    if reviewed_targets.rust_families().is_empty() {
+        return fail(
+            stderr,
+            format!(
+                "{REVIEWED_TARGETS_CONFIG_FILE}: no active Rust reviewed families; verify requires at least one"
+            ),
+        );
     }
 
     let pin_check_exit =
-        run_pin_check(Path::new(REVIEWED_TARGETS_CONFIG_FILE), current_dir, stdout)?;
+        enforce_reviewed_targets(&reviewed_targets, config_path, current_dir, stdout)?;
     if pin_check_exit != ExitCode::SUCCESS {
         return Ok(pin_check_exit);
     }
@@ -51,9 +42,12 @@ where
     if let Err(error) = runner.cargo_build_locked(current_dir) {
         return fail(stderr, format!("cargo build --locked: {error}"));
     }
+    writeln!(stdout, "OK   cargo build --locked").map_err(CommandError::Io)?;
     if let Err(error) = runner.cargo_test_locked(current_dir) {
         return fail(stderr, format!("cargo test --locked: {error}"));
     }
+    writeln!(stdout, "OK   cargo test --locked").map_err(CommandError::Io)?;
+    writeln!(stdout, "Verify: PASS").map_err(CommandError::Io)?;
 
     Ok(ExitCode::SUCCESS)
 }

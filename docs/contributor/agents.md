@@ -88,7 +88,8 @@ current implemented surface is:
 - `cargo barbican gatehouse candidate`
 - `cargo barbican policy init`
 - `cargo barbican inventory`
-- `cargo barbican pin-check`
+- `cargo barbican pin add`
+- `cargo barbican pin check`
 - `cargo barbican review`
 - `cargo barbican audit`
 - `cargo barbican verify`
@@ -132,13 +133,13 @@ The current intake layer now includes the first pre-add deep-review slice:
   inventory and policy-coverage audit; it now combines offline manifest /
   lockfile facts with read-only frozen cargo metadata for live execution
   surfaces
-- `cargo barbican pin-check` now exists as the first reviewed-target
+- `cargo barbican pin check` now exists as the first reviewed-target
   enforcement surface over repo-root `reviewed-targets.toml`
-- `pin-check` now validates that every active reviewed family points at a real
+- `pin check` now validates that every active reviewed family points at a real
   checked-in review record path before it trusts that reviewed-target entry
 - the first gate trusts exact `Cargo.lock` parity plus optional exact direct
   manifest requirements; stronger build-input parity remains deferred
-- for structured crates.io `resolved` entries, `pin-check` also reconciles the
+- for structured crates.io `resolved` entries, `pin check` also reconciles the
   reviewed `checksum_sha256` against the resolved `Cargo.lock` checksum chain
 - reviewed families can now declare exact `allowed_surfaces` for reviewed
   `build-rs`, `proc-macro`, and `native-sys` execution surfaces
@@ -151,8 +152,13 @@ The current intake layer now includes the first pre-add deep-review slice:
 - release-age-aware commands honour those reviewed release-age exceptions at
   the shared release-age seam, while yanked releases and exception checksum
   mismatches remain blocking
-- `cargo barbican verify` now reuses the default `pin-check` gate before
-  running locked build/test verification
+- `cargo barbican verify` now reuses the default `pin check` gate before
+  running locked build/test verification; it fails closed when
+  `reviewed-targets.toml` configures no active reviewed family and confirms
+  each passing step with a final `Verify: PASS`
+- `cargo barbican pin add` exists as the offline reviewed-family scaffolder:
+  it composes the `reviewed-targets.toml` family stub and the review-record
+  stub from resolved `Cargo.lock` facts, and fails closed on any conflict
 
 ## Source material to read before implementing
 

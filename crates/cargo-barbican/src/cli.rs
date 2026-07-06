@@ -75,9 +75,9 @@ pub(crate) enum Command {
         command: PolicyCommand,
     },
     Inventory,
-    PinCheck {
-        #[arg(long, default_value = REVIEWED_TARGETS_CONFIG_FILE)]
-        config: PathBuf,
+    Pin {
+        #[command(subcommand)]
+        command: PinCommand,
     },
     Review {
         #[arg(long)]
@@ -95,6 +95,17 @@ pub(crate) enum GatehouseCommand {
 #[derive(Debug, Subcommand)]
 pub(crate) enum PolicyCommand {
     Init,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PinCommand {
+    Add {
+        spec: String,
+    },
+    Check {
+        #[arg(long, default_value = REVIEWED_TARGETS_CONFIG_FILE)]
+        config: PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]

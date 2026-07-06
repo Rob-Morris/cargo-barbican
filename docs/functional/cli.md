@@ -219,7 +219,38 @@ cargo barbican inventory
     Observational findings and policy coverage gaps are informational, and the
     command returns exit 0 when it can render the report.
 
-cargo barbican pin-check [--config reviewed-targets.toml]
+cargo barbican pin add <crate>[@version]
+    Scaffold a reviewed-target family and review-record stub for one crate
+    already resolved in `Cargo.lock`, fully offline. It:
+    - reads the resolved version and `checksum_sha256` from `Cargo.lock`
+      (no crates.io fetch)
+    - appends a `[[rust.families]]` stub to the repo-root
+      `reviewed-targets.toml`: family name, review-record path, and a
+      `[rust.families.resolved]` entry with the resolved version and, when
+      present in `Cargo.lock`, the checksum
+    - includes a `[rust.families.direct]` entry only when the crate is a
+      direct dependency and every observed manifest requirement is already the
+      exact `=version` pin from a source kind the direct gate enforces —
+      exactly the condition under which the scaffolded direct check passes;
+      otherwise a note reports why no direct entry was scaffolded
+    - creates a review-record markdown stub under `docs/dependency-reviews/`
+      pre-filled with the resolved facts and the required record sections
+    - prints next steps (complete the record, then run `pin check`)
+    The family name and record filename derive from the crate name and the
+    current UTC date, matching the record naming convention.
+    The version component may be omitted when the crate resolves to exactly
+    one version; multiple resolved versions require an exact `crate@version`.
+    Fail-closed: exits 1 without mutating anything when the crate or requested
+    version is not in `Cargo.lock`, when `reviewed-targets.toml` is absent
+    (adopters run `policy init` first), when the crate is already covered by
+    an existing reviewed family, when the scaffold family name already exists,
+    or when the review-record path already exists. Scaffold writes follow the
+    same wrong-type/symlink containment posture as `policy init`, and the
+    appended policy text is re-parsed before it is written.
+    The scaffold activates the family for `pin check` but is not a completed
+    review; the record stub must be completed by a human reviewer.
+
+cargo barbican pin check [--config reviewed-targets.toml]
     Check active reviewed Rust families against the current workspace manifests
     and `Cargo.lock`.
     The first slice is local-only and read-only. It:
@@ -276,13 +307,17 @@ cargo barbican audit
 
 cargo barbican verify
     Run the local execution gates in order:
-    1. `pin-check` with the default repo-root `reviewed-targets.toml`
+    1. `pin check` with the default repo-root `reviewed-targets.toml`
     2. `cargo build --locked`
     3. `cargo test --locked`
-    The standalone `pin-check` command skips successfully when no
+    The standalone `pin check` command skips successfully when no
     reviewed-target manifest is present or no active Rust families are
-    configured. `verify` fails closed instead: build/test execution requires an
-    explicit reviewed-target policy.
+    configured. `verify` fails closed in both cases: build/test execution
+    requires an explicit reviewed-target policy with at least one active
+    reviewed family.
+    On success, `verify` confirms each executed step explicitly
+    (`OK   cargo build --locked`, `OK   cargo test --locked`) and ends with
+    `Verify: PASS`, so a passing gate is distinguishable from a skipped one.
 ```
 
 `<crate@version>` candidate specs are exact crates.io package specs. A single
@@ -305,7 +340,7 @@ optional leading `=` on the version is accepted for CLI ergonomics:
 - `gatehouse candidate` is a workflow-convenience layer for isolated
   candidate intake evidence. It composes existing policy/evidence primitives
   and delegated Cargo checks; it does not define new policy semantics.
-- Reviewed-target enforcement has a dedicated `pin-check` surface, and `verify`
+- Reviewed-target enforcement has a dedicated `pin check` surface, and `verify`
   now reuses that same gate before code-executing build/test steps. The
   foundation for that work is checked-in review records plus a repo-root
   `reviewed-targets.toml` manifest for active Rust families.

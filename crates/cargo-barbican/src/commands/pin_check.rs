@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    ObservedDirectDependency, ReviewedResolvedTarget, RustReviewedTargetsReport,
+    ObservedDirectDependency, ReviewedResolvedTarget, ReviewedTargets, RustReviewedTargetsReport,
     check_reviewed_rust_targets,
 };
 
@@ -38,11 +38,20 @@ pub(super) fn run_pin_check(
         return Ok(ExitCode::SUCCESS);
     }
 
+    enforce_reviewed_targets(&reviewed_targets, config_path, current_dir, stdout)
+}
+
+pub(super) fn enforce_reviewed_targets(
+    reviewed_targets: &ReviewedTargets,
+    config_path: &Path,
+    current_dir: &Path,
+    stdout: &mut dyn Write,
+) -> Result<ExitCode, CommandError> {
     let manifest_requirements = load_current_manifest_direct_requirements(current_dir)?;
-    let review_record_checks = check_review_record_paths(current_dir, &reviewed_targets);
+    let review_record_checks = check_review_record_paths(current_dir, reviewed_targets);
     let lockfile = load_current_lockfile(current_dir, Path::new("Cargo.lock"))?;
 
-    let report = check_reviewed_rust_targets(&reviewed_targets, &manifest_requirements, &lockfile);
+    let report = check_reviewed_rust_targets(reviewed_targets, &manifest_requirements, &lockfile);
 
     render_pin_check_report(
         stdout,

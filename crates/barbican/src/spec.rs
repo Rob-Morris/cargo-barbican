@@ -94,13 +94,13 @@ impl ExactCrateSpec {
     }
 }
 
-fn is_valid_crate_name(crate_name: &str) -> bool {
+pub(crate) fn is_valid_crate_name(crate_name: &str) -> bool {
     crate_name
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
-fn is_valid_version(version: &str) -> bool {
+pub(crate) fn is_valid_version(version: &str) -> bool {
     let mut bytes = version.bytes();
     let Some(first) = bytes.next() else {
         return false;

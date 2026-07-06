@@ -18,6 +18,7 @@ pub mod pick;
 pub mod pin_check;
 pub mod release_age;
 pub mod reviewed_targets;
+pub mod scaffold;
 pub mod sha256;
 pub mod spec;
 
@@ -88,11 +89,15 @@ pub use reviewed_targets::{
     ExecutionSurfaceKind, IsoDateError, ReviewedAdvisory, ReviewedAdvisoryException,
     ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException, ReviewedResolvedTarget,
     ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError, RustSecAdvisoryId,
-    RustSecAdvisoryIdError, parse_reviewed_targets_toml,
+    RustSecAdvisoryIdError, format_iso_date, parse_reviewed_targets_toml,
+};
+pub use scaffold::{
+    PinAddTarget, PinAddTargetError, compose_pin_family_stub, compose_pin_review_record,
+    parse_pin_add_target, pin_family_name, pin_review_record_path,
 };
 pub use sha256::{Sha256Digest, Sha256DigestError};
 pub use spec::{
     ExactCrateSpec, ExactCrateSpecError, ExactVersionRequirementError,
     parse_exact_version_requirement,
 };
-pub use time::OffsetDateTime;
+pub use time::{Date, OffsetDateTime};

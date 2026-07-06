@@ -472,7 +472,7 @@ fn render_inventory(
     } else if inventory.gaps().is_empty() {
         writeln!(
             stdout,
-            "  - Run `cargo barbican pin-check` or `cargo barbican verify` to enforce policy."
+            "  - Run `cargo barbican pin check` or `cargo barbican verify` to enforce policy."
         )
         .map_err(CommandError::Io)?;
     } else {

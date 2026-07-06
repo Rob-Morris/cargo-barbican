@@ -653,6 +653,15 @@ fn parse_iso_date(value: &str) -> Result<Date, IsoDateError> {
     Date::from_calendar_date(year, month, day).map_err(|_| IsoDateError)
 }
 
+pub fn format_iso_date(date: Date) -> String {
+    format!(
+        "{:04}-{:02}-{:02}",
+        date.year(),
+        u8::from(date.month()),
+        date.day()
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("expected ISO date in YYYY-MM-DD form")]
 pub struct IsoDateError;

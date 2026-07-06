@@ -164,7 +164,7 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 - cleanup-first by default, with `--preserve-sandbox` available for manual
   inspection of the generated sandbox
 - not a repo-integration simulation; repo adoption remains covered by
-  `resolve`, `update`, `assess`, `review`, `pin-check`, and `verify`
+  `resolve`, `update`, `assess`, `review`, `pin check`, and `verify`
 
 `cargo barbican policy init` is currently:
 
@@ -180,7 +180,7 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   `barbican.toml` is validated, and symlinks or wrong-type scaffold paths fail
   closed
 - adoption-guidance oriented: successful output points operators to the manual
-  adoption guide before `pin-check` / `verify`
+  adoption guide before `pin check` / `verify`
 
 `cargo barbican inventory` is currently:
 
@@ -227,11 +227,11 @@ The reviewed-target enforcement baseline is:
   - `resolved` exact `Cargo.lock` versions
   - optional `allowed_surfaces` reviewed execution-surface allowances for
     crates already present in the same `resolved` map
-- `pin-check` validates that every active `review_record` path actually exists
+- `pin check` validates that every active `review_record` path actually exists
   before the family declaration is trusted
-- `pin-check` checks exact resolved `Cargo.lock` parity plus any configured
+- `pin check` checks exact resolved `Cargo.lock` parity plus any configured
   exact direct manifest requirements
-- `pin-check` validates `allowed_surfaces` manifest integrity, but does not
+- `pin check` validates `allowed_surfaces` manifest integrity, but does not
   inspect live metadata surfaces
 - `inventory` reports live metadata surfaces and cross-references them against
   `allowed_surfaces`, but does not enforce the result
@@ -270,13 +270,13 @@ Contract notes:
 - the structured form is the intended path for crates.io reviewed families
 - `checksum_sha256` is the reviewed `.crate` tarball digest, expected to match
   both crates.io metadata and the resolved `Cargo.lock` checksum chain
-- `pin-check` remains read-only and local-only; it does not fetch from the
+- `pin check` remains read-only and local-only; it does not fetch from the
   network during enforcement
-- when a structured `checksum_sha256` is present, `pin-check` fails closed on
+- when a structured `checksum_sha256` is present, `pin check` fails closed on
   checksum drift even if the resolved version still matches
 - inventory coverage is version-level: a resolved crate is considered covered
   when its name and version appear in a reviewed family; checksum drift remains
-  the `pin-check` / `verify` gate
+  the `pin check` / `verify` gate
 - inventory treats review-record backing as a separate policy signal: a
   resolved crate can be version-covered by a family whose review record is
   missing, and that missing record is reported as its own gap

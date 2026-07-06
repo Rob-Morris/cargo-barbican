@@ -25,7 +25,7 @@ For later checked-pin enforcement, the machine-readable companion file is
   already present in the same `resolved` map, recorded as `{ id, review_by }`
   entries with a `RUSTSEC-*` id and a re-review deadline
 
-When a crates.io family carries `checksum_sha256`, `pin-check` reconciles that
+When a crates.io family carries `checksum_sha256`, `pin check` reconciles that
 digest against the resolved `Cargo.lock` checksum chain as part of the local
 execution gate.
 

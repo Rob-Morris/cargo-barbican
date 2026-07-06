@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::net::TcpListener;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::OnceLock;
@@ -3378,8 +3380,470 @@ serde = ["build-rs"]
     assert!(stderr.is_empty());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("Pin check: PASS"));
+    assert!(rendered.contains("OK   cargo build --locked"));
+    assert!(rendered.contains("OK   cargo test --locked"));
+    assert!(rendered.contains("Verify: PASS"));
     assert_eq!(*runner.build_calls.borrow(), 1);
     assert_eq!(*runner.test_calls.borrow(), 1);
+}
+
+#[test]
+fn verify_fails_closed_when_no_active_reviewed_families_are_configured() {
+    let cli = Cli::parse_from(["cargo-barbican", "verify"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        "[rust]\nfamilies = []\n",
+    )
+    .expect("reviewed targets should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(String::from_utf8(stderr).expect("stderr should be utf8").contains(
+        "FAIL reviewed-targets.toml: no active Rust reviewed families; verify requires at least one"
+    ));
+    assert_eq!(*runner.build_calls.borrow(), 0);
+    assert_eq!(*runner.test_calls.borrow(), 0);
+}
+
+#[test]
+fn pin_check_skips_when_no_active_reviewed_families_are_configured() {
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.228", true)]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        "[rust]\nfamilies = []\n",
+    )
+    .expect("reviewed targets should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        "Pin check: no active Rust reviewed families configured in reviewed-targets.toml; skipping.\n"
+    );
+}
+
+const PIN_ADD_TEST_CHECKSUM: &str =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn write_pin_add_workspace(temp_dir: &Path) {
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[(
+            "serde",
+            "1.0.228",
+            Some("registry+https://github.com/rust-lang/crates.io-index"),
+            Some(PIN_ADD_TEST_CHECKSUM),
+        )]),
+    )
+    .expect("lockfile should write");
+    fs::write(temp_dir.join("reviewed-targets.toml"), "[rust]\n")
+        .expect("reviewed targets should write");
+}
+
+fn run_pin_add(temp_dir: &Path, spec: &str) -> (ExitCode, String, String) {
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "add", spec]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    (
+        exit_code,
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        String::from_utf8(stderr).expect("stderr should be utf8"),
+    )
+}
+
+#[test]
+fn pin_add_scaffolds_record_and_family_then_pin_check_passes() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+
+    let (exit_code, stdout, stderr) = run_pin_add(&temp_dir, "serde");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("Pin add:"));
+    assert!(stdout.contains("- docs/dependency-reviews/2020-06-01-serde.md: created"));
+    assert!(stdout.contains(
+        "- reviewed-targets.toml: appended reviewed family \"serde-2020-06-01\" for serde@1.0.228"
+    ));
+    assert!(
+        stdout.contains("- note: exact direct manifest pin \"=1.0.228\" included in the family")
+    );
+    assert!(stdout.contains("Next steps:"));
+    assert!(stdout.contains("Complete the review record"));
+    assert!(stdout.contains("cargo barbican pin check"));
+
+    let record = fs::read_to_string(temp_dir.join("docs/dependency-reviews/2020-06-01-serde.md"))
+        .expect("scaffolded review record should exist");
+    assert!(record.starts_with("# Dependency Review: serde 1.0.228\n"));
+    assert!(record.contains("- Active family name: serde-2020-06-01"));
+    assert!(record.contains("- Direct reviewed set: `serde` `=1.0.228`"));
+    assert!(record.contains(PIN_ADD_TEST_CHECKSUM));
+
+    let policy = fs::read_to_string(temp_dir.join("reviewed-targets.toml"))
+        .expect("reviewed targets should read");
+    assert!(policy.contains("name = \"serde-2020-06-01\""));
+    assert!(policy.contains("review_record = \"docs/dependency-reviews/2020-06-01-serde.md\""));
+    assert!(policy.contains("[rust.families.direct]\nserde = \"=1.0.228\""));
+    assert!(policy.contains(&format!(
+        "serde = {{ version = \"1.0.228\", checksum_sha256 = \"{PIN_ADD_TEST_CHECKSUM}\" }}"
+    )));
+
+    let pin_check_cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let pin_check_exit = run_cli_with_runner(
+        pin_check_cli,
+        &temp_dir,
+        &client,
+        &runner,
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("pin check should run");
+
+    assert_eq!(pin_check_exit, ExitCode::SUCCESS);
+    assert!(
+        String::from_utf8(stdout)
+            .expect("stdout should be utf8")
+            .contains("Pin check: PASS")
+    );
+}
+
+#[test]
+fn pin_add_fails_closed_when_crate_is_absent_from_lockfile() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+    let policy_before = fs::read_to_string(temp_dir.join("reviewed-targets.toml"))
+        .expect("reviewed targets should read");
+
+    let (exit_code, stdout, stderr) = run_pin_add(&temp_dir, "tokio");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("FAIL pin add tokio: not present in Cargo.lock"));
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("reviewed-targets.toml"))
+            .expect("reviewed targets should read"),
+        policy_before
+    );
+    assert!(!temp_dir.join("docs/dependency-reviews").exists());
+}
+
+#[test]
+fn pin_add_requires_an_exact_spec_for_ambiguous_lockfile_versions() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[
+            (
+                "serde",
+                "1.0.228",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                Some(PIN_ADD_TEST_CHECKSUM),
+            ),
+            (
+                "serde",
+                "1.0.100",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                Some(PIN_ADD_TEST_CHECKSUM),
+            ),
+        ]),
+    )
+    .expect("lockfile should write");
+
+    let (ambiguous_exit, ambiguous_stdout, ambiguous_stderr) = run_pin_add(&temp_dir, "serde");
+
+    assert_eq!(ambiguous_exit, ExitCode::from(1));
+    assert!(ambiguous_stdout.is_empty());
+    assert!(ambiguous_stderr.contains(
+        "FAIL pin add serde: multiple resolved versions in Cargo.lock [\"1.0.228\", \"1.0.100\"]"
+    ));
+    assert!(!temp_dir.join("docs/dependency-reviews").exists());
+
+    let (exact_exit, exact_stdout, exact_stderr) = run_pin_add(&temp_dir, "serde@1.0.100");
+
+    assert_eq!(exact_exit, ExitCode::SUCCESS);
+    assert!(exact_stderr.is_empty());
+    assert!(exact_stdout.contains(
+        "- reviewed-targets.toml: appended reviewed family \"serde-2020-06-01\" for serde@1.0.100"
+    ));
+    assert!(exact_stdout.contains(
+        "- note: serde is a direct dependency but its manifest requirement is not uniformly the exact pin \"=1.0.100\"; no direct entry scaffolded"
+    ));
+    let policy = fs::read_to_string(temp_dir.join("reviewed-targets.toml"))
+        .expect("reviewed targets should read");
+    assert!(!policy.contains("[rust.families.direct]"));
+}
+
+#[test]
+fn pin_add_scaffolds_no_direct_entry_for_transitive_crates() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[
+            (
+                "serde",
+                "1.0.228",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                Some(PIN_ADD_TEST_CHECKSUM),
+            ),
+            (
+                "serde_derive",
+                "1.0.228",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                Some(PIN_ADD_TEST_CHECKSUM),
+            ),
+        ]),
+    )
+    .expect("lockfile should write");
+
+    let (exit_code, stdout, stderr) = run_pin_add(&temp_dir, "serde_derive");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(!stdout.contains("direct"));
+    let policy = fs::read_to_string(temp_dir.join("reviewed-targets.toml"))
+        .expect("reviewed targets should read");
+    assert!(!policy.contains("[rust.families.direct]"));
+    let record =
+        fs::read_to_string(temp_dir.join("docs/dependency-reviews/2020-06-01-serde_derive.md"))
+            .expect("scaffolded review record should exist");
+    assert!(record.contains("- Direct reviewed set:\n"));
+}
+
+#[test]
+fn pin_add_fails_closed_when_requested_version_is_not_resolved() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+
+    let (exit_code, stdout, stderr) = run_pin_add(&temp_dir, "serde@9.9.9");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        stderr.contains("FAIL pin add serde@9.9.9: Cargo.lock resolves serde to [\"1.0.228\"]")
+    );
+    assert!(!temp_dir.join("docs/dependency-reviews").exists());
+}
+
+#[test]
+fn pin_add_fails_closed_without_reviewed_targets_policy() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+    fs::remove_file(temp_dir.join("reviewed-targets.toml"))
+        .expect("reviewed targets should remove");
+
+    let (exit_code, stdout, stderr) = run_pin_add(&temp_dir, "serde");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains(
+        "FAIL pin add: reviewed-targets.toml not found; run `cargo barbican policy init` first"
+    ));
+    assert!(!temp_dir.join("docs/dependency-reviews").exists());
+}
+
+#[test]
+fn pin_add_fails_closed_when_crate_is_already_covered_by_a_family() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+    let policy = format!(
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = {{ version = "1.0.228", checksum_sha256 = "{PIN_ADD_TEST_CHECKSUM}" }}
+"#
+    );
+    fs::write(temp_dir.join("reviewed-targets.toml"), &policy)
+        .expect("reviewed targets should write");
+
+    let (exit_code, stdout, stderr) = run_pin_add(&temp_dir, "serde");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains(
+        "FAIL pin add serde: crate is already covered by reviewed family \"serde-family\""
+    ));
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("reviewed-targets.toml"))
+            .expect("reviewed targets should read"),
+        policy
+    );
+    assert!(!temp_dir.join("docs/dependency-reviews").exists());
+}
+
+#[test]
+fn pin_add_fails_closed_when_the_scaffold_family_name_already_exists() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-2020-06-01"
+review_record = "docs/dependency-reviews/2020-06-01-other.md"
+
+[rust.families.resolved]
+other-crate = "0.1.0"
+"#,
+    )
+    .expect("reviewed targets should write");
+
+    let (exit_code, stdout, stderr) = run_pin_add(&temp_dir, "serde");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        stderr.contains("FAIL pin add serde: reviewed family \"serde-2020-06-01\" already exists")
+    );
+    assert!(!temp_dir.join("docs/dependency-reviews").exists());
+}
+
+#[test]
+fn pin_add_fails_closed_when_the_review_record_path_already_exists() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+    let policy_before = fs::read_to_string(temp_dir.join("reviewed-targets.toml"))
+        .expect("reviewed targets should read");
+    write_review_record(&temp_dir, "docs/dependency-reviews/2020-06-01-serde.md");
+
+    let (exit_code, stdout, stderr) = run_pin_add(&temp_dir, "serde");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains(
+        "FAIL pin add serde: review record path already exists at docs/dependency-reviews/2020-06-01-serde.md"
+    ));
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("reviewed-targets.toml"))
+            .expect("reviewed targets should read"),
+        policy_before
+    );
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("docs/dependency-reviews/2020-06-01-serde.md"))
+            .expect("pre-existing record should read"),
+        "# Dependency Review\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn pin_add_removes_review_record_when_policy_append_fails() {
+    let temp_dir = fresh_temp_dir();
+    write_pin_add_workspace(&temp_dir);
+    let policy_path = temp_dir.join("reviewed-targets.toml");
+    let record_path = temp_dir.join("docs/dependency-reviews/2020-06-01-serde.md");
+    let original_policy =
+        fs::read_to_string(&policy_path).expect("reviewed targets should read before chmod");
+
+    let mut read_only = fs::metadata(&policy_path)
+        .expect("reviewed targets metadata should read")
+        .permissions();
+    read_only.set_mode(0o444);
+    fs::set_permissions(&policy_path, read_only).expect("reviewed targets should become readonly");
+
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "add", "serde"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let result = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    );
+
+    let mut writable = fs::metadata(&policy_path)
+        .expect("reviewed targets metadata should read after failure")
+        .permissions();
+    writable.set_mode(0o644);
+    fs::set_permissions(&policy_path, writable).expect("reviewed targets should become writable");
+
+    let error = result.expect_err("readonly policy append should fail");
+    let rendered = error.to_string();
+    assert!(rendered.contains("unable to write reviewed-targets.toml after creating review record docs/dependency-reviews/2020-06-01-serde.md"));
+    assert!(
+        rendered
+            .contains("removed orphaned review record docs/dependency-reviews/2020-06-01-serde.md")
+    );
+    assert!(!record_path.exists());
+    assert_eq!(
+        fs::read_to_string(&policy_path).expect("reviewed targets should still read"),
+        original_policy
+    );
+    assert!(stdout.is_empty());
+    assert!(stderr.is_empty());
 }
 
 #[test]
@@ -4391,7 +4855,7 @@ fn inspect_reports_policy_violation_for_checksum_mismatch() {
 
 #[test]
 fn pin_check_skips_when_reviewed_targets_manifest_is_absent() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4422,7 +4886,7 @@ fn pin_check_skips_when_reviewed_targets_manifest_is_absent() {
 
 #[test]
 fn pin_check_passes_when_reviewed_targets_match_manifest_and_lockfile() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4489,7 +4953,7 @@ serde_derive = "1.0.228"
 
 #[test]
 fn pin_check_renders_reviewed_advisory_exceptions() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4529,7 +4993,7 @@ fn pin_check_renders_reviewed_advisory_exceptions() {
 
 #[test]
 fn pin_check_fails_when_advisory_exception_review_record_is_missing() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4572,7 +5036,7 @@ fn pin_check_does_not_fail_when_advisory_review_by_has_elapsed() {
     // Pin-check renders reviewed advisory exceptions but does not apply advisory
     // lifecycle policy. Commands that use exceptions to suppress advisory
     // findings must enforce `review_by` expiry at that suppression point.
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4609,7 +5073,7 @@ fn pin_check_does_not_fail_when_advisory_review_by_has_elapsed() {
 
 #[test]
 fn pin_check_fails_when_advisory_exception_resolved_target_drifts() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4651,7 +5115,7 @@ fn pin_check_fails_when_advisory_exception_resolved_target_drifts() {
 
 #[test]
 fn pin_check_does_not_render_advisory_exception_when_checksum_drifts() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4701,7 +5165,7 @@ fn pin_check_does_not_render_advisory_exception_when_checksum_drifts() {
 
 #[test]
 fn pin_check_renders_only_bound_advisory_exceptions_in_order() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4811,7 +5275,7 @@ quote = [
 
 #[test]
 fn pin_check_suppresses_advisory_exceptions_for_families_missing_review_records() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4906,7 +5370,7 @@ quote = [
 
 #[test]
 fn pin_check_renders_bound_advisory_exception_when_direct_spec_drifts() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4948,7 +5412,7 @@ fn pin_check_renders_bound_advisory_exception_when_direct_spec_drifts() {
 
 #[test]
 fn pin_check_fails_when_allowed_surface_state_is_malformed() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -4995,7 +5459,7 @@ serde_derive = ["proc-macro"]
 
 #[test]
 fn pin_check_fails_when_allowed_age_exception_state_is_malformed() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -5042,7 +5506,7 @@ serde = "1.0.228"
 
 #[test]
 fn pin_check_fails_when_review_record_is_missing() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -5094,7 +5558,7 @@ serde_derive = "1.0.228"
 
 #[test]
 fn pin_check_fails_when_manifest_or_lockfile_drift_from_reviewed_targets() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -5146,7 +5610,7 @@ serde = "1.0.228"
 
 #[test]
 fn pin_check_fails_when_reviewed_checksum_drifts_from_lockfile() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -5200,7 +5664,7 @@ serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcd
 
 #[test]
 fn pin_check_fails_when_reviewed_checksum_is_missing_from_lockfile() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -5254,7 +5718,7 @@ serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcd
 
 #[test]
 fn pin_check_accepts_uppercase_lockfile_checksum_for_reviewed_target() {
-    let cli = Cli::parse_from(["cargo-barbican", "pin-check"]);
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();

@@ -25,7 +25,8 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican assess` | Base assessment | Classify a dependency diff. |
 | `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption. |
 | `cargo barbican inventory` | Base audit | Report dependency inventory and reviewed-policy coverage. |
-| `cargo barbican pin-check` | Base policy gate | Enforce reviewed-target policy. |
+| `cargo barbican pin add` | Policy management | Scaffold a reviewed family and review-record stub from `Cargo.lock`. |
+| `cargo barbican pin check` | Base policy gate | Enforce reviewed-target policy. |
 | `cargo barbican review` | Base review aid | Print a policy-focused review diff. |
 | `cargo barbican audit` | Base delegated gate | Run delegated advisory and source-policy checks. |
 | `cargo barbican verify` | Base execution gate | Run the final local execution gate. |
@@ -43,7 +44,7 @@ cargo barbican policy init
 
 Then follow [adoption.md](adoption.md) to manually review current
 dependencies, create dependency review records, populate `reviewed-targets.toml`,
-and run `pin-check` / `verify`.
+and run `pin check` / `verify`.
 
 `policy init` does not certify existing dependencies. It only creates missing
 policy files and reports scaffold issues.
@@ -158,7 +159,7 @@ cargo barbican review
 Before committing, run the local gates:
 
 ```bash
-cargo barbican pin-check
+cargo barbican pin check
 cargo barbican audit
 cargo barbican verify
 ```
@@ -191,7 +192,16 @@ and should be pinned before build or test execution.
 
 The repo-root `reviewed-targets.toml` records active reviewed families. Each
 family points at a checked-in review record and exact resolved `Cargo.lock`
-targets. For crates.io entries, prefer the structured form with the reviewed
+targets.
+
+Use `pin add` to scaffold a new family and its review-record stub from the
+resolved `Cargo.lock` facts instead of hand-authoring both:
+
+```bash
+cargo barbican pin add serde
+```
+
+For crates.io entries, prefer the structured form with the reviewed
 tarball checksum:
 
 ```toml
@@ -213,13 +223,13 @@ reviewed checksum. `age`, `age-lock`, `resolve`, `update`, and `assess` use
 crates.io's published checksum metadata; `inspect` and `gatehouse candidate`
 also verify downloaded tarball bytes.
 
-Run `pin-check` after editing `reviewed-targets.toml`:
+Run `pin check` after editing `reviewed-targets.toml`:
 
 ```bash
-cargo barbican pin-check
+cargo barbican pin check
 ```
 
-`pin-check` is local-only and read-only. It verifies that active review records
+`pin check` is local-only and read-only. It verifies that active review records
 exist, direct requirements match when configured, resolved versions match
 `Cargo.lock`, checksums match when configured, and allowed execution surfaces
 refer to crates in the same reviewed family.
@@ -318,7 +328,8 @@ Prints the shipped cargo-barbican version.
 | `update --dry-run` | No | Uses a temporary workspace and prints a preview. |
 | `assess` | No | Reads manifests, lockfiles, policy files, and inspection evidence. |
 | `inventory` | No | Reads manifests, lockfile, and reviewed-target policy to report findings and coverage gaps. |
-| `pin-check` | No | Local-only reviewed-target enforcement. |
+| `pin add` | Yes | Appends a reviewed family to `reviewed-targets.toml` and creates a review-record stub; never overwrites existing entries or files. |
+| `pin check` | No | Local-only reviewed-target enforcement. |
 | `review` | No | Prints review-focused diffs. |
 | `audit` | No intended repo mutation | Delegated tools may update their own caches. |
 | `verify` | Yes, through Cargo build output | Runs `cargo build --locked` and `cargo test --locked`; Cargo writes build artefacts under `target/`. |
@@ -694,13 +705,61 @@ renders the offline sections and marks live graph surfaces as not collected.
 Reported observational findings and policy coverage gaps do not change the
 exit code; this command is an audit view, not an enforcement gate.
 
-### `cargo barbican pin-check`
+### `cargo barbican pin add`
+
+Scaffolds a reviewed-target family and a review-record stub for one crate
+already resolved in `Cargo.lock`.
+
+```bash
+cargo barbican pin add <crate>[@version]
+```
+
+Use this when bringing a dependency under reviewed-target policy, instead of
+hand-authoring the `reviewed-targets.toml` family and record file.
+
+Examples:
+
+```bash
+cargo barbican pin add serde
+cargo barbican pin add serde@1.0.228
+```
+
+The command is fully offline. It:
+
+- reads the resolved version and `checksum_sha256` for the crate from
+  `Cargo.lock` (the same source `inventory` uses; nothing is fetched from
+  crates.io)
+- appends a family stub to `reviewed-targets.toml` with the family name,
+  review-record path, and a `[rust.families.resolved]` entry carrying the
+  resolved version and checksum
+- when the crate is a direct dependency whose manifest requirement is already
+  the exact `=version` pin everywhere it appears, also includes the matching
+  `[rust.families.direct]` entry; a direct dependency without a uniform exact
+  pin is reported with a note instead
+- creates a review-record markdown stub under `docs/dependency-reviews/`
+  pre-filled with the resolved facts
+- prints next steps
+
+The version may be omitted when the crate resolves to exactly one version in
+`Cargo.lock`; with multiple resolved versions, pass an exact `crate@version`.
+
+Fail-closed behaviour — the command exits `1` without mutating anything when:
+
+- the crate (or requested version) is not present in `Cargo.lock`
+- `reviewed-targets.toml` is absent (run `cargo barbican policy init` first)
+- the crate is already covered by an existing reviewed family
+- the scaffold family name or the review-record path already exists
+
+The scaffold is not a completed review. Complete the review record, then run
+`pin check`.
+
+### `cargo barbican pin check`
 
 Checks active reviewed Rust families against current manifests and
 `Cargo.lock`.
 
 ```bash
-cargo barbican pin-check [--config reviewed-targets.toml]
+cargo barbican pin check [--config reviewed-targets.toml]
 ```
 
 Use this after editing `reviewed-targets.toml` and before running build/test
@@ -709,8 +768,8 @@ execution.
 Examples:
 
 ```bash
-cargo barbican pin-check
-cargo barbican pin-check --config reviewed-targets.toml
+cargo barbican pin check
+cargo barbican pin check --config reviewed-targets.toml
 ```
 
 Checks include:
@@ -724,9 +783,9 @@ Checks include:
 - allowed release-age exceptions reference crates in the same reviewed family
   and require structured `checksum_sha256` entries
 
-Standalone `pin-check` skips successfully when no reviewed-target manifest is
+Standalone `pin check` skips successfully when no reviewed-target manifest is
 present or no active Rust families are configured. `verify` is stricter and
-requires explicit reviewed-target policy before build/test execution.
+requires at least one active reviewed family before build/test execution.
 
 ### `cargo barbican review`
 
@@ -797,14 +856,18 @@ Use this before commit and in local CI-equivalent checks.
 It runs, in order:
 
 ```bash
-cargo barbican pin-check
+cargo barbican pin check
 cargo build --locked
 cargo test --locked
 ```
 
 `verify` requires explicit reviewed-target policy. Unlike standalone
-`pin-check`, it fails closed when `reviewed-targets.toml` is absent or not a
-regular file.
+`pin check`, it fails closed when `reviewed-targets.toml` is absent, not a
+regular file, or configures no active reviewed family.
+
+On success, `verify` confirms each executed step explicitly (`OK   cargo build
+--locked`, `OK   cargo test --locked`) and ends with `Verify: PASS`, so a
+passing run is distinguishable from a skipped one.
 
 This command executes normal Cargo build and test behaviour. That can run build
 scripts, proc macros, and tests from the dependency graph. Run it after the

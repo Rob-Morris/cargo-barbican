@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.17.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20branch-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.18.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20branch-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -60,12 +60,12 @@ review records, and populate `reviewed-targets.toml`. When policy is ready, run
 the main gates:
 
 ```bash
-cargo barbican pin-check
+cargo barbican pin check
 cargo barbican audit
 cargo barbican verify
 ```
 
-`pin-check` validates reviewed-target policy against the current manifests and
+`pin check` validates reviewed-target policy against the current manifests and
 lockfile. `audit` runs the delegated advisory and deny checks. `verify` is the
 final CI-oriented gate: it requires `reviewed-targets.toml`, then runs
 reviewed-target policy plus locked build/test verification.
@@ -126,6 +126,20 @@ crates.io versions:
 cargo barbican resolve
 ```
 
+### Scaffold a reviewed family
+
+Use `pin add` to scaffold the reviewed-target policy entry and review-record
+stub for a crate already resolved in `Cargo.lock`, fully offline:
+
+```bash
+cargo barbican pin add serde
+```
+
+It reads the resolved version and checksum from `Cargo.lock`, appends a
+reviewed family to `reviewed-targets.toml`, and creates a review-record stub
+under `docs/dependency-reviews/`. The scaffold is not a completed review:
+finish the record, then run `pin check`.
+
 ### Review the dependency diff
 
 Classify the current dependency state against the default git baseline:
@@ -159,10 +173,12 @@ for the exact flags.
 cargo barbican verify
 ```
 
-It requires a repo-root `reviewed-targets.toml`, runs the default reviewed-target
-policy check, then runs locked build and test verification. Standalone
-`pin-check` remains a diagnostic command and skips successfully when no
-reviewed-target policy is configured; `verify` does not.
+It requires a repo-root `reviewed-targets.toml` with at least one active
+reviewed family, runs the default reviewed-target policy check, then runs
+locked build and test verification and confirms each passing step. Standalone
+`pin check` remains a diagnostic command and skips successfully when no
+reviewed-target policy or no active family is configured; `verify` fails closed
+in both cases.
 
 ## Configuration and Policy Files
 

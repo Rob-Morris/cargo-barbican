@@ -8,10 +8,12 @@ mod inspect;
 mod inventory;
 mod lockfile_ops;
 mod pick;
+mod pin;
 mod pin_check;
 mod policy;
 mod resolve;
 mod review;
+mod scaffold_fs;
 mod scratch_dir;
 mod update;
 mod verify;
@@ -212,7 +214,7 @@ where
         }
         Command::Policy { command } => policy::run_policy(command, current_dir, stdout),
         Command::Inventory => inventory::run_inventory(current_dir, runner, now, stdout),
-        Command::PinCheck { config } => pin_check::run_pin_check(&config, current_dir, stdout),
+        Command::Pin { command } => pin::run_pin(command, current_dir, now, stdout, stderr),
         Command::Review { base_dir } => {
             review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)
         }
@@ -1171,6 +1173,12 @@ pub enum CommandError {
     InvalidCratesIoBaseUrl {
         value: String,
     },
+    PinAddConfigWrite {
+        config_path: String,
+        review_record_path: String,
+        source: io::Error,
+        cleanup_source: Option<io::Error>,
+    },
     LockfileMissing {
         path: String,
     },
@@ -1245,6 +1253,26 @@ impl fmt::Display for CommandError {
                     "{CRATES_IO_BASE_URL_ENV} must use https://, or http:// loopback for local tests: {value}"
                 ))
             ),
+            Self::PinAddConfigWrite {
+                config_path,
+                review_record_path,
+                source,
+                cleanup_source,
+            } => {
+                let cleanup = match cleanup_source {
+                    Some(cleanup_source) => format!(
+                        "; also unable to remove orphaned review record {review_record_path}: {cleanup_source}"
+                    ),
+                    None => format!("; removed orphaned review record {review_record_path}"),
+                };
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!(
+                        "unable to write {config_path} after creating review record {review_record_path}: {source}{cleanup}"
+                    ))
+                )
+            }
             Self::LockfileMissing { path } => {
                 write!(
                     formatter,
@@ -1363,6 +1391,7 @@ impl std::error::Error for CommandError {
             Self::GitRead { source, .. } => Some(source),
             Self::InvalidEnvironment { .. } => None,
             Self::InvalidCratesIoBaseUrl { .. } => None,
+            Self::PinAddConfigWrite { source, .. } => Some(source),
             Self::LockfileMissing { .. } => None,
             Self::LockfileParse { source, .. } => Some(source),
             Self::LockfileRead { source, .. } => Some(source),

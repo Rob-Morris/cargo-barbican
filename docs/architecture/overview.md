@@ -49,7 +49,7 @@ support is explicitly delivered.
 
 The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
 `update`, `assess`, `inspect`, `gatehouse candidate`, `policy init`,
-`pin-check`, `review`, `audit`, and `verify` are implemented.
+`pin check`, `review`, `audit`, and `verify` are implemented.
 
 The current intake layer is:
 
@@ -57,10 +57,10 @@ The current intake layer is:
 - `pick` is the implemented read-only exact-version discovery surface for
   crates.io semver ranges
 - `inspect` is the implemented first Rust-only, crates.io-only deep-review surface
-- `pin-check` is now the implemented first reviewed-target enforcement surface
+- `pin check` is now the implemented first reviewed-target enforcement surface
 - the current enforcement baseline is checked-in review records plus a repo-root
   `reviewed-targets.toml` manifest for active Rust families
-- `pin-check` now validates that each active reviewed family points at a real
+- `pin check` now validates that each active reviewed family points at a real
   checked-in review record path before it trusts the reviewed-target declaration
 - the first gate trusts exact `Cargo.lock` parity plus optional exact direct
   manifest requirements
@@ -145,7 +145,7 @@ symlinked member directory, or intermediate symlink inside a `review_record`
 path can read or probe files outside the repo when cargo-barbican is run on an
 untrusted checkout.
 
-This is pre-existing and repo-wide: `review`, `pin-check`, `assess`, and
+This is pre-existing and repo-wide: `review`, `pin check`, `assess`, and
 `inventory` all depend on the same discovery model. The intended hardening is
 to canonicalise the repo root once and assert every walked or read path remains
 within it before using the path. That closes the workspace-member discovery and
