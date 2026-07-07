@@ -1,6 +1,6 @@
 [package]
 name = "cargo-barbican"
-version = "0.19.0"
+version = "0.20.0"
 description = "Cargo subcommand for Rust supply-chain hardening. Invokable as `cargo barbican`."
 edition.workspace = true
 license.workspace = true
@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 barbican = { path = "../barbican" }
 clap = { version = "=4.6.1", features = ["derive"] }
+serde_json = "=1.0.149"
 similar = { version = "=3.1.1", default-features = false, features = ["text"] }
 ureq = { version = "=3.3.0", default-features = false, features = ["rustls"] }
 

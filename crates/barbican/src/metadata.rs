@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -131,6 +131,102 @@ pub fn package_surfaces(
     Ok(surfaces)
 }
 
+pub fn shortest_workspace_dependency_path(
+    metadata: &CargoMetadata,
+    target: &ExactCrateSpec,
+) -> Result<Option<MetadataDependencyPath>, CargoMetadataError> {
+    let resolve = metadata
+        .resolve
+        .as_ref()
+        .ok_or(CargoMetadataError::MissingResolveGraph)?;
+    let packages_by_id = metadata
+        .packages
+        .iter()
+        .map(|package| (package.id.as_str(), package))
+        .collect::<BTreeMap<_, _>>();
+    let target_ids = metadata
+        .packages
+        .iter()
+        .filter(|package| {
+            package.name == target.crate_name() && package.version == target.version()
+        })
+        .map(|package| package.id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    if target_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let deps_by_id = resolve
+        .nodes
+        .iter()
+        .map(|node| {
+            let mut deps = node
+                .deps
+                .iter()
+                .map(|dependency| dependency.pkg.as_str())
+                .collect::<Vec<_>>();
+            deps.sort_unstable();
+            (node.id.as_str(), deps)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut starts = metadata
+        .workspace_members
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    starts.sort_unstable();
+
+    let mut visited = BTreeSet::new();
+    let mut queue = VecDeque::new();
+    for start in starts {
+        if visited.insert(start) {
+            queue.push_back(vec![start]);
+        }
+    }
+
+    while let Some(path) = queue.pop_front() {
+        let current = path.last().expect("queued paths are never empty");
+        if target_ids.contains(current) {
+            return metadata_dependency_path(&packages_by_id, &path).map(Some);
+        }
+        for dependency in deps_by_id.get(current).into_iter().flatten() {
+            if !visited.insert(*dependency) {
+                continue;
+            }
+            let mut next_path = path.clone();
+            next_path.push(*dependency);
+            queue.push_back(next_path);
+        }
+    }
+
+    Ok(None)
+}
+
+fn metadata_dependency_path(
+    packages_by_id: &BTreeMap<&str, &MetadataPackage>,
+    package_ids: &[&str],
+) -> Result<MetadataDependencyPath, CargoMetadataError> {
+    let packages = package_ids
+        .iter()
+        .map(|package_id| {
+            let package = packages_by_id.get(package_id).ok_or_else(|| {
+                CargoMetadataError::UnknownPackageId {
+                    package_id: (*package_id).to_owned(),
+                }
+            })?;
+            ExactCrateSpec::from_parts(&package.name, &package.version).map_err(|source| {
+                CargoMetadataError::InvalidPackageSpec {
+                    package_id: (*package_id).to_owned(),
+                    source,
+                }
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(MetadataDependencyPath { packages })
+}
+
 pub(crate) fn metadata_packages(
     metadata: &CargoMetadata,
 ) -> impl Iterator<Item = MetadataPackageInfo<'_>> {
@@ -187,6 +283,25 @@ pub enum CargoMetadataError {
     },
     #[error("{crate_name}@{version}: package version not found in cargo metadata")]
     PackageVersionNotFound { crate_name: String, version: String },
+    #[error("cargo metadata resolve graph referenced unknown package id {package_id:?}")]
+    UnknownPackageId { package_id: String },
+    #[error("cargo metadata package {package_id:?} is not an exact crate spec: {source}")]
+    InvalidPackageSpec {
+        package_id: String,
+        #[source]
+        source: crate::ExactCrateSpecError,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataDependencyPath {
+    packages: Vec<ExactCrateSpec>,
+}
+
+impl MetadataDependencyPath {
+    pub fn packages(&self) -> &[ExactCrateSpec] {
+        &self.packages
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -313,7 +428,10 @@ struct RawMetadataDependency {
 mod tests {
     use crate::ExactCrateSpec;
 
-    use super::{CargoMetadataError, package_surfaces, parse_cargo_metadata, select_package_id};
+    use super::{
+        CargoMetadataError, package_surfaces, parse_cargo_metadata, select_package_id,
+        shortest_workspace_dependency_path,
+    };
 
     #[test]
     fn selects_the_only_matching_package_id() {
@@ -373,6 +491,79 @@ mod tests {
         assert_eq!(
             package_id,
             "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228"
+        );
+    }
+
+    #[test]
+    fn finds_shortest_workspace_dependency_path_to_package_version() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
+    {"name": "mid", "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0", "version": "1.0.0", "targets": []},
+    {"name": "leaf", "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "version": "2.0.0", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [{"name": "mid", "pkg": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0",
+        "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0",
+        "deps": []
+      }
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("leaf", "2.0.0").expect("target should parse");
+
+        let path = shortest_workspace_dependency_path(&metadata, &target)
+            .expect("path computation should succeed")
+            .expect("target should be reachable");
+
+        assert_eq!(
+            path.packages()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec![
+                "root@0.1.0".to_owned(),
+                "mid@1.0.0".to_owned(),
+                "leaf@2.0.0".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dependency_path_is_none_when_target_package_is_absent() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {"id": "path+file:///repo#root@0.1.0", "deps": []}
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("leaf", "2.0.0").expect("target should parse");
+
+        assert_eq!(
+            shortest_workspace_dependency_path(&metadata, &target)
+                .expect("path computation should succeed"),
+            None
         );
     }
 

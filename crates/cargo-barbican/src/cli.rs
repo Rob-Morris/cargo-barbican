@@ -222,7 +222,15 @@ pub(crate) enum Command {
             exceptions, and computes a Barbican-owned pass/fail verdict rather than inheriting \
             the scanner's own exit code."
     )]
-    Audit,
+    Audit {
+        #[arg(
+            long,
+            value_enum,
+            default_value = "text",
+            help = "Output format for the audit report"
+        )]
+        format: AuditOutputFormat,
+    },
     #[command(
         about = "Run the final local execution gate",
         long_about = "Runs pin check with the default reviewed-targets.toml, then cargo build \
@@ -285,6 +293,12 @@ pub(crate) enum PinCommand {
         )]
         config: PathBuf,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum AuditOutputFormat {
+    Text,
+    Json,
 }
 
 #[derive(Debug, Args)]

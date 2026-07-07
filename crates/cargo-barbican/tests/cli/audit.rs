@@ -170,6 +170,315 @@ fn audit_accepts_reviewed_advisory_with_cargo_audit_scanner() {
     assert_eq!(runner.recorded_deny_json_calls().len(), 1);
     assert_eq!(runner.recorded_audit_json_calls().len(), 1);
     assert_ne!(runner.recorded_audit_json_calls()[0].0, temp_dir);
+    assert_eq!(runner.frozen_metadata_calls(), 0);
+}
+
+#[test]
+fn audit_renders_cargo_audit_remediation_details_and_dependency_path() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(advisory_path_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(rendered.contains("FAIL RUSTSEC-2026-0001 serde@1.0.228 (high): unreviewed advisory finding; title: vulnerable parser; fixed in >=1.0.229"));
+    assert!(rendered.contains("dependency path: root@0.1.0 -> mid@1.0.0 -> serde@1.0.228"));
+    assert_eq!(runner.frozen_metadata_calls(), 1);
+}
+
+#[test]
+fn audit_json_outputs_structured_findings() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(advisory_path_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(report["schema_version"], 1);
+    assert_eq!(report["status"], "fail");
+    assert_eq!(report["success"], false);
+    assert_eq!(report["dependency_paths_available"], true);
+    assert_eq!(report["findings"][0]["advisory_id"], "RUSTSEC-2026-0001");
+    assert_eq!(report["findings"][0]["package"]["spec"], "serde@1.0.228");
+    assert_eq!(report["findings"][0]["disposition"], "unreviewed");
+    assert_eq!(report["findings"][0]["title"], "vulnerable parser");
+    assert_eq!(report["findings"][0]["risk"], "high");
+    assert_eq!(report["findings"][0]["patched"][0], ">=1.0.229");
+    assert_eq!(
+        report["findings"][0]["dependency_path"],
+        serde_json::json!(["root@0.1.0", "mid@1.0.0", "serde@1.0.228"])
+    );
+}
+
+#[test]
+fn audit_json_outputs_accepted_exception_details_and_collects_paths() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(advisory_path_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_advisory_audit_fixture(
+        &temp_dir,
+        Some(r#"lockfile_scanner = "cargo-audit""#),
+        "2026-09-21",
+    );
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert_eq!(runner.frozen_metadata_calls(), 1);
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(report["status"], "pass");
+    assert_eq!(report["dependency_paths_available"], true);
+    assert_eq!(report["findings"][0]["disposition"], "accepted");
+    assert_eq!(report["findings"][0]["exception"]["family"], "serde-family");
+    assert_eq!(
+        report["findings"][0]["exception"]["review_record"],
+        "docs/dependency-reviews/2026-05-27-serde.md"
+    );
+    assert_eq!(
+        report["findings"][0]["exception"]["review_by"],
+        "2026-09-21"
+    );
+    assert_eq!(
+        report["findings"][0]["dependency_path"],
+        serde_json::json!(["root@0.1.0", "mid@1.0.0", "serde@1.0.228"])
+    );
+}
+
+#[test]
+fn audit_json_outputs_expired_exception_details() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(advisory_path_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_advisory_audit_fixture(
+        &temp_dir,
+        Some(r#"lockfile_scanner = "cargo-audit""#),
+        "2000-01-01",
+    );
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(report["findings"][0]["disposition"], "expired");
+    assert_eq!(report["findings"][0]["exception"]["family"], "serde-family");
+    assert_eq!(
+        report["findings"][0]["exception"]["review_by"],
+        "2000-01-01"
+    );
+}
+
+#[test]
+fn audit_json_distinguishes_missing_dependency_path_from_unavailable_path_collection() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(metadata_without_advisory_target_json());
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(report["dependency_paths_available"], true);
+    assert!(report["findings"][0]["dependency_path"].is_null());
+}
+
+#[test]
+fn audit_json_marks_dependency_paths_unavailable_when_metadata_has_no_resolve_graph() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(metadata_with_packages(&[(
+            "serde",
+            "1.0.228",
+            "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        )]));
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(report["dependency_paths_available"], false);
+    assert!(report["findings"][0]["dependency_path"].is_null());
+}
+
+#[test]
+fn audit_text_notes_dependency_path_metadata_subprocess_failures_on_stderr() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata_error("metadata failed");
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(rendered_error.contains("note: dependency path context unavailable:"));
+    assert!(rendered_error.contains("cargo metadata --frozen"));
+}
+
+#[test]
+fn audit_text_notes_dependency_path_unknown_package_metadata_errors_on_stderr() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(metadata_with_unknown_workspace_package_json());
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains("referenced unknown package id"));
+}
+
+#[test]
+fn audit_text_notes_dependency_path_invalid_package_metadata_errors_on_stderr() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(metadata_with_invalid_workspace_package_json());
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains("is not an exact crate spec"));
 }
 
 #[test]
@@ -513,4 +822,118 @@ lockfile_scanner = "cargo-audit"
             .expect("stderr should be utf8")
             .contains("FAIL cargo audit structured output:")
     );
+}
+
+fn cargo_audit_advisory_with_remediation_json() -> String {
+    r#"{
+  "vulnerabilities": {
+    "found": true,
+    "count": 1,
+    "list": [
+      {
+        "advisory": {
+          "id": "RUSTSEC-2026-0001",
+          "title": "vulnerable parser",
+          "severity": "high"
+        },
+        "package": { "name": "serde", "version": "1.0.228" },
+        "versions": { "patched": [">=1.0.229"], "unaffected": [] }
+      }
+    ]
+  },
+  "settings": { "ignore": [] },
+  "warnings": {}
+}"#
+    .to_owned()
+}
+
+fn advisory_path_metadata_json() -> String {
+    r#"{
+  "packages": [
+    {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
+    {"name": "mid", "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0", "version": "1.0.0", "targets": []},
+    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "version": "1.0.228", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [{"name": "mid", "pkg": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0",
+        "deps": [{"name": "serde", "pkg": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        "deps": []
+      }
+    ]
+  }
+}"#
+    .to_owned()
+}
+
+fn metadata_without_advisory_target_json() -> String {
+    r#"{
+  "packages": [
+    {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": []
+      }
+    ]
+  }
+}"#
+    .to_owned()
+}
+
+fn metadata_with_unknown_workspace_package_json() -> String {
+    r#"{
+  "packages": [
+    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "version": "1.0.228", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [{"name": "serde", "pkg": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        "deps": []
+      }
+    ]
+  }
+}"#
+    .to_owned()
+}
+
+fn metadata_with_invalid_workspace_package_json() -> String {
+    r#"{
+  "packages": [
+    {"name": "bad/name", "id": "path+file:///repo#bad-name@0.1.0", "version": "0.1.0", "targets": []},
+    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "version": "1.0.228", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#bad-name@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#bad-name@0.1.0",
+        "deps": [{"name": "serde", "pkg": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        "deps": []
+      }
+    ]
+  }
+}"#
+    .to_owned()
 }

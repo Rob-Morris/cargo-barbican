@@ -278,9 +278,9 @@ pub(crate) struct FakeCommandRunner {
     pub(crate) deny_json_config_texts: RefCell<Vec<String>>,
     pub(crate) build_calls: RefCell<usize>,
     pub(crate) test_calls: RefCell<usize>,
-    /// Only `inventory` calls `cargo_metadata_frozen`; it defaults to a
-    /// minimal-but-valid baseline (matching the rest of this fake's
-    /// permissive-by-default philosophy), overridden per test via
+    /// Commands that need live graph facts call `cargo_metadata_frozen`; it
+    /// defaults to a minimal-but-valid baseline (matching the rest of this
+    /// fake's permissive-by-default philosophy), overridden per test via
     /// `with_frozen_metadata`/`with_frozen_metadata_error`.
     pub(crate) cargo_metadata_frozen_result: Result<String, String>,
     pub(crate) cargo_metadata_frozen_calls: RefCell<u64>,

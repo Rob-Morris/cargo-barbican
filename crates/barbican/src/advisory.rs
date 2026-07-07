@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -8,10 +8,11 @@ use crate::{
     ReviewedAdvisoryException, RustSecAdvisoryId,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdvisoryFinding {
     advisory_id: AdvisoryFindingId,
     package: ExactCrateSpec,
+    details: AdvisoryFindingDetails,
 }
 
 impl AdvisoryFinding {
@@ -19,6 +20,7 @@ impl AdvisoryFinding {
         Self {
             advisory_id,
             package,
+            details: AdvisoryFindingDetails::default(),
         }
     }
 
@@ -28,6 +30,84 @@ impl AdvisoryFinding {
 
     pub fn package(&self) -> &ExactCrateSpec {
         &self.package
+    }
+
+    pub fn details(&self) -> &AdvisoryFindingDetails {
+        &self.details
+    }
+
+    fn merge_missing_details_from(&mut self, other: &Self) {
+        self.details.merge_missing_from(&other.details);
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AdvisoryFindingDetails {
+    title: Option<String>,
+    severity: Option<String>,
+    cvss: Option<String>,
+    informational: Option<String>,
+    patched_versions: Vec<String>,
+}
+
+impl AdvisoryFindingDetails {
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    pub fn severity(&self) -> Option<&str> {
+        self.severity.as_deref()
+    }
+
+    pub fn cvss(&self) -> Option<&str> {
+        self.cvss.as_deref()
+    }
+
+    pub fn informational(&self) -> Option<&str> {
+        self.informational.as_deref()
+    }
+
+    pub fn patched_versions(&self) -> &[String] {
+        &self.patched_versions
+    }
+
+    pub fn risk_label(&self) -> Option<&str> {
+        self.severity()
+            .or_else(|| self.informational())
+            .or_else(|| self.cvss())
+    }
+
+    fn merge_missing_from(&mut self, other: &Self) {
+        if self.title.is_none() {
+            self.title.clone_from(&other.title);
+        }
+        if self.severity.is_none() {
+            self.severity.clone_from(&other.severity);
+        }
+        if self.cvss.is_none() {
+            self.cvss.clone_from(&other.cvss);
+        }
+        if self.informational.is_none() {
+            self.informational.clone_from(&other.informational);
+        }
+        if self.patched_versions.is_empty() {
+            self.patched_versions.clone_from(&other.patched_versions);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct AdvisoryFindingKey {
+    advisory_id: AdvisoryFindingId,
+    package: ExactCrateSpec,
+}
+
+impl From<&AdvisoryFinding> for AdvisoryFindingKey {
+    fn from(finding: &AdvisoryFinding) -> Self {
+        Self {
+            advisory_id: finding.advisory_id.clone(),
+            package: finding.package.clone(),
+        }
     }
 }
 
@@ -168,7 +248,7 @@ impl CargoAuditAdvisoryReport {
 pub fn parse_cargo_deny_json_lines(
     text: &str,
 ) -> Result<CargoDenyAdvisoryReport, AdvisoryParseError> {
-    let mut findings = BTreeSet::new();
+    let mut findings = BTreeMap::new();
     let mut summary_counts = Vec::new();
     let mut no_advisory_diagnostics = Vec::new();
     let mut saw_summary = false;
@@ -215,7 +295,7 @@ pub fn parse_cargo_deny_json_lines(
     }
 
     Ok(CargoDenyAdvisoryReport {
-        findings: findings.into_iter().collect(),
+        findings: findings.into_values().collect(),
         summary_counts,
         no_advisory_diagnostics,
     })
@@ -256,7 +336,7 @@ fn parse_cargo_deny_summary(
 fn collect_cargo_deny_diagnostic(
     line: usize,
     value: &serde_json::Value,
-    findings: &mut BTreeSet<AdvisoryFinding>,
+    findings: &mut BTreeMap<AdvisoryFindingKey, AdvisoryFinding>,
     no_advisory_diagnostics: &mut Vec<CargoDenyNoAdvisoryDiagnostic>,
 ) -> Result<(), AdvisoryParseError> {
     let fields = value
@@ -317,7 +397,7 @@ fn collect_cargo_deny_diagnostic(
                 reason: format!("diagnostic line {line} Krate missing version"),
             })?;
 
-        findings.insert(finding_from_parts(advisory_id, name, version)?);
+        insert_finding(findings, finding_from_parts(advisory_id, name, version)?);
     }
 
     Ok(())
@@ -356,7 +436,7 @@ pub fn parse_cargo_audit_json(text: &str) -> Result<CargoAuditAdvisoryReport, Ad
         .ok_or_else(|| AdvisoryParseError::CargoAuditShape {
             reason: "missing warnings object".to_owned(),
         })?;
-    let mut findings = BTreeSet::new();
+    let mut findings = BTreeMap::new();
     let mut idless_warnings = 0;
 
     for vulnerability in list {
@@ -368,7 +448,7 @@ pub fn parse_cargo_audit_json(text: &str) -> Result<CargoAuditAdvisoryReport, Ad
         else {
             continue;
         };
-        findings.insert(finding);
+        insert_finding(&mut findings, finding);
     }
     for (kind, entries) in warnings {
         let entries = entries
@@ -388,7 +468,7 @@ pub fn parse_cargo_audit_json(text: &str) -> Result<CargoAuditAdvisoryReport, Ad
             else {
                 continue;
             };
-            findings.insert(finding);
+            insert_finding(&mut findings, finding);
         }
     }
     let settings_ignore = ignore
@@ -404,7 +484,7 @@ pub fn parse_cargo_audit_json(text: &str) -> Result<CargoAuditAdvisoryReport, Ad
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(CargoAuditAdvisoryReport {
-        findings: findings.into_iter().collect(),
+        findings: findings.into_values().collect(),
         settings_ignore,
         idless_warnings,
     })
@@ -439,6 +519,7 @@ fn cargo_audit_finding(
         .ok_or_else(|| AdvisoryParseError::CargoAuditShape {
             reason: format!("{context} advisory missing id"),
         })?;
+    let details = cargo_audit_finding_details(entry, advisory)?;
     let package = entry
         .get("package")
         .and_then(serde_json::Value::as_object)
@@ -458,7 +539,73 @@ fn cargo_audit_finding(
             reason: format!("{context} package missing version"),
         })?;
 
-    Ok(Some(finding_from_parts(advisory_id, name, version)?))
+    let mut finding = finding_from_parts(advisory_id, name, version)?;
+    finding.details = details;
+
+    Ok(Some(finding))
+}
+
+fn cargo_audit_finding_details(
+    entry: &serde_json::Map<String, serde_json::Value>,
+    advisory: &serde_json::Map<String, serde_json::Value>,
+) -> Result<AdvisoryFindingDetails, AdvisoryParseError> {
+    let title = optional_string(advisory, "title");
+    let severity =
+        optional_string(advisory, "severity").or_else(|| optional_string(entry, "severity"));
+    let informational = optional_string(advisory, "informational");
+    let cvss = advisory.get("cvss").and_then(cvss_value);
+    let patched_versions = entry
+        .get("versions")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|versions| versions.get("patched"))
+        .map(parse_patched_versions)
+        .transpose()?
+        .unwrap_or_default();
+
+    Ok(AdvisoryFindingDetails {
+        title,
+        severity,
+        cvss,
+        informational,
+        patched_versions,
+    })
+}
+
+fn optional_string(
+    fields: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+) -> Option<String> {
+    fields
+        .get(name)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+fn cvss_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn parse_patched_versions(value: &serde_json::Value) -> Result<Vec<String>, AdvisoryParseError> {
+    let patched = value
+        .as_array()
+        .ok_or_else(|| AdvisoryParseError::CargoAuditShape {
+            reason: "versions.patched is not an array".to_owned(),
+        })?;
+    patched
+        .iter()
+        .map(|version| {
+            version
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| AdvisoryParseError::CargoAuditShape {
+                    reason: "versions.patched entry is not a string".to_owned(),
+                })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,7 +623,18 @@ fn finding_from_parts(
         advisory_id: AdvisoryFindingId::parse(advisory_id),
         package: ExactCrateSpec::from_parts(crate_name, version)
             .map_err(AdvisoryParseError::InvalidPackageSpec)?,
+        details: AdvisoryFindingDetails::default(),
     })
+}
+
+fn insert_finding(
+    findings: &mut BTreeMap<AdvisoryFindingKey, AdvisoryFinding>,
+    finding: AdvisoryFinding,
+) {
+    findings
+        .entry(AdvisoryFindingKey::from(&finding))
+        .and_modify(|existing| existing.merge_missing_details_from(&finding))
+        .or_insert(finding);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -638,7 +796,7 @@ pub fn evaluate_advisory_audit(
     exceptions: &[&ReviewedAdvisoryException],
     now: OffsetDateTime,
 ) -> AdvisoryAuditOutcome {
-    let mut findings = BTreeSet::new();
+    let mut findings = BTreeMap::new();
     let mut completeness_failures = Vec::new();
     let mut cargo_deny_no_advisory_errors = Vec::new();
     let mut cargo_deny_non_advisory_errors = Vec::new();
@@ -648,7 +806,9 @@ pub fn evaluate_advisory_audit(
     if !cargo_deny_checks.is_empty() {
         match cargo_deny_report {
             Some(report) => {
-                findings.extend(report.findings().iter().cloned());
+                for finding in report.findings() {
+                    insert_finding(&mut findings, finding.clone());
+                }
                 cargo_deny_no_advisory_errors.extend(
                     report
                         .no_advisory_diagnostics()
@@ -684,7 +844,9 @@ pub fn evaluate_advisory_audit(
     ) {
         match cargo_audit_report {
             Some(report) => {
-                findings.extend(report.findings().iter().cloned());
+                for finding in report.findings() {
+                    insert_finding(&mut findings, finding.clone());
+                }
                 cargo_audit_settings_ignore.extend(report.settings_ignore().iter().cloned());
                 cargo_audit_idless_warnings += report.idless_warnings();
             }
@@ -693,7 +855,7 @@ pub fn evaluate_advisory_audit(
         }
     }
 
-    let findings = findings.into_iter().collect::<Vec<_>>();
+    let findings = findings.into_values().collect::<Vec<_>>();
     AdvisoryAuditOutcome {
         reconciliation: reconcile_advisory_findings(&findings, exceptions, now),
         completeness_failures,
@@ -780,10 +942,11 @@ mod tests {
       {
         "advisory": {
           "id": "RUSTSEC-2026-0001",
-          "title": "extra scanner metadata"
+          "title": "extra scanner metadata",
+          "severity": "high"
         },
         "package": { "name": "serde", "version": "1.0.228" },
-        "versions": { "patched": [], "unaffected": [] }
+        "versions": { "patched": [">=1.0.229"], "unaffected": [] }
       }
     ]
   },
@@ -799,7 +962,66 @@ mod tests {
             "RUSTSEC-2026-0001"
         );
         assert_eq!(report.findings()[0].package().to_string(), "serde@1.0.228");
+        assert_eq!(
+            report.findings()[0].details().title(),
+            Some("extra scanner metadata")
+        );
+        assert_eq!(report.findings()[0].details().risk_label(), Some("high"));
+        assert_eq!(
+            report.findings()[0].details().patched_versions(),
+            &[">=1.0.229".to_owned()]
+        );
         assert_eq!(report.settings_ignore(), &["RUSTSEC-2025-0001".to_owned()]);
+    }
+
+    #[test]
+    fn cargo_audit_merges_duplicate_findings_without_dropping_remediation_details() {
+        let report = parse_cargo_audit_json(
+            r#"{
+  "vulnerabilities": {
+    "found": true,
+    "count": 1,
+    "list": [
+      {
+        "advisory": {
+          "id": "RUSTSEC-2026-0001",
+          "title": "vulnerable parser"
+        },
+        "package": { "name": "serde", "version": "1.0.228" },
+        "versions": { "patched": [">=1.0.229"], "unaffected": [] }
+      }
+    ]
+  },
+  "settings": { "ignore": [] },
+  "warnings": {
+    "unmaintained": [
+      {
+        "advisory": {
+          "id": "RUSTSEC-2026-0001",
+          "informational": "unmaintained"
+        },
+        "package": { "name": "serde", "version": "1.0.228" },
+        "versions": { "patched": [], "unaffected": [] }
+      }
+    ]
+  }
+}"#,
+        )
+        .expect("cargo-audit output should parse");
+
+        assert_eq!(report.findings().len(), 1);
+        assert_eq!(
+            report.findings()[0].details().title(),
+            Some("vulnerable parser")
+        );
+        assert_eq!(
+            report.findings()[0].details().risk_label(),
+            Some("unmaintained")
+        );
+        assert_eq!(
+            report.findings()[0].details().patched_versions(),
+            &[">=1.0.229".to_owned()]
+        );
     }
 
     #[test]
@@ -1636,6 +1858,61 @@ mod tests {
 
         assert!(outcome.is_success());
         assert_eq!(outcome.reconciliation().dispositions().len(), 1);
+    }
+
+    #[test]
+    fn audit_outcome_keeps_cargo_audit_details_when_cargo_deny_reports_same_finding_first() {
+        let deny_report = parse_cargo_deny_json_lines(
+            r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0003"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
+"#,
+        )
+        .expect("cargo-deny output should parse");
+        let audit_report = parse_cargo_audit_json(
+            r#"{
+  "vulnerabilities": {
+    "found": true,
+    "count": 1,
+    "list": [
+      {
+        "advisory": {
+          "id": "RUSTSEC-2026-0003",
+          "title": "vulnerable parser",
+          "severity": "high"
+        },
+        "package": { "name": "serde", "version": "1.0.228" },
+        "versions": { "patched": [">=1.0.229"], "unaffected": [] }
+      }
+    ]
+  },
+  "settings": { "ignore": [] },
+  "warnings": {}
+}"#,
+        )
+        .expect("cargo-audit output should parse");
+
+        let outcome = evaluate_advisory_audit(
+            LockfileAdvisoryScanner::Both,
+            &[CargoDenyCheck::Advisories],
+            Some(&deny_report),
+            Some(&audit_report),
+            &[],
+            fixed_now(),
+        );
+
+        assert!(!outcome.is_success());
+        assert_eq!(outcome.reconciliation().dispositions().len(), 1);
+        let AdvisoryDisposition::Unreviewed { finding } =
+            &outcome.reconciliation().dispositions()[0]
+        else {
+            panic!("merged finding should remain unreviewed");
+        };
+        assert_eq!(finding.details().title(), Some("vulnerable parser"));
+        assert_eq!(finding.details().risk_label(), Some("high"));
+        assert_eq!(
+            finding.details().patched_versions(),
+            &[">=1.0.229".to_owned()]
+        );
     }
 
     #[test]

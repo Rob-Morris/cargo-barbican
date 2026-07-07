@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::io;
 use std::io::Write;
@@ -6,12 +8,16 @@ use std::process::ExitCode;
 
 use barbican::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
-    AdvisoryFindingId, CargoDenyNoAdvisoryDiagnostic, LockfileAdvisoryScanner, OffsetDateTime,
-    ReviewRecordFact, ReviewedAdvisoryException, ReviewedTargets, RustReviewedTargetsReport,
-    UnmanagedDelegatedPolicyMode, check_reviewed_rust_targets, evaluate_advisory_audit,
-    generate_cargo_deny_runtime_config, parse_cargo_audit_json, parse_cargo_deny_json_lines,
+    AdvisoryFindingId, CargoDenyNoAdvisoryDiagnostic, ExactCrateSpec, LockfileAdvisoryScanner,
+    MetadataDependencyPath, OffsetDateTime, ReviewRecordFact, ReviewedAdvisoryException,
+    ReviewedTargets, RustReviewedTargetsReport, UnmanagedDelegatedPolicyMode,
+    check_reviewed_rust_targets, evaluate_advisory_audit, generate_cargo_deny_runtime_config,
+    parse_cargo_audit_json, parse_cargo_deny_json_lines, parse_cargo_metadata,
+    shortest_workspace_dependency_path,
 };
+use serde_json::json;
 
+use crate::cli::AuditOutputFormat;
 use crate::command_runner::CommandRunner;
 
 use super::scratch_dir::ScratchDir;
@@ -23,6 +29,7 @@ use super::{
 };
 
 pub(super) fn run_audit<R>(
+    output_format: AuditOutputFormat,
     current_dir: &Path,
     runner: &R,
     now: OffsetDateTime,
@@ -108,20 +115,124 @@ where
             UnmanagedDelegatedPolicyMode::Deny
         );
     let passed = outcome.is_success() && !native_ignores_fail;
+    let dependency_paths = collect_dependency_paths(current_dir, runner, &outcome, output_format);
 
-    render_audit_report(
-        stdout,
-        passed,
-        &outcome,
-        &native_ignores,
-        config.delegates.unmanaged_delegated_policy,
-    )?;
+    match output_format {
+        AuditOutputFormat::Text => {
+            if let Some(reason) = dependency_paths.unavailable_reason() {
+                writeln!(
+                    stderr,
+                    "note: dependency path context unavailable: {}",
+                    escape_diagnostic_for_terminal(reason)
+                )
+                .map_err(CommandError::Io)?;
+            }
+            render_audit_report(
+                stdout,
+                passed,
+                &outcome,
+                &dependency_paths,
+                &native_ignores,
+                config.delegates.unmanaged_delegated_policy,
+            )?;
+        }
+        AuditOutputFormat::Json => render_audit_json_report(
+            stdout,
+            passed,
+            &outcome,
+            &dependency_paths,
+            &native_ignores,
+            config.delegates.unmanaged_delegated_policy,
+        )?,
+    }
 
     Ok(if passed {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
     })
+}
+
+fn collect_dependency_paths<R>(
+    current_dir: &Path,
+    runner: &R,
+    outcome: &AdvisoryAuditOutcome,
+    output_format: AuditOutputFormat,
+) -> DependencyPathReport
+where
+    R: CommandRunner + ?Sized,
+{
+    let mut targets = Vec::new();
+    for disposition in outcome.reconciliation().dispositions() {
+        if matches!(output_format, AuditOutputFormat::Text)
+            && matches!(disposition, AdvisoryDisposition::Accepted { .. })
+        {
+            continue;
+        }
+        let package = disposition.finding().package();
+        if !targets.contains(package) {
+            targets.push(package.clone());
+        }
+    }
+    if targets.is_empty() {
+        return DependencyPathReport::available(BTreeMap::new());
+    }
+
+    let metadata_text = match runner.cargo_metadata_frozen(current_dir) {
+        Ok(text) => text,
+        Err(error) => {
+            return DependencyPathReport::unavailable(format!("cargo metadata --frozen: {error}"));
+        }
+    };
+    let metadata = match parse_cargo_metadata(&metadata_text) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return DependencyPathReport::unavailable(format!(
+                "cargo metadata --frozen output: {error}"
+            ));
+        }
+    };
+
+    let mut paths = BTreeMap::new();
+    for target in targets {
+        match shortest_workspace_dependency_path(&metadata, &target) {
+            Ok(Some(path)) => {
+                paths.insert(target, path);
+            }
+            Ok(None) => {}
+            Err(error) => return DependencyPathReport::unavailable(format!("{target}: {error}")),
+        }
+    }
+
+    DependencyPathReport::available(paths)
+}
+
+struct DependencyPathReport {
+    paths: BTreeMap<ExactCrateSpec, MetadataDependencyPath>,
+    available: bool,
+    unavailable_reason: Option<String>,
+}
+
+impl DependencyPathReport {
+    fn available(paths: BTreeMap<ExactCrateSpec, MetadataDependencyPath>) -> Self {
+        Self {
+            paths,
+            available: true,
+            unavailable_reason: None,
+        }
+    }
+
+    fn unavailable(reason: String) -> Self {
+        Self {
+            paths: BTreeMap::new(),
+            available: false,
+            unavailable_reason: Some(reason),
+        }
+    }
+
+    fn unavailable_reason(&self) -> Option<&str> {
+        self.unavailable_reason.as_deref()
+    }
 }
 
 fn load_review_evidence(
@@ -156,6 +267,7 @@ fn render_audit_report(
     stdout: &mut dyn Write,
     passed: bool,
     outcome: &AdvisoryAuditOutcome,
+    dependency_paths: &DependencyPathReport,
     native_ignores: &[NativeDelegatedIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
 ) -> Result<(), CommandError> {
@@ -171,21 +283,28 @@ fn render_audit_report(
             AdvisoryDisposition::Expired { finding, exception } => {
                 writeln!(
                     stdout,
-                    "FAIL {}: reviewed advisory exception expired for reviewed family {} ({}), review by {}",
-                    render_finding(finding),
-                    escape_render_field(exception.family()),
-                    escape_render_field(exception.review_record()),
-                    exception.review_by(),
+                    "{}",
+                    render_finding_failure(
+                        finding,
+                        &format!(
+                            "reviewed advisory exception expired for reviewed family {} ({}), review by {}",
+                            escape_render_field(exception.family()),
+                            escape_render_field(exception.review_record()),
+                            exception.review_by(),
+                        ),
+                    ),
                 )
                 .map_err(CommandError::Io)?;
+                render_dependency_path(stdout, finding, dependency_paths)?;
             }
             AdvisoryDisposition::Unreviewed { finding } => {
                 writeln!(
                     stdout,
-                    "FAIL {}: unreviewed advisory finding",
-                    render_finding(finding)
+                    "{}",
+                    render_finding_failure(finding, "unreviewed advisory finding")
                 )
                 .map_err(CommandError::Io)?;
+                render_dependency_path(stdout, finding, dependency_paths)?;
             }
         }
     }
@@ -232,6 +351,182 @@ fn render_audit_report(
     }
 
     Ok(())
+}
+
+fn render_audit_json_report(
+    stdout: &mut dyn Write,
+    passed: bool,
+    outcome: &AdvisoryAuditOutcome,
+    dependency_paths: &DependencyPathReport,
+    native_ignores: &[NativeDelegatedIgnore],
+    unmanaged_policy: UnmanagedDelegatedPolicyMode,
+) -> Result<(), CommandError> {
+    let findings = outcome
+        .reconciliation()
+        .dispositions()
+        .iter()
+        .map(|disposition| finding_json(disposition, dependency_paths))
+        .collect::<Vec<_>>();
+    let report = json!({
+        "schema_version": 1,
+        "status": if passed { "pass" } else { "fail" },
+        "success": passed,
+        "dependency_paths_available": dependency_paths.available,
+        "findings": findings,
+        "completeness_failures": outcome
+            .completeness_failures()
+            .iter()
+            .map(render_completeness_failure)
+            .collect::<Vec<_>>(),
+        "cargo_deny": {
+            "no_advisory_errors": outcome
+                .cargo_deny_no_advisory_errors()
+                .iter()
+                .map(no_advisory_diagnostic_json)
+                .collect::<Vec<_>>(),
+            "non_advisory_errors": outcome
+                .cargo_deny_non_advisory_errors()
+                .iter()
+                .map(|count| json!({
+                    "check": count.check(),
+                    "errors": count.errors(),
+                }))
+                .collect::<Vec<_>>(),
+        },
+        "cargo_audit": {
+            "settings_ignore": outcome.cargo_audit_settings_ignore(),
+            "idless_warnings": outcome.cargo_audit_idless_warnings(),
+        },
+        "native_delegated_ignores": native_ignores
+            .iter()
+            .map(|entry| json!({
+                "source": entry.source(),
+                "advisory_ids": entry.advisory_ids(),
+                "policy": unmanaged_policy_json(unmanaged_policy),
+            }))
+            .collect::<Vec<_>>(),
+    });
+
+    serde_json::to_writer_pretty(&mut *stdout, &report)
+        .map_err(|error| CommandError::Io(io::Error::other(error)))?;
+    writeln!(stdout).map_err(CommandError::Io)
+}
+
+fn finding_json(
+    disposition: &AdvisoryDisposition,
+    dependency_paths: &DependencyPathReport,
+) -> serde_json::Value {
+    let finding = disposition.finding();
+    let details = finding.details();
+    json!({
+        "advisory_id": finding.advisory_id().to_string(),
+        "package": {
+            "spec": finding.package().to_string(),
+            "name": finding.package().crate_name(),
+            "version": finding.package().version(),
+        },
+        "disposition": disposition_json(disposition),
+        "title": details.title(),
+        "risk": details.risk_label(),
+        "severity": details.severity(),
+        "cvss": details.cvss(),
+        "informational": details.informational(),
+        "patched": details.patched_versions(),
+        "dependency_path": dependency_paths
+            .paths
+            .get(finding.package())
+            .map(|path| {
+                path.packages()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            }),
+        "exception": exception_json(disposition),
+    })
+}
+
+fn disposition_json(disposition: &AdvisoryDisposition) -> &'static str {
+    match disposition {
+        AdvisoryDisposition::Accepted { .. } => "accepted",
+        AdvisoryDisposition::Expired { .. } => "expired",
+        AdvisoryDisposition::Unreviewed { .. } => "unreviewed",
+    }
+}
+
+fn exception_json(disposition: &AdvisoryDisposition) -> Option<serde_json::Value> {
+    match disposition {
+        AdvisoryDisposition::Accepted { exception, .. }
+        | AdvisoryDisposition::Expired { exception, .. } => Some(json!({
+            "family": exception.family(),
+            "review_record": exception.review_record(),
+            "review_by": exception.review_by().to_string(),
+        })),
+        AdvisoryDisposition::Unreviewed { .. } => None,
+    }
+}
+
+fn no_advisory_diagnostic_json(diagnostic: &CargoDenyNoAdvisoryDiagnostic) -> serde_json::Value {
+    json!({
+        "line": diagnostic.line(),
+        "severity": diagnostic.severity(),
+        "code": diagnostic.code(),
+    })
+}
+
+fn unmanaged_policy_json(policy: UnmanagedDelegatedPolicyMode) -> &'static str {
+    match policy {
+        UnmanagedDelegatedPolicyMode::Warn => "warn",
+        UnmanagedDelegatedPolicyMode::Deny => "deny",
+        UnmanagedDelegatedPolicyMode::Allow => "allow",
+    }
+}
+
+fn render_finding_failure(finding: &AdvisoryFinding, reason: &str) -> String {
+    let mut rendered = format!("FAIL {}", render_finding(finding));
+    if let Some(risk) = finding.details().risk_label() {
+        write!(&mut rendered, " ({})", escape_render_field(risk))
+            .expect("writing to a String cannot fail");
+    }
+    write!(&mut rendered, ": {reason}").expect("writing to a String cannot fail");
+    if let Some(title) = finding.details().title() {
+        write!(&mut rendered, "; title: {}", escape_render_field(title))
+            .expect("writing to a String cannot fail");
+    }
+    if !finding.details().patched_versions().is_empty() {
+        write!(
+            &mut rendered,
+            "; fixed in {}",
+            finding
+                .details()
+                .patched_versions()
+                .iter()
+                .map(|version| escape_render_field(version))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .expect("writing to a String cannot fail");
+    }
+    rendered
+}
+
+fn render_dependency_path(
+    stdout: &mut dyn Write,
+    finding: &AdvisoryFinding,
+    dependency_paths: &DependencyPathReport,
+) -> Result<(), CommandError> {
+    let Some(path) = dependency_paths.paths.get(finding.package()) else {
+        return Ok(());
+    };
+    writeln!(
+        stdout,
+        "  dependency path: {}",
+        path.packages()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" -> ")
+    )
+    .map_err(CommandError::Io)
 }
 
 fn render_native_ignores(

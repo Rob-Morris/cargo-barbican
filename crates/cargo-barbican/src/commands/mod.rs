@@ -264,7 +264,9 @@ where
         Command::Review { base_dir } => {
             review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)
         }
-        Command::Audit => audit::run_audit(current_dir, runner, now, stdout, stderr),
+        Command::Audit { format } => {
+            audit::run_audit(format, current_dir, runner, now, stdout, stderr)
+        }
         Command::Verify => verify::run_verify(current_dir, runner, stdout, stderr),
     }
 }

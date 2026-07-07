@@ -324,7 +324,7 @@ cargo barbican review [--base-dir PATH]
     - workspace member `Cargo.toml` files
     - checked-in dependency review records under `docs/dependency-reviews/`
 
-cargo barbican audit
+cargo barbican audit [--format text|json]
     Enumerate the complete advisory finding set from the configured
     scanner(s) (`cargo-deny` and/or `cargo-audit`) with native advisory
     ignores neutralised, reconcile each finding against reviewed advisory
@@ -334,6 +334,17 @@ cargo barbican audit
     `delegates.unmanaged_delegated_policy = "deny"` — any native delegated
     advisory ignore. Accepted exceptions and native delegated ignores are
     rendered.
+
+    The default `--format text` report is human-oriented. When scanner output
+    carries advisory metadata, finding lines include the advisory title, risk
+    label, and patched-version ranges. When frozen Cargo metadata can be
+    collected, unaccepted findings also include the shortest workspace-root
+    dependency path to the affected package.
+
+    `--format json` emits a stable JSON report on stdout with
+    `schema_version`, `status`, `success`, structured advisory `findings`,
+    scanner completeness failures, delegated scanner diagnostics, native
+    delegated ignores, patched-version ranges, and optional dependency paths.
 
 cargo barbican verify
     Run the local execution gates in order:
@@ -372,6 +383,17 @@ contract, not a routine rewording.
   by `verify`, which calls the same reviewed-target check before its build
   and test steps)
 - `Audit: PASS` / `Audit: FAIL` — printed by `audit`
+  when `--format text` is selected
+- `cargo barbican audit --format json` emits a stable JSON report on stdout.
+  Its top-level `schema_version` identifies the JSON contract version. Adding
+  optional fields is a non-breaking schema-version-compatible change; removing
+  fields, renaming fields, changing field meaning, or changing existing field
+  types requires a new `schema_version`. In schema version `1`, consumers may
+  rely on the top-level `schema_version`, `status`, `success`,
+  `dependency_paths_available`, `findings`, `completeness_failures`,
+  `cargo_deny`, `cargo_audit`, and `native_delegated_ignores` fields, plus
+  each finding's advisory id, package object, disposition, title/risk/severity
+  metadata, patched ranges, dependency path, and reviewed-exception object.
 - `Verify: PASS` — printed by `verify` on success; there is no matching
   `Verify: FAIL` token. A failing `verify` run stops at the failing step
   (`pin check`, `cargo build --locked`, or `cargo test --locked`), reports the
@@ -382,8 +404,8 @@ contract, not a routine rewording.
 All other output — evidence reports, dossiers, inventory findings, review
 diffs, and human-oriented notes such as `verify`'s scope-honesty pointer to
 `audit` — is not a stable parse target and may change wording or formatting
-between versions. Match on the tokens above and the exit code, not on other
-output text.
+between versions. Match on the tokens and JSON schema above and the exit code,
+not on other output text.
 
 ## Stream discipline
 
