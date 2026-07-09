@@ -46,6 +46,7 @@ pub(crate) use loaders::{
     NativeDelegatedIgnore, ReviewedReleaseAgeExceptions, check_review_record_paths,
     collect_reviewed_release_age_exceptions, load_base_manifest_dependencies, load_config,
     load_current_lockfile, load_current_lockfile_text, load_current_lockfile_with_text,
+    load_current_manifest_direct_and_workspace_requirements,
     load_current_manifest_direct_requirements, load_git_base_lockfile, load_lockfile_from_path,
     load_manifest_dependencies_from_root, load_manifest_patched_crate_names,
     load_manifest_texts_from_root, load_native_delegated_ignores, load_release_age_context,

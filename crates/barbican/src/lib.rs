@@ -26,8 +26,9 @@ pub mod spec;
 pub use advisory::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
     AdvisoryFindingDetails, AdvisoryFindingId, AdvisoryParseError, AdvisoryReconciliationReport,
-    CargoAuditAdvisoryReport, CargoDenyAdvisoryReport, CargoDenyNoAdvisoryDiagnostic,
-    CargoDenySummaryCount, evaluate_advisory_audit, parse_cargo_audit_json,
+    AdvisoryRemediation, AdvisoryRemediationKind, CargoAuditAdvisoryReport,
+    CargoDenyAdvisoryReport, CargoDenyNoAdvisoryDiagnostic, CargoDenySummaryCount,
+    advisory_remediation, evaluate_advisory_audit, parse_cargo_audit_json,
     parse_cargo_deny_json_lines, reconcile_advisory_findings,
 };
 pub use assessment::{

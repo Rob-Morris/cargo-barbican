@@ -4,8 +4,9 @@ use thiserror::Error;
 use time::OffsetDateTime;
 
 use crate::{
-    CargoDenyCheck, ExactCrateSpec, ExactCrateSpecError, LockfileAdvisoryScanner,
-    ReviewedAdvisoryException, RustSecAdvisoryId,
+    CargoDenyCheck, CargoDependencySourceKind, CargoManifestDirectRequirement, ExactCrateSpec,
+    ExactCrateSpecError, LockfileAdvisoryScanner, MetadataDependencyPath,
+    ReviewedAdvisoryException, RustSecAdvisoryId, parse_exact_version_requirement,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -243,6 +244,165 @@ impl CargoAuditAdvisoryReport {
     pub fn idless_warnings(&self) -> usize {
         self.idless_warnings
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvisoryRemediation {
+    kind: AdvisoryRemediationKind,
+    patched_versions: Vec<String>,
+    target_crate: String,
+    nearest_parent: Option<String>,
+    command_hint: Option<String>,
+}
+
+impl AdvisoryRemediation {
+    pub fn kind(&self) -> AdvisoryRemediationKind {
+        self.kind
+    }
+
+    pub fn patched_versions(&self) -> &[String] {
+        &self.patched_versions
+    }
+
+    pub fn target_crate(&self) -> &str {
+        &self.target_crate
+    }
+
+    pub fn nearest_parent(&self) -> Option<&str> {
+        self.nearest_parent.as_deref()
+    }
+
+    pub fn command_hint(&self) -> Option<&str> {
+        self.command_hint.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdvisoryRemediationKind {
+    DirectPinnedEdit,
+    DirectUpdate,
+    TransitiveBump,
+}
+
+impl AdvisoryRemediationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DirectPinnedEdit => "direct-pinned-edit",
+            Self::DirectUpdate => "direct-update",
+            Self::TransitiveBump => "transitive-bump",
+        }
+    }
+}
+
+pub fn advisory_remediation(
+    finding: &AdvisoryFinding,
+    manifest_requirements: &[CargoManifestDirectRequirement],
+    workspace_requirements: &[CargoManifestDirectRequirement],
+    dependency_path: Option<&MetadataDependencyPath>,
+) -> Option<AdvisoryRemediation> {
+    let patched_versions = finding.details().patched_versions();
+    if patched_versions.is_empty() {
+        return None;
+    }
+
+    let crate_name = finding.package().crate_name();
+    let direct =
+        direct_requirement_summary(crate_name, manifest_requirements, workspace_requirements);
+    if let Some(direct) = direct {
+        if direct.exact_pinned {
+            return Some(AdvisoryRemediation {
+                kind: AdvisoryRemediationKind::DirectPinnedEdit,
+                patched_versions: patched_versions.to_vec(),
+                target_crate: crate_name.to_owned(),
+                nearest_parent: None,
+                command_hint: None,
+            });
+        }
+
+        return Some(AdvisoryRemediation {
+            kind: AdvisoryRemediationKind::DirectUpdate,
+            patched_versions: patched_versions.to_vec(),
+            target_crate: crate_name.to_owned(),
+            nearest_parent: None,
+            command_hint: Some(format!("cargo barbican update {crate_name}@<version>")),
+        });
+    }
+
+    let nearest_parent = dependency_path
+        .and_then(|path| nearest_parent_crate(path, finding.package()))
+        .map(str::to_owned);
+    let target_crate = nearest_parent
+        .clone()
+        .unwrap_or_else(|| crate_name.to_owned());
+    let command_hint = nearest_parent
+        .as_ref()
+        .map(|parent| format!("cargo barbican update {parent}@<version>"));
+    Some(AdvisoryRemediation {
+        kind: AdvisoryRemediationKind::TransitiveBump,
+        patched_versions: patched_versions.to_vec(),
+        target_crate,
+        nearest_parent,
+        command_hint,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DirectRequirementSummary {
+    exact_pinned: bool,
+}
+
+fn direct_requirement_summary(
+    crate_name: &str,
+    manifest_requirements: &[CargoManifestDirectRequirement],
+    workspace_requirements: &[CargoManifestDirectRequirement],
+) -> Option<DirectRequirementSummary> {
+    let matching = manifest_requirements
+        .iter()
+        .filter(|requirement| requirement.name() == crate_name);
+
+    let mut found = false;
+    let mut exact_pinned = false;
+    for requirement in matching {
+        found = true;
+        if effective_direct_requirement(requirement, workspace_requirements).is_some_and(
+            |version_requirement| {
+                parse_exact_version_requirement(crate_name, version_requirement).is_ok()
+            },
+        ) {
+            exact_pinned = true;
+        }
+    }
+
+    found.then_some(DirectRequirementSummary { exact_pinned })
+}
+
+fn effective_direct_requirement<'a>(
+    requirement: &'a CargoManifestDirectRequirement,
+    workspace_requirements: &'a [CargoManifestDirectRequirement],
+) -> Option<&'a str> {
+    if requirement.source_kind() == CargoDependencySourceKind::Workspace {
+        workspace_requirements
+            .iter()
+            .find(|workspace| workspace.name() == requirement.name())
+            .and_then(CargoManifestDirectRequirement::version_requirement)
+            .or_else(|| requirement.version_requirement())
+    } else {
+        requirement.version_requirement()
+    }
+}
+
+fn nearest_parent_crate<'a>(
+    path: &'a MetadataDependencyPath,
+    target: &ExactCrateSpec,
+) -> Option<&'a str> {
+    let packages = path.packages();
+    if packages.last() != Some(target) || packages.len() < 3 {
+        return None;
+    }
+
+    packages
+        .get(packages.len() - 2)
+        .map(ExactCrateSpec::crate_name)
 }
 
 pub fn parse_cargo_deny_json_lines(
@@ -890,12 +1050,15 @@ pub enum AdvisoryParseError {
 mod tests {
     use super::{
         AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition,
-        AdvisoryFindingId, evaluate_advisory_audit, parse_cargo_audit_json,
-        parse_cargo_deny_json_lines, reconcile_advisory_findings,
+        AdvisoryFinding, AdvisoryFindingId, AdvisoryRemediationKind, advisory_remediation,
+        evaluate_advisory_audit, parse_cargo_audit_json, parse_cargo_deny_json_lines,
+        reconcile_advisory_findings,
     };
     use crate::{
-        CargoAuditAdvisoryReport, CargoDenyAdvisoryReport, CargoDenyCheck, LockfileAdvisoryScanner,
-        ReviewedAdvisoryException, ReviewedTargetsError, parse_reviewed_targets_toml,
+        CargoAuditAdvisoryReport, CargoDenyAdvisoryReport, CargoDenyCheck, ExactCrateSpec,
+        LockfileAdvisoryScanner, ReviewedAdvisoryException, ReviewedTargetsError,
+        parse_cargo_metadata, parse_manifest_direct_requirements, parse_reviewed_targets_toml,
+        parse_workspace_dependency_requirements, shortest_workspace_dependency_path,
     };
     use time::{Date, Month, OffsetDateTime};
 
@@ -910,6 +1073,105 @@ mod tests {
         include_str!("../tests/fixtures/advisory/cargo-deny-bans-finding.jsonl");
     const CARGO_DENY_WITH_FINDINGS: &str =
         include_str!("../tests/fixtures/advisory/cargo-deny-findings.jsonl");
+
+    #[test]
+    fn remediation_targets_nearest_parent_for_transitive_findings() {
+        let finding = remediation_finding();
+        let manifest_requirements = direct_requirements("[dependencies]\nplist = \"1.9\"\n");
+        let path = dependency_path_to_quick_xml();
+
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], Some(&path))
+            .expect("patched transitive finding should have remediation");
+
+        assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
+        assert_eq!(remediation.target_crate(), "plist");
+        assert_eq!(remediation.nearest_parent(), Some("plist"));
+        assert_eq!(
+            remediation.command_hint(),
+            Some("cargo barbican update plist@<version>")
+        );
+        assert_eq!(remediation.patched_versions(), &[">=0.41.0".to_owned()]);
+    }
+
+    #[test]
+    fn remediation_does_not_treat_workspace_root_as_transitive_parent() {
+        let finding = remediation_finding_for("serde", "1.0.228", ">=1.0.229");
+        let path = dependency_path_to_direct_serde();
+
+        let remediation = advisory_remediation(&finding, &[], &[], Some(&path))
+            .expect("patched finding should have generic transitive remediation");
+
+        assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
+        assert_eq!(remediation.target_crate(), "serde");
+        assert_eq!(remediation.nearest_parent(), None);
+        assert_eq!(remediation.command_hint(), None);
+    }
+
+    #[test]
+    fn remediation_keeps_direct_exact_pins_as_manifest_edits() {
+        let finding = remediation_finding_for("tauri", "2.11.2", ">=2.11.5");
+        let manifest_requirements = direct_requirements("[dependencies]\ntauri = \"=2.11.2\"\n");
+
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], None)
+            .expect("patched direct finding should have remediation");
+
+        assert_eq!(
+            remediation.kind(),
+            AdvisoryRemediationKind::DirectPinnedEdit
+        );
+        assert_eq!(remediation.target_crate(), "tauri");
+        assert_eq!(remediation.command_hint(), None);
+    }
+
+    #[test]
+    fn remediation_treats_workspace_inherited_exact_pins_as_pinned() {
+        let finding = remediation_finding_for("tauri", "2.11.2", ">=2.11.5");
+        let manifest_requirements =
+            direct_requirements("[dependencies]\ntauri = { workspace = true }\n");
+        let workspace_requirements =
+            workspace_requirements("[workspace.dependencies]\ntauri = \"=2.11.2\"\n");
+
+        let remediation = advisory_remediation(
+            &finding,
+            &manifest_requirements,
+            &workspace_requirements,
+            None,
+        )
+        .expect("patched direct finding should have remediation");
+
+        assert_eq!(
+            remediation.kind(),
+            AdvisoryRemediationKind::DirectPinnedEdit
+        );
+        assert_eq!(remediation.command_hint(), None);
+    }
+
+    #[test]
+    fn remediation_suggests_update_for_direct_unpinned_findings() {
+        let finding = remediation_finding_for("serde", "1.0.228", ">=1.0.229");
+        let manifest_requirements = direct_requirements("[dependencies]\nserde = \"1\"\n");
+
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], None)
+            .expect("patched direct finding should have remediation");
+
+        assert_eq!(remediation.kind(), AdvisoryRemediationKind::DirectUpdate);
+        assert_eq!(remediation.target_crate(), "serde");
+        assert_eq!(
+            remediation.command_hint(),
+            Some("cargo barbican update serde@<version>")
+        );
+    }
+
+    #[test]
+    fn remediation_is_absent_without_patched_versions() {
+        let finding = AdvisoryFinding::new(
+            AdvisoryFindingId::parse("RUSTSEC-2026-0001"),
+            ExactCrateSpec::from_parts("serde", "1.0.228").expect("spec should parse"),
+        );
+        let manifest_requirements = direct_requirements("[dependencies]\nserde = \"1\"\n");
+
+        assert!(advisory_remediation(&finding, &manifest_requirements, &[], None).is_none());
+    }
 
     #[test]
     fn parses_cargo_deny_json_advisory_diagnostics() {
@@ -2037,6 +2299,175 @@ serde = [
             exceptions,
             now,
         )
+    }
+
+    fn remediation_finding() -> AdvisoryFinding {
+        remediation_finding_for("quick-xml", "0.39.4", ">=0.41.0")
+    }
+
+    fn remediation_finding_for(
+        crate_name: &str,
+        version: &str,
+        patched_range: &str,
+    ) -> AdvisoryFinding {
+        let report = parse_cargo_audit_json(&format!(
+            r#"{{
+  "database": {{ "advisory-count": 1 }},
+  "lockfile": {{ "dependency-count": 1 }},
+  "settings": {{
+    "target_arch": [],
+    "target_os": [],
+    "severity": null,
+    "ignore": [],
+    "informational_warnings": []
+  }},
+  "vulnerabilities": {{
+    "found": true,
+    "count": 1,
+    "list": [
+      {{
+        "package": {{
+          "name": "{crate_name}",
+          "version": "{version}",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "00"
+        }},
+        "advisory": {{
+          "id": "RUSTSEC-2026-0001",
+          "package": "{crate_name}",
+          "title": "vulnerable parser",
+          "severity": "high",
+          "versions": {{ "patched": ["{patched_range}"] }}
+        }},
+        "versions": {{ "patched": ["{patched_range}"] }}
+      }}
+    ]
+  }},
+  "warnings": {{}}
+}}"#
+        ))
+        .expect("cargo audit fixture should parse");
+
+        report.findings()[0].clone()
+    }
+
+    fn direct_requirements(text: &str) -> Vec<crate::CargoManifestDirectRequirement> {
+        parse_manifest_direct_requirements("Cargo.toml", text)
+            .expect("manifest should parse")
+            .into_iter()
+            .collect()
+    }
+
+    fn workspace_requirements(text: &str) -> Vec<crate::CargoManifestDirectRequirement> {
+        parse_workspace_dependency_requirements("Cargo.toml", text)
+            .expect("workspace manifest should parse")
+            .into_iter()
+            .collect()
+    }
+
+    fn dependency_path_to_quick_xml() -> crate::MetadataDependencyPath {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "root",
+      "version": "0.1.0",
+      "id": "path+file:///repo#root@0.1.0",
+      "targets": []
+    },
+    {
+      "name": "plist",
+      "version": "1.9.0",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0",
+      "targets": []
+    },
+    {
+      "name": "quick-xml",
+      "version": "0.39.4",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4",
+      "targets": []
+    }
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [
+          {
+            "name": "plist",
+            "pkg": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0"
+          }
+        ]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0",
+        "deps": [
+          {
+            "name": "quick_xml",
+            "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"
+          }
+        ]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4",
+        "deps": []
+      }
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("spec should parse");
+
+        shortest_workspace_dependency_path(&metadata, &target)
+            .expect("path lookup should succeed")
+            .expect("path should exist")
+    }
+
+    fn dependency_path_to_direct_serde() -> crate::MetadataDependencyPath {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {
+      "name": "root",
+      "version": "0.1.0",
+      "id": "path+file:///repo#root@0.1.0",
+      "targets": []
+    },
+    {
+      "name": "serde",
+      "version": "1.0.228",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "targets": []
+    }
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [
+          {
+            "name": "serde_alias",
+            "pkg": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228"
+          }
+        ]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        "deps": []
+      }
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("serde", "1.0.228").expect("spec should parse");
+
+        shortest_workspace_dependency_path(&metadata, &target)
+            .expect("path lookup should succeed")
+            .expect("path should exist")
     }
 
     fn fixed_now() -> OffsetDateTime {

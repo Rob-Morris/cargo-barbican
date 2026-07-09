@@ -8,6 +8,7 @@ use barbican::{
     BarbicanConfig, ExactCrateSpec, ReviewRecordFact, ReviewedReleaseAgeException, ReviewedTargets,
     advisory_ignores_from_toml, parse_lockfile, parse_manifest_dependencies,
     parse_manifest_direct_requirements, parse_reviewed_targets_toml,
+    parse_workspace_dependency_requirements,
 };
 
 use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
@@ -215,6 +216,22 @@ pub(crate) fn load_current_manifest_direct_requirements(
     parse_manifest_requirements(&load_manifest_texts_from_root(current_dir)?)
 }
 
+pub(crate) fn load_current_manifest_direct_and_workspace_requirements(
+    current_dir: &Path,
+) -> Result<
+    (
+        Vec<barbican::CargoManifestDirectRequirement>,
+        Vec<barbican::CargoManifestDirectRequirement>,
+    ),
+    CommandError,
+> {
+    let manifest_texts = load_manifest_texts_from_root(current_dir)?;
+    let direct = parse_manifest_requirements(&manifest_texts)?;
+    let workspace = parse_workspace_requirements(&manifest_texts)?;
+
+    Ok((direct, workspace))
+}
+
 pub(crate) fn parse_manifest_requirements(
     manifest_texts: &[(String, String)],
 ) -> Result<Vec<barbican::CargoManifestDirectRequirement>, CommandError> {
@@ -228,6 +245,24 @@ pub(crate) fn parse_manifest_requirements(
     }
 
     Ok(dependencies)
+}
+
+pub(crate) fn parse_workspace_requirements(
+    manifest_texts: &[(String, String)],
+) -> Result<Vec<barbican::CargoManifestDirectRequirement>, CommandError> {
+    let root_text = manifest_texts
+        .iter()
+        .find_map(|(path, text)| (path == "Cargo.toml").then_some(text.as_str()))
+        .unwrap_or("");
+    let parsed =
+        parse_workspace_dependency_requirements("Cargo.toml", root_text).map_err(|source| {
+            CommandError::ManifestParse {
+                path: "Cargo.toml".to_owned(),
+                source,
+            }
+        })?;
+
+    Ok(parsed.into_iter().collect())
 }
 
 pub(crate) fn load_manifest_texts_from_root(

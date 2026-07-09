@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.21.0](changelog/v0.21.0.md) | 2026-07-09 | Add advisory remediation guidance to audit findings |
 | [v0.20.0](changelog/v0.20.0.md) | 2026-07-07 | Add JSON audit output and surface advisory remediation facts |
 | [v0.19.0](changelog/v0.19.0.md) | 2026-07-06 | Harden reviewed-target gates and CLI output contracts |
 | [v0.18.0](changelog/v0.18.0.md) | 2026-07-06 | Add pin add and harden verify gating |

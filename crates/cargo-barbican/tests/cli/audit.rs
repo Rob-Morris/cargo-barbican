@@ -181,6 +181,7 @@ fn audit_renders_cargo_audit_remediation_details_and_dependency_path() {
         .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
         .with_frozen_metadata(advisory_path_metadata_json());
     let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nmid = \"1\"\n");
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -200,6 +201,12 @@ lockfile_scanner = "cargo-audit"
     assert!(rendered.contains("Audit: FAIL"));
     assert!(rendered.contains("FAIL RUSTSEC-2026-0001 serde@1.0.228 (high): unreviewed advisory finding; title: vulnerable parser; fixed in >=1.0.229"));
     assert!(rendered.contains("dependency path: root@0.1.0 -> mid@1.0.0 -> serde@1.0.228"));
+    assert!(
+        rendered.contains(
+            "remediation: bump nearest parent mid with cargo barbican update mid@<version>"
+        )
+    );
+    assert!(!rendered.contains("cargo barbican update serde@<version>"));
     assert_eq!(runner.frozen_metadata_calls(), 1);
 }
 
@@ -211,6 +218,7 @@ fn audit_json_outputs_structured_findings() {
         .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
         .with_frozen_metadata(advisory_path_metadata_json());
     let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nmid = \"1\"\n");
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -229,7 +237,7 @@ lockfile_scanner = "cargo-audit"
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
 
-    assert_eq!(report["schema_version"], 1);
+    assert_eq!(report["schema_version"], 2);
     assert_eq!(report["status"], "fail");
     assert_eq!(report["success"], false);
     assert_eq!(report["dependency_paths_available"], true);
@@ -243,6 +251,121 @@ lockfile_scanner = "cargo-audit"
         report["findings"][0]["dependency_path"],
         serde_json::json!(["root@0.1.0", "mid@1.0.0", "serde@1.0.228"])
     );
+    assert_eq!(
+        report["findings"][0]["remediation"],
+        serde_json::json!({
+            "kind": "transitive-bump",
+            "patched": [">=1.0.229"],
+            "target_crate": "mid",
+            "nearest_parent": "mid",
+            "command_hint": "cargo barbican update mid@<version>"
+        })
+    );
+}
+
+#[test]
+fn audit_text_remediation_targets_transitive_parent_not_vulnerable_crate() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_quick_xml_advisory_json())
+        .with_frozen_metadata(quick_xml_via_plist_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nplist = \"1.9\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("dependency path: root@0.1.0 -> plist@1.9.0 -> quick-xml@0.39.4"));
+    assert!(rendered.contains(
+        "remediation: bump nearest parent plist with cargo barbican update plist@<version>"
+    ));
+    assert!(rendered.contains(
+        "the vulnerable crate often cannot be bumped alone if a parent caps its version"
+    ));
+    assert!(!rendered.contains("cargo barbican update quick-xml@<version>"));
+}
+
+#[test]
+fn audit_text_remediation_keeps_direct_exact_pin_as_manifest_edit() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_tauri_advisory_json())
+        .with_frozen_metadata(tauri_direct_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\ntauri = \"=2.11.2\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("remediation: edit the pinned tauri manifest requirement to a patched release (>=2.11.5); a lockfile-only update cannot move an exact = pin"));
+    assert!(!rendered.contains("cargo barbican update tauri@<version>"));
+}
+
+#[test]
+fn audit_text_remediation_suggests_direct_update_for_unpinned_direct_dependency() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(serde_direct_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("remediation: run cargo barbican update serde@<version>; choose a patched release with cargo barbican pick serde@'>=1.0.229'; verify with cargo barbican update serde@<version> --dry-run"));
+}
+
+#[test]
+fn audit_json_outputs_null_remediation_when_patched_versions_are_empty() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_without_patched_versions_json())
+        .with_frozen_metadata(serde_direct_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(report["schema_version"], 2);
+    assert!(
+        report["findings"][0]["patched"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(report["findings"][0]["remediation"].is_null());
 }
 
 #[test]
@@ -344,6 +467,7 @@ fn audit_json_distinguishes_missing_dependency_path_from_unavailable_path_collec
         .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
         .with_frozen_metadata(metadata_without_advisory_target_json());
     let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -378,6 +502,7 @@ fn audit_json_marks_dependency_paths_unavailable_when_metadata_has_no_resolve_gr
             "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
         )]));
     let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -408,6 +533,7 @@ fn audit_text_notes_dependency_path_metadata_subprocess_failures_on_stderr() {
         .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
         .with_frozen_metadata_error("metadata failed");
     let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -437,6 +563,7 @@ fn audit_text_notes_dependency_path_unknown_package_metadata_errors_on_stderr() 
         .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
         .with_frozen_metadata(metadata_with_unknown_workspace_package_json());
     let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -463,6 +590,7 @@ fn audit_text_notes_dependency_path_invalid_package_metadata_errors_on_stderr() 
         .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
         .with_frozen_metadata(metadata_with_invalid_workspace_package_json());
     let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -847,6 +975,75 @@ fn cargo_audit_advisory_with_remediation_json() -> String {
     .to_owned()
 }
 
+fn cargo_audit_quick_xml_advisory_json() -> String {
+    cargo_audit_advisory_json_for(
+        "RUSTSEC-2026-0195",
+        "quick-xml",
+        "0.39.4",
+        "unbounded namespace declaration",
+        "high",
+        &[">=0.41.0"],
+    )
+}
+
+fn cargo_audit_tauri_advisory_json() -> String {
+    cargo_audit_advisory_json_for(
+        "RUSTSEC-2026-0196",
+        "tauri",
+        "2.11.2",
+        "unsafe IPC handling",
+        "high",
+        &[">=2.11.5"],
+    )
+}
+
+fn cargo_audit_advisory_without_patched_versions_json() -> String {
+    cargo_audit_advisory_json_for(
+        "RUSTSEC-2026-0197",
+        "serde",
+        "1.0.228",
+        "vulnerable parser",
+        "high",
+        &[],
+    )
+}
+
+fn cargo_audit_advisory_json_for(
+    advisory_id: &str,
+    crate_name: &str,
+    version: &str,
+    title: &str,
+    severity: &str,
+    patched: &[&str],
+) -> String {
+    let patched_json = patched
+        .iter()
+        .map(|range| format!(r#""{range}""#))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"{{
+  "vulnerabilities": {{
+    "found": true,
+    "count": 1,
+    "list": [
+      {{
+        "advisory": {{
+          "id": "{advisory_id}",
+          "title": "{title}",
+          "severity": "{severity}"
+        }},
+        "package": {{ "name": "{crate_name}", "version": "{version}" }},
+        "versions": {{ "patched": [{patched_json}], "unaffected": [] }}
+      }}
+    ]
+  }},
+  "settings": {{ "ignore": [] }},
+  "warnings": {{}}
+}}"#
+    )
+}
+
 fn advisory_path_metadata_json() -> String {
     r#"{
   "packages": [
@@ -875,6 +1072,66 @@ fn advisory_path_metadata_json() -> String {
     .to_owned()
 }
 
+fn quick_xml_via_plist_metadata_json() -> String {
+    r#"{
+  "packages": [
+    {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
+    {"name": "plist", "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "version": "1.9.0", "targets": []},
+    {"name": "quick-xml", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "version": "0.39.4", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [{"name": "plist", "pkg": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0",
+        "deps": [{"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4",
+        "deps": []
+      }
+    ]
+  }
+}"#
+    .to_owned()
+}
+
+fn serde_direct_metadata_json() -> String {
+    direct_dependency_metadata_json("serde", "1.0.228")
+}
+
+fn tauri_direct_metadata_json() -> String {
+    direct_dependency_metadata_json("tauri", "2.11.2")
+}
+
+fn direct_dependency_metadata_json(crate_name: &str, version: &str) -> String {
+    format!(
+        r#"{{
+  "packages": [
+    {{"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []}},
+    {{"name": "{crate_name}", "id": "registry+https://github.com/rust-lang/crates.io-index#{crate_name}@{version}", "version": "{version}", "targets": []}}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {{
+    "nodes": [
+      {{
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [{{"name": "{crate_name}", "pkg": "registry+https://github.com/rust-lang/crates.io-index#{crate_name}@{version}"}}]
+      }},
+      {{
+        "id": "registry+https://github.com/rust-lang/crates.io-index#{crate_name}@{version}",
+        "deps": []
+      }}
+    ]
+  }}
+}}"#
+    )
+}
+
 fn metadata_without_advisory_target_json() -> String {
     r#"{
   "packages": [
@@ -891,6 +1148,20 @@ fn metadata_without_advisory_target_json() -> String {
   }
 }"#
     .to_owned()
+}
+
+fn write_manifest(temp_dir: &Path, text: &str) {
+    fs::write(temp_dir.join("Cargo.toml"), text).expect("manifest should write");
+}
+
+fn write_cargo_audit_config(temp_dir: &Path) {
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
 }
 
 fn metadata_with_unknown_workspace_package_json() -> String {

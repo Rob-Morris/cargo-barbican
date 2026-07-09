@@ -8,12 +8,12 @@ use std::process::ExitCode;
 
 use barbican::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
-    AdvisoryFindingId, CargoDenyNoAdvisoryDiagnostic, ExactCrateSpec, LockfileAdvisoryScanner,
-    MetadataDependencyPath, OffsetDateTime, ReviewRecordFact, ReviewedAdvisoryException,
-    ReviewedTargets, RustReviewedTargetsReport, UnmanagedDelegatedPolicyMode,
-    check_reviewed_rust_targets, evaluate_advisory_audit, generate_cargo_deny_runtime_config,
-    parse_cargo_audit_json, parse_cargo_deny_json_lines, parse_cargo_metadata,
-    shortest_workspace_dependency_path,
+    AdvisoryFindingId, AdvisoryRemediation, AdvisoryRemediationKind, CargoDenyNoAdvisoryDiagnostic,
+    ExactCrateSpec, LockfileAdvisoryScanner, MetadataDependencyPath, OffsetDateTime,
+    ReviewRecordFact, ReviewedAdvisoryException, ReviewedTargets, RustReviewedTargetsReport,
+    UnmanagedDelegatedPolicyMode, advisory_remediation, check_reviewed_rust_targets,
+    evaluate_advisory_audit, generate_cargo_deny_runtime_config, parse_cargo_audit_json,
+    parse_cargo_deny_json_lines, parse_cargo_metadata, shortest_workspace_dependency_path,
 };
 use serde_json::json;
 
@@ -24,6 +24,7 @@ use super::scratch_dir::ScratchDir;
 use super::{
     CommandError, NativeDelegatedIgnore, check_review_record_paths, escape_diagnostic_for_terminal,
     escape_render_field, fail, load_config, load_current_lockfile,
+    load_current_manifest_direct_and_workspace_requirements,
     load_current_manifest_direct_requirements, load_native_delegated_ignores,
     load_reviewed_targets, read_optional_text_no_symlink, render_allowed_policy_exceptions,
 };
@@ -116,6 +117,7 @@ where
         );
     let passed = outcome.is_success() && !native_ignores_fail;
     let dependency_paths = collect_dependency_paths(current_dir, runner, &outcome, output_format);
+    let remediations = collect_remediations(current_dir, &outcome, &dependency_paths)?;
 
     match output_format {
         AuditOutputFormat::Text => {
@@ -132,6 +134,7 @@ where
                 passed,
                 &outcome,
                 &dependency_paths,
+                &remediations,
                 &native_ignores,
                 config.delegates.unmanaged_delegated_policy,
             )?;
@@ -141,6 +144,7 @@ where
             passed,
             &outcome,
             &dependency_paths,
+            &remediations,
             &native_ignores,
             config.delegates.unmanaged_delegated_policy,
         )?,
@@ -207,6 +211,73 @@ where
     DependencyPathReport::available(paths)
 }
 
+fn collect_remediations(
+    current_dir: &Path,
+    outcome: &AdvisoryAuditOutcome,
+    dependency_paths: &DependencyPathReport,
+) -> Result<AdvisoryRemediationReport, CommandError> {
+    let remediation_candidates = outcome
+        .reconciliation()
+        .dispositions()
+        .iter()
+        .filter_map(|disposition| match disposition {
+            AdvisoryDisposition::Accepted { .. } => None,
+            AdvisoryDisposition::Expired { finding, .. }
+            | AdvisoryDisposition::Unreviewed { finding } => {
+                (!finding.details().patched_versions().is_empty()).then_some(finding)
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if remediation_candidates.is_empty() {
+        return Ok(AdvisoryRemediationReport::default());
+    }
+
+    let (manifest_requirements, workspace_requirements) =
+        load_current_manifest_direct_and_workspace_requirements(current_dir)?;
+    let remediations = remediation_candidates
+        .into_iter()
+        .filter_map(|finding| {
+            advisory_remediation(
+                finding,
+                &manifest_requirements,
+                &workspace_requirements,
+                dependency_paths.paths.get(finding.package()),
+            )
+            .map(|remediation| (AdvisoryRemediationKey::from(finding), remediation))
+        })
+        .collect();
+
+    Ok(AdvisoryRemediationReport { remediations })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct AdvisoryRemediationKey {
+    advisory_id: String,
+    package: ExactCrateSpec,
+}
+
+impl From<&AdvisoryFinding> for AdvisoryRemediationKey {
+    fn from(finding: &AdvisoryFinding) -> Self {
+        Self {
+            advisory_id: finding.advisory_id().to_string(),
+            package: finding.package().clone(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct AdvisoryRemediationReport {
+    remediations: BTreeMap<AdvisoryRemediationKey, AdvisoryRemediation>,
+}
+
+impl AdvisoryRemediationReport {
+    fn get(&self, finding: &AdvisoryFinding) -> Option<&AdvisoryRemediation> {
+        self.remediations
+            .get(&AdvisoryRemediationKey::from(finding))
+    }
+}
+
 struct DependencyPathReport {
     paths: BTreeMap<ExactCrateSpec, MetadataDependencyPath>,
     available: bool,
@@ -268,6 +339,7 @@ fn render_audit_report(
     passed: bool,
     outcome: &AdvisoryAuditOutcome,
     dependency_paths: &DependencyPathReport,
+    remediations: &AdvisoryRemediationReport,
     native_ignores: &[NativeDelegatedIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
 ) -> Result<(), CommandError> {
@@ -296,6 +368,7 @@ fn render_audit_report(
                 )
                 .map_err(CommandError::Io)?;
                 render_dependency_path(stdout, finding, dependency_paths)?;
+                render_remediation(stdout, finding, remediations)?;
             }
             AdvisoryDisposition::Unreviewed { finding } => {
                 writeln!(
@@ -305,6 +378,7 @@ fn render_audit_report(
                 )
                 .map_err(CommandError::Io)?;
                 render_dependency_path(stdout, finding, dependency_paths)?;
+                render_remediation(stdout, finding, remediations)?;
             }
         }
     }
@@ -358,6 +432,7 @@ fn render_audit_json_report(
     passed: bool,
     outcome: &AdvisoryAuditOutcome,
     dependency_paths: &DependencyPathReport,
+    remediations: &AdvisoryRemediationReport,
     native_ignores: &[NativeDelegatedIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
 ) -> Result<(), CommandError> {
@@ -365,10 +440,10 @@ fn render_audit_json_report(
         .reconciliation()
         .dispositions()
         .iter()
-        .map(|disposition| finding_json(disposition, dependency_paths))
+        .map(|disposition| finding_json(disposition, dependency_paths, remediations))
         .collect::<Vec<_>>();
     let report = json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "status": if passed { "pass" } else { "fail" },
         "success": passed,
         "dependency_paths_available": dependency_paths.available,
@@ -415,6 +490,7 @@ fn render_audit_json_report(
 fn finding_json(
     disposition: &AdvisoryDisposition,
     dependency_paths: &DependencyPathReport,
+    remediations: &AdvisoryRemediationReport,
 ) -> serde_json::Value {
     let finding = disposition.finding();
     let details = finding.details();
@@ -440,8 +516,19 @@ fn finding_json(
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
-            }),
+        }),
         "exception": exception_json(disposition),
+        "remediation": remediations.get(finding).map(remediation_json),
+    })
+}
+
+fn remediation_json(remediation: &AdvisoryRemediation) -> serde_json::Value {
+    json!({
+        "kind": remediation.kind().as_str(),
+        "patched": remediation.patched_versions(),
+        "target_crate": remediation.target_crate(),
+        "nearest_parent": remediation.nearest_parent(),
+        "command_hint": remediation.command_hint(),
     })
 }
 
@@ -527,6 +614,77 @@ fn render_dependency_path(
             .join(" -> ")
     )
     .map_err(CommandError::Io)
+}
+
+fn render_remediation(
+    stdout: &mut dyn Write,
+    finding: &AdvisoryFinding,
+    remediations: &AdvisoryRemediationReport,
+) -> Result<(), CommandError> {
+    let Some(remediation) = remediations.get(finding) else {
+        return Ok(());
+    };
+
+    writeln!(
+        stdout,
+        "  remediation: {}",
+        render_remediation_advice(remediation)
+    )
+    .map_err(CommandError::Io)
+}
+
+fn render_remediation_advice(remediation: &AdvisoryRemediation) -> String {
+    match remediation.kind() {
+        AdvisoryRemediationKind::DirectPinnedEdit => format!(
+            "edit the pinned {} manifest requirement to a patched release ({}); a lockfile-only update cannot move an exact = pin",
+            escape_render_field(remediation.target_crate()),
+            render_patched_ranges(remediation.patched_versions()),
+        ),
+        AdvisoryRemediationKind::DirectUpdate => {
+            let command_hint = remediation
+                .command_hint()
+                .expect("direct update remediation has a command hint");
+            format!(
+                "run {}; choose a patched release with {}; verify with {} --dry-run",
+                escape_render_field(command_hint),
+                render_pick_hint(remediation.target_crate(), remediation.patched_versions()),
+                escape_render_field(command_hint),
+            )
+        }
+        AdvisoryRemediationKind::TransitiveBump => match remediation.command_hint() {
+            Some(command_hint) => format!(
+                "bump nearest parent {} with {}; the vulnerable crate often cannot be bumped alone if a parent caps its version; confirm with {} --dry-run",
+                escape_render_field(remediation.target_crate()),
+                escape_render_field(command_hint),
+                escape_render_field(command_hint),
+            ),
+            None => format!(
+                "bump a parent dependency that allows {} to resolve to a patched release ({}); the vulnerable crate often cannot be bumped alone if a parent caps its version; confirm candidate changes with --dry-run",
+                escape_render_field(remediation.target_crate()),
+                render_patched_ranges(remediation.patched_versions()),
+            ),
+        },
+    }
+}
+
+fn render_pick_hint(crate_name: &str, patched_versions: &[String]) -> String {
+    let range = patched_versions
+        .first()
+        .expect("remediation requires at least one patched range");
+
+    format!(
+        "cargo barbican pick {}@'{}'",
+        escape_render_field(crate_name),
+        escape_render_field(range)
+    )
+}
+
+fn render_patched_ranges(patched_versions: &[String]) -> String {
+    patched_versions
+        .iter()
+        .map(|range| escape_render_field(range))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn render_native_ignores(
