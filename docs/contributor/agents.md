@@ -173,11 +173,17 @@ The current intake layer now includes the first pre-add deep-review slice:
 - `cargo barbican audit --format json` emits a stable `schema_version`ed JSON
   report for CI and tooling, defined in the CLI output-stability contract
 - failing findings with patched releases carry a conservative read-only
-  remediation hint (`direct-pinned-edit`, `direct-update`, or
-  `transitive-bump`); a manifest requirement classifies a finding as direct
-  only when it can admit the finding's resolved version, and dependency-path
-  and remediation enrichment degrade with explicit stderr notes instead of
-  suppressing the report
+  remediation hint (`direct-pinned-edit`, `direct-update`,
+  `transitive-update`, or `transitive-bump`); a manifest requirement
+  classifies a finding as direct only when it can admit the finding's
+  resolved version, and dependency-path and remediation enrichment degrade
+  with explicit stderr notes instead of suppressing the report
+- remediation classification is metadata-first: workspace-member resolve
+  edges decide the direct case, and the declared requirement edges
+  (`packages[].dependencies[].req`) across all resolved parents feed an
+  exact semver-interval overlap analysis that names provable blocking
+  parents ("capped by plist@1.9.0 (requires ^0.39)"), proves when the
+  vulnerable crate can move alone, and hedges on anything indeterminate
 
 ## Source material to read before implementing
 

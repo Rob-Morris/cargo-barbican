@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.23.0](changelog/v0.23.0.md) | 2026-07-14 | Name provable advisory blockers from requirement edges |
 | [v0.22.0](changelog/v0.22.0.md) | 2026-07-14 | Add pin exception for governed advisory acceptance |
 | [v0.21.1](changelog/v0.21.1.md) | 2026-07-14 | Harden audit remediation classification and output contracts |
 | [v0.21.0](changelog/v0.21.0.md) | 2026-07-09 | Add advisory remediation guidance to audit findings |

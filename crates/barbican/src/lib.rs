@@ -26,7 +26,8 @@ pub mod spec;
 pub use advisory::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
     AdvisoryFindingDetails, AdvisoryFindingId, AdvisoryParseError, AdvisoryReconciliationReport,
-    AdvisoryRemediation, AdvisoryRemediationKind, CargoAuditAdvisoryReport,
+    AdvisoryRemediation, AdvisoryRemediationBlocker, AdvisoryRemediationKind,
+    CargoAuditAdvisoryReport,
     CargoDenyAdvisoryReport, CargoDenyNoAdvisoryDiagnostic, CargoDenySummaryCount,
     advisory_remediation, evaluate_advisory_audit, parse_cargo_audit_json,
     parse_cargo_deny_json_lines, reconcile_advisory_findings,
@@ -72,7 +73,8 @@ pub use manifest::{
 };
 pub use metadata::{
     CargoMetadata, CargoMetadataError, MetadataDependencyPath, MetadataPackageSurfaces,
-    package_surfaces, parse_cargo_metadata, select_package_id, shortest_workspace_dependency_path,
+    MetadataRequirementEdge, package_surfaces, parse_cargo_metadata, requirement_edges_onto,
+    select_package_id, shortest_workspace_dependency_path,
 };
 pub use pick::{
     PickError, PickExcludedVersion, PickExclusionReason, PickSelection, PickSpec, PickSpecError,

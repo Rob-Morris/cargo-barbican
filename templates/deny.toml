@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.22.0
+# Synced from cargo-barbican v0.23.0
 # Runtime advisory checks are owned by cargo-barbican audit.
 #
 # Do not add [advisories] here to weaken advisory handling. During audit,

@@ -35,6 +35,15 @@ pub fn parse_cargo_metadata(text: &str) -> Result<CargoMetadata, CargoMetadataEr
                     .into_iter()
                     .map(|target| MetadataTarget { kind: target.kind })
                     .collect(),
+                dependencies: package
+                    .dependencies
+                    .into_iter()
+                    .map(|dependency| MetadataDependencyDeclaration {
+                        name: dependency.name,
+                        req: dependency.req,
+                        kind: dependency.kind,
+                    })
+                    .collect(),
             })
             .collect(),
         workspace_members: raw.workspace_members,
@@ -203,6 +212,121 @@ pub fn shortest_workspace_dependency_path(
     Ok(None)
 }
 
+/// One resolved parent's declared requirement on a target package: the edge
+/// Cargo's resolver honoured, joined back to the semver requirement the
+/// parent's manifest stated. `requirement` is `None` when the resolve graph
+/// records the edge but no matching declaration was found — callers must
+/// treat that edge as indeterminate rather than unconstrained.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataRequirementEdge {
+    parent: ExactCrateSpec,
+    parent_is_workspace_member: bool,
+    requirement: Option<String>,
+    kind: Option<String>,
+}
+
+impl MetadataRequirementEdge {
+    pub fn parent(&self) -> &ExactCrateSpec {
+        &self.parent
+    }
+
+    pub fn parent_is_workspace_member(&self) -> bool {
+        self.parent_is_workspace_member
+    }
+
+    pub fn requirement(&self) -> Option<&str> {
+        self.requirement.as_deref()
+    }
+
+    pub fn kind(&self) -> Option<&str> {
+        self.kind.as_deref()
+    }
+}
+
+/// Collects every requirement edge onto the exact target package: all
+/// resolved parents, not only the shortest-path one, because the parent that
+/// caps a vulnerable crate is not necessarily the parent on the shortest
+/// dependency path.
+pub fn requirement_edges_onto(
+    metadata: &CargoMetadata,
+    target: &ExactCrateSpec,
+) -> Result<Vec<MetadataRequirementEdge>, CargoMetadataError> {
+    let resolve = metadata
+        .resolve
+        .as_ref()
+        .ok_or(CargoMetadataError::MissingResolveGraph)?;
+    let packages_by_id = metadata
+        .packages
+        .iter()
+        .map(|package| (package.id.as_str(), package))
+        .collect::<BTreeMap<_, _>>();
+    let target_ids = metadata
+        .packages
+        .iter()
+        .filter(|package| {
+            package.name == target.crate_name() && package.version == target.version()
+        })
+        .map(|package| package.id.as_str())
+        .collect::<BTreeSet<_>>();
+    if target_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let workspace_members = metadata.workspace_member_ids();
+    let mut edges = Vec::new();
+    for node in &resolve.nodes {
+        if !node
+            .deps
+            .iter()
+            .any(|dependency| target_ids.contains(dependency.pkg.as_str()))
+        {
+            continue;
+        }
+        let parent = packages_by_id.get(node.id.as_str()).ok_or_else(|| {
+            CargoMetadataError::UnknownPackageId {
+                package_id: node.id.clone(),
+            }
+        })?;
+        let parent_spec =
+            ExactCrateSpec::from_parts(&parent.name, &parent.version).map_err(|source| {
+                CargoMetadataError::InvalidPackageSpec {
+                    package_id: node.id.clone(),
+                    source,
+                }
+            })?;
+        let parent_is_workspace_member = workspace_members.contains(node.id.as_str());
+        let declarations = parent
+            .dependencies
+            .iter()
+            .filter(|declaration| {
+                dependency_name_matches_package(&declaration.name, target.crate_name())
+            })
+            .collect::<Vec<_>>();
+        if declarations.is_empty() {
+            edges.push(MetadataRequirementEdge {
+                parent: parent_spec,
+                parent_is_workspace_member,
+                requirement: None,
+                kind: None,
+            });
+            continue;
+        }
+        for declaration in declarations {
+            edges.push(MetadataRequirementEdge {
+                parent: parent_spec.clone(),
+                parent_is_workspace_member,
+                requirement: declaration.req.clone(),
+                kind: declaration.kind.clone(),
+            });
+        }
+    }
+
+    edges.sort_by(|left, right| {
+        (left.parent(), left.requirement()).cmp(&(right.parent(), right.requirement()))
+    });
+    Ok(edges)
+}
+
 fn metadata_dependency_path(
     packages_by_id: &BTreeMap<&str, &MetadataPackage>,
     package_ids: &[&str],
@@ -356,6 +480,14 @@ struct MetadataPackage {
     version: String,
     links: Option<String>,
     targets: Vec<MetadataTarget>,
+    dependencies: Vec<MetadataDependencyDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MetadataDependencyDeclaration {
+    name: String,
+    req: Option<String>,
+    kind: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -397,6 +529,16 @@ struct RawMetadataPackage {
     links: Option<String>,
     #[serde(default)]
     targets: Vec<RawMetadataTarget>,
+    #[serde(default)]
+    dependencies: Vec<RawMetadataDependencyDeclaration>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawMetadataDependencyDeclaration {
+    name: String,
+    req: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -429,8 +571,8 @@ mod tests {
     use crate::ExactCrateSpec;
 
     use super::{
-        CargoMetadataError, package_surfaces, parse_cargo_metadata, select_package_id,
-        shortest_workspace_dependency_path,
+        CargoMetadataError, package_surfaces, parse_cargo_metadata, requirement_edges_onto,
+        select_package_id, shortest_workspace_dependency_path,
     };
 
     #[test]
@@ -540,6 +682,78 @@ mod tests {
                 "leaf@2.0.0".to_owned(),
             ]
         );
+    }
+
+    #[test]
+    fn requirement_edges_capture_declared_requirements_from_all_resolved_parents() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": [],
+     "dependencies": [{"name": "quick-xml", "req": "^0.39", "kind": "dev"}]},
+    {"name": "plist", "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "version": "1.9.0", "targets": [],
+     "dependencies": [{"name": "quick-xml", "req": ">=0.39, <0.40"}]},
+    {"name": "undeclared-parent", "id": "registry+https://github.com/rust-lang/crates.io-index#undeclared-parent@0.2.0", "version": "0.2.0", "targets": []},
+    {"name": "quick-xml", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "version": "0.39.4", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {"id": "path+file:///repo#root@0.1.0", "deps": [
+        {"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"},
+        {"name": "plist", "pkg": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0"}
+      ]},
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "deps": [
+        {"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}
+      ]},
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#undeclared-parent@0.2.0", "deps": [
+        {"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}
+      ]},
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "deps": []}
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("target should parse");
+
+        let edges = requirement_edges_onto(&metadata, &target).expect("edges should collect");
+
+        assert_eq!(edges.len(), 3);
+        assert_eq!(edges[0].parent().to_string(), "plist@1.9.0");
+        assert!(!edges[0].parent_is_workspace_member());
+        assert_eq!(edges[0].requirement(), Some(">=0.39, <0.40"));
+        assert_eq!(edges[0].kind(), None);
+        assert_eq!(edges[1].parent().to_string(), "root@0.1.0");
+        assert!(edges[1].parent_is_workspace_member());
+        assert_eq!(edges[1].requirement(), Some("^0.39"));
+        assert_eq!(edges[1].kind(), Some("dev"));
+        assert_eq!(edges[2].parent().to_string(), "undeclared-parent@0.2.0");
+        assert_eq!(
+            edges[2].requirement(),
+            None,
+            "a resolve edge with no matching declaration must stay indeterminate, not unconstrained"
+        );
+    }
+
+    #[test]
+    fn requirement_edges_require_a_resolve_graph() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "quick-xml", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "version": "0.39.4", "targets": []}
+  ],
+  "workspace_members": [],
+  "resolve": null
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("target should parse");
+
+        assert!(matches!(
+            requirement_edges_onto(&metadata, &target),
+            Err(CargoMetadataError::MissingResolveGraph)
+        ));
     }
 
     #[test]

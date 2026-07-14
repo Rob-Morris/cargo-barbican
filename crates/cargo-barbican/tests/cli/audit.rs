@@ -240,7 +240,7 @@ lockfile_scanner = "cargo-audit"
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
 
-    assert_eq!(report["schema_version"], 2);
+    assert_eq!(report["schema_version"], 3);
     assert_eq!(report["status"], "fail");
     assert_eq!(report["success"], false);
     assert_eq!(report["dependency_paths_available"], true);
@@ -261,7 +261,15 @@ lockfile_scanner = "cargo-audit"
             "patched": [">=1.0.229"],
             "target_crate": "mid",
             "nearest_parent": "mid",
-            "command_hint": "cargo barbican update mid@<version>"
+            "command_hint": "cargo barbican update mid@<version>",
+            "blockers": null
+        })
+    );
+    assert_eq!(report["remediations_available"], true);
+    assert_eq!(
+        report["findings"][0]["governed_exception"],
+        serde_json::json!({
+            "command_hint": "cargo barbican pin exception serde@1.0.228 RUSTSEC-2026-0001"
         })
     );
     assert_eq!(report["findings"][0]["severity"], "high");
@@ -340,6 +348,167 @@ ignore = ["RUSTSEC-2026-0002"]
 }
 
 #[test]
+fn audit_text_names_the_provable_blocker_from_requirement_edges() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_quick_xml_advisory_json())
+        .with_frozen_metadata(quick_xml_capped_by_plist_metadata_json("^0.39"));
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nplist = \"1.9\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains(
+        "remediation: capped by plist@1.9.0 (requires ^0.39); bump plist with cargo barbican update plist@<version>; no pinned-parent manifest edit needed; verify with cargo barbican update plist@<version> --dry-run"
+    ));
+    assert!(!rendered.contains("often cannot be bumped alone"));
+    assert!(!rendered.contains("cargo barbican update quick-xml@<version>"));
+}
+
+#[test]
+fn audit_text_reports_pinned_parent_edits_for_exact_pinned_blockers() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_quick_xml_advisory_json())
+        .with_frozen_metadata(quick_xml_capped_by_plist_metadata_json("^0.39"));
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nplist = \"=1.9.0\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains(
+        "remediation: capped by plist@1.9.0 (requires ^0.39); edit the pinned plist manifest requirement to allow a patched release (>=0.41.0); a lockfile-only update cannot move an exact = pin"
+    ));
+    assert!(!rendered.contains("cargo barbican update plist@<version>"));
+}
+
+#[test]
+fn audit_reports_transitive_lockfile_update_when_no_parent_caps_the_patched_range() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_json_for(
+            "RUSTSEC-2026-0195",
+            "quick-xml",
+            "0.39.4",
+            "unbounded namespace declaration",
+            "high",
+            &[">=0.39.5"],
+        ))
+        .with_frozen_metadata(quick_xml_capped_by_plist_metadata_json("^0.39"));
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nplist = \"1.9\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(
+        report["findings"][0]["remediation"],
+        serde_json::json!({
+            "kind": "transitive-update",
+            "patched": [">=0.39.5"],
+            "target_crate": "quick-xml",
+            "nearest_parent": "plist",
+            "command_hint": "cargo barbican update quick-xml@<version>",
+            "blockers": []
+        })
+    );
+}
+
+#[test]
+fn audit_json_reports_blockers_for_capped_transitive_findings() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_quick_xml_advisory_json())
+        .with_frozen_metadata(quick_xml_capped_by_plist_metadata_json("^0.39"));
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nplist = \"1.9\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(
+        report["findings"][0]["remediation"],
+        serde_json::json!({
+            "kind": "transitive-bump",
+            "patched": [">=0.41.0"],
+            "target_crate": "plist",
+            "nearest_parent": "plist",
+            "command_hint": "cargo barbican update plist@<version>",
+            "blockers": [{
+                "crate": "plist",
+                "version": "1.9.0",
+                "requirement": "^0.39"
+            }]
+        })
+    );
+}
+
+fn quick_xml_capped_by_plist_metadata_json(plist_requirement: &str) -> String {
+    format!(
+        r#"{{
+  "packages": [
+    {{"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": [],
+     "dependencies": [{{"name": "plist", "req": "^1.9"}}]}},
+    {{"name": "plist", "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "version": "1.9.0", "targets": [],
+     "dependencies": [{{"name": "quick-xml", "req": "{plist_requirement}"}}]}},
+    {{"name": "quick-xml", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "version": "0.39.4", "targets": []}}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {{
+    "nodes": [
+      {{
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [{{"name": "plist", "pkg": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0"}}]
+      }},
+      {{
+        "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0",
+        "deps": [{{"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}}]
+      }},
+      {{
+        "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4",
+        "deps": []
+      }}
+    ]
+  }}
+}}"#
+    )
+}
+
+#[test]
 fn audit_json_reports_completeness_failures_for_missing_summary_checks() {
     let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
     let client = FakeCratesIoClient::default();
@@ -394,7 +563,8 @@ fn audit_json_outputs_direct_update_remediation_for_unpinned_direct_dependency()
             "patched": [">=1.0.229"],
             "target_crate": "serde",
             "nearest_parent": null,
-            "command_hint": "cargo barbican update serde@<version>"
+            "command_hint": "cargo barbican update serde@<version>",
+            "blockers": null
         })
     );
 }
@@ -494,7 +664,7 @@ fn audit_json_outputs_null_remediation_when_patched_versions_are_empty() {
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
 
-    assert_eq!(report["schema_version"], 2);
+    assert_eq!(report["schema_version"], 3);
     assert!(
         report["findings"][0]["patched"]
             .as_array()
@@ -561,7 +731,7 @@ fn audit_json_outputs_expired_exception_details() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default()
         .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
-        .with_frozen_metadata(advisory_path_metadata_json());
+        .with_frozen_metadata(serde_direct_metadata_json());
     let temp_dir = fresh_temp_dir();
     write_advisory_audit_fixture(
         &temp_dir,
@@ -600,7 +770,8 @@ fn audit_json_outputs_expired_exception_details() {
             "patched": [">=1.0.229"],
             "target_crate": "serde",
             "nearest_parent": null,
-            "command_hint": null
+            "command_hint": null,
+            "blockers": null
         })
     );
 }

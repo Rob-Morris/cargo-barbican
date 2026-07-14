@@ -8,12 +8,14 @@ use std::process::ExitCode;
 
 use barbican::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
-    AdvisoryFindingId, AdvisoryRemediation, AdvisoryRemediationKind, CargoDenyNoAdvisoryDiagnostic,
-    ExactCrateSpec, LockfileAdvisoryScanner, MetadataDependencyPath, OffsetDateTime,
-    ReviewRecordFact, ReviewedAdvisoryException, ReviewedTargets, RustReviewedTargetsReport,
+    AdvisoryFindingId, AdvisoryRemediation, AdvisoryRemediationBlocker, AdvisoryRemediationKind,
+    CargoDenyNoAdvisoryDiagnostic, ExactCrateSpec, LockfileAdvisoryScanner,
+    MetadataDependencyPath, MetadataRequirementEdge, OffsetDateTime, ReviewRecordFact,
+    ReviewedAdvisoryException, ReviewedTargets, RustReviewedTargetsReport,
     UnmanagedDelegatedPolicyMode, advisory_remediation, check_reviewed_rust_targets,
     evaluate_advisory_audit, generate_cargo_deny_runtime_config, parse_cargo_audit_json,
-    parse_cargo_deny_json_lines, parse_cargo_metadata, shortest_workspace_dependency_path,
+    parse_cargo_deny_json_lines, parse_cargo_metadata, requirement_edges_onto,
+    shortest_workspace_dependency_path,
 };
 use serde_json::json;
 
@@ -187,7 +189,7 @@ where
         }
     }
     if targets.is_empty() {
-        return DependencyPathReport::available(BTreeMap::new());
+        return DependencyPathReport::available(BTreeMap::new(), BTreeMap::new());
     }
 
     let metadata_text = match runner.cargo_metadata_frozen(current_dir) {
@@ -206,17 +208,24 @@ where
     };
 
     let mut paths = BTreeMap::new();
+    let mut requirement_edges = BTreeMap::new();
     for target in targets {
         match shortest_workspace_dependency_path(&metadata, &target) {
             Ok(Some(path)) => {
-                paths.insert(target, path);
+                paths.insert(target.clone(), path);
             }
             Ok(None) => {}
             Err(error) => return DependencyPathReport::unavailable(format!("{target}: {error}")),
         }
+        match requirement_edges_onto(&metadata, &target) {
+            Ok(edges) => {
+                requirement_edges.insert(target, edges);
+            }
+            Err(error) => return DependencyPathReport::unavailable(format!("{target}: {error}")),
+        }
     }
 
-    DependencyPathReport::available(paths)
+    DependencyPathReport::available(paths, requirement_edges)
 }
 
 /// Remediation hints are best-effort guidance, so a manifest that barbican
@@ -258,6 +267,10 @@ fn collect_remediations(
                 &manifest_requirements,
                 &workspace_requirements,
                 dependency_paths.paths.get(finding.package()),
+                dependency_paths
+                    .requirement_edges
+                    .get(finding.package())
+                    .map(Vec::as_slice),
             )
             .map(|remediation| (AdvisoryRemediationKey::from(finding), remediation))
         })
@@ -310,14 +323,19 @@ impl AdvisoryRemediationReport {
 
 struct DependencyPathReport {
     paths: BTreeMap<ExactCrateSpec, MetadataDependencyPath>,
+    requirement_edges: BTreeMap<ExactCrateSpec, Vec<MetadataRequirementEdge>>,
     available: bool,
     unavailable_reason: Option<String>,
 }
 
 impl DependencyPathReport {
-    fn available(paths: BTreeMap<ExactCrateSpec, MetadataDependencyPath>) -> Self {
+    fn available(
+        paths: BTreeMap<ExactCrateSpec, MetadataDependencyPath>,
+        requirement_edges: BTreeMap<ExactCrateSpec, Vec<MetadataRequirementEdge>>,
+    ) -> Self {
         Self {
             paths,
+            requirement_edges,
             available: true,
             unavailable_reason: None,
         }
@@ -326,6 +344,7 @@ impl DependencyPathReport {
     fn unavailable(reason: String) -> Self {
         Self {
             paths: BTreeMap::new(),
+            requirement_edges: BTreeMap::new(),
             available: false,
             unavailable_reason: Some(reason),
         }
@@ -474,10 +493,11 @@ fn render_audit_json_report(
         .map(|disposition| finding_json(disposition, dependency_paths, remediations))
         .collect::<Vec<_>>();
     let report = json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "status": if passed { "pass" } else { "fail" },
         "success": passed,
         "dependency_paths_available": dependency_paths.available,
+        "remediations_available": remediations.unavailable_reason().is_none(),
         "findings": findings,
         "completeness_failures": outcome
             .completeness_failures()
@@ -550,6 +570,7 @@ fn finding_json(
         }),
         "exception": exception_json(disposition),
         "remediation": remediations.get(finding).map(remediation_json),
+        "governed_exception": governed_exception_json(disposition),
     })
 }
 
@@ -560,7 +581,34 @@ fn remediation_json(remediation: &AdvisoryRemediation) -> serde_json::Value {
         "target_crate": remediation.target_crate(),
         "nearest_parent": remediation.nearest_parent(),
         "command_hint": remediation.command_hint(),
+        "blockers": remediation.blockers().map(|blockers| {
+            blockers
+                .iter()
+                .map(|blocker| json!({
+                    "crate": blocker.parent().crate_name(),
+                    "version": blocker.parent().version(),
+                    "requirement": blocker.requirement(),
+                }))
+                .collect::<Vec<_>>()
+        }),
     })
+}
+
+fn governed_exception_json(disposition: &AdvisoryDisposition) -> Option<serde_json::Value> {
+    let AdvisoryDisposition::Unreviewed { finding } = disposition else {
+        return None;
+    };
+    let AdvisoryFindingId::RustSec(advisory_id) = finding.advisory_id() else {
+        return None;
+    };
+
+    Some(json!({
+        "command_hint": format!(
+            "cargo barbican pin exception {} {}",
+            finding.package(),
+            advisory_id
+        ),
+    }))
 }
 
 fn disposition_json(disposition: &AdvisoryDisposition) -> &'static str {
@@ -703,20 +751,62 @@ fn render_remediation_advice(remediation: &AdvisoryRemediation) -> String {
                 escape_render_field(command_hint),
             )
         }
-        AdvisoryRemediationKind::TransitiveBump => match remediation.command_hint() {
-            Some(command_hint) => format!(
-                "bump nearest parent {} with {}; the vulnerable crate often cannot be bumped alone if a parent caps its version; confirm with {} --dry-run",
-                escape_render_field(remediation.target_crate()),
-                escape_render_field(command_hint),
-                escape_render_field(command_hint),
-            ),
-            None => format!(
-                "bump a parent dependency that allows {} to resolve to a patched release ({}); the vulnerable crate often cannot be bumped alone if a parent caps its version; confirm candidate changes with --dry-run",
-                escape_render_field(remediation.target_crate()),
+        AdvisoryRemediationKind::TransitiveUpdate => {
+            let command_hint = remediation
+                .command_hint()
+                .expect("transitive update remediation has a command hint");
+            format!(
+                "no requiring parent caps the patched range ({}); run {}; choose a patched release with {}; verify with {} --dry-run",
                 render_patched_ranges(remediation.patched_versions()),
-            ),
+                escape_render_field(command_hint),
+                render_pick_hint(remediation.target_crate(), remediation.patched_versions()),
+                escape_render_field(command_hint),
+            )
+        }
+        AdvisoryRemediationKind::TransitiveBump => match remediation.blockers() {
+            Some(blockers) if !blockers.is_empty() => {
+                let capped_by = blockers
+                    .iter()
+                    .map(render_blocker)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                match remediation.command_hint() {
+                    Some(command_hint) => format!(
+                        "capped by {capped_by}; bump {} with {}; no pinned-parent manifest edit needed; verify with {} --dry-run",
+                        escape_render_field(remediation.target_crate()),
+                        escape_render_field(command_hint),
+                        escape_render_field(command_hint),
+                    ),
+                    None => format!(
+                        "capped by {capped_by}; edit the pinned {} manifest requirement to allow a patched release ({}); a lockfile-only update cannot move an exact = pin",
+                        escape_render_field(remediation.target_crate()),
+                        render_patched_ranges(remediation.patched_versions()),
+                    ),
+                }
+            }
+            _ => match remediation.command_hint() {
+                Some(command_hint) => format!(
+                    "bump nearest parent {} with {}; the vulnerable crate often cannot be bumped alone if a parent caps its version; confirm with {} --dry-run",
+                    escape_render_field(remediation.target_crate()),
+                    escape_render_field(command_hint),
+                    escape_render_field(command_hint),
+                ),
+                None => format!(
+                    "bump a parent dependency that allows {} to resolve to a patched release ({}); the vulnerable crate often cannot be bumped alone if a parent caps its version; confirm candidate changes with --dry-run",
+                    escape_render_field(remediation.target_crate()),
+                    render_patched_ranges(remediation.patched_versions()),
+                ),
+            },
         },
     }
+}
+
+fn render_blocker(blocker: &AdvisoryRemediationBlocker) -> String {
+    format!(
+        "{} (requires {})",
+        escape_render_field(&blocker.parent().to_string()),
+        escape_render_field(blocker.requirement()),
+    )
 }
 
 fn render_pick_hint(crate_name: &str, patched_versions: &[String]) -> String {

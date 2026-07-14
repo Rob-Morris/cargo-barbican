@@ -232,6 +232,12 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   remediation hint that never suggests moving an exact `=` pin with a
   lockfile-only update; a manifest requirement classifies a finding as
   direct only when it can admit the finding's resolved version
+- blocker-precise where provable: requirement edges from cargo metadata
+  across all resolved parents feed an exact semver-interval overlap
+  analysis, so transitive findings either name the provable blocking
+  parents with their requirements, prove the vulnerable crate can move with
+  a lockfile-only update, or keep the conservative hedge when any edge is
+  indeterminate — precise claims come only from decidable interval proofs
 - explicit about degraded enrichment: dependency-path and remediation
   context failures produce stderr notes (and the JSON
   `dependency_paths_available` flag) while the report and

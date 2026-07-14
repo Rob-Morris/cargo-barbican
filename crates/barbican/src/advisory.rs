@@ -6,7 +6,8 @@ use time::OffsetDateTime;
 use crate::{
     CargoDenyCheck, CargoDependencySourceKind, CargoManifestDirectRequirement, ExactCrateSpec,
     ExactCrateSpecError, LockfileAdvisoryScanner, MetadataDependencyPath,
-    ReviewedAdvisoryException, RustSecAdvisoryId, parse_exact_version_requirement,
+    MetadataRequirementEdge, ReviewedAdvisoryException, RustSecAdvisoryId,
+    parse_exact_version_requirement,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,6 +247,293 @@ impl CargoAuditAdvisoryReport {
     }
 }
 
+/// Whether a semver requirement can resolve to any release in the advisory's
+/// patched set. Decided exactly, by interval arithmetic: every Cargo
+/// requirement op describes a contiguous release interval, a comma
+/// requirement is an interval intersection, and a patched list is an
+/// interval union — so overlap is decidable without probing versions.
+/// Pre-release comparators and unparseable requirements are `Indeterminate`
+/// rather than guessed, because semver pre-release matching is not
+/// interval-shaped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PatchedOverlap {
+    AdmitsPatched,
+    ExcludesPatched,
+    Indeterminate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct VersionTriple {
+    major: u64,
+    minor: u64,
+    patch: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VersionBound {
+    version: VersionTriple,
+    inclusive: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VersionInterval {
+    lower: VersionBound,
+    upper: Option<VersionBound>,
+}
+
+impl VersionInterval {
+    fn all() -> Self {
+        Self {
+            lower: VersionBound {
+                version: VersionTriple {
+                    major: 0,
+                    minor: 0,
+                    patch: 0,
+                },
+                inclusive: true,
+            },
+            upper: None,
+        }
+    }
+
+    fn intersect(self, other: Self) -> Option<Self> {
+        let lower = if (other.lower.version, !other.lower.inclusive)
+            > (self.lower.version, !self.lower.inclusive)
+        {
+            other.lower
+        } else {
+            self.lower
+        };
+        let upper = match (self.upper, other.upper) {
+            (None, None) => None,
+            (Some(upper), None) | (None, Some(upper)) => Some(upper),
+            (Some(left), Some(right)) => {
+                if (left.version, left.inclusive) < (right.version, right.inclusive) {
+                    Some(left)
+                } else {
+                    Some(right)
+                }
+            }
+        };
+
+        match upper {
+            None => Some(Self { lower, upper }),
+            Some(bound) => {
+                let non_empty = lower.version < bound.version
+                    || (lower.version == bound.version && lower.inclusive && bound.inclusive);
+                non_empty.then_some(Self { lower, upper })
+            }
+        }
+    }
+}
+
+fn comparator_interval(comparator: &semver::Comparator) -> Option<VersionInterval> {
+    if !comparator.pre.is_empty() {
+        return None;
+    }
+
+    let major = comparator.major;
+    let minor = comparator.minor;
+    let patch = comparator.patch;
+    let base = VersionTriple {
+        major,
+        minor: minor.unwrap_or(0),
+        patch: patch.unwrap_or(0),
+    };
+    let next_major = VersionTriple {
+        major: major.checked_add(1)?,
+        minor: 0,
+        patch: 0,
+    };
+    let next_minor = minor.map(|minor| {
+        Some(VersionTriple {
+            major,
+            minor: minor.checked_add(1)?,
+            patch: 0,
+        })
+    });
+    let next_patch = patch.map(|patch| {
+        Some(VersionTriple {
+            major,
+            minor: minor.unwrap_or(0),
+            patch: patch.checked_add(1)?,
+        })
+    });
+
+    let inclusive_from = |version| VersionBound {
+        version,
+        inclusive: true,
+    };
+    let exclusive_to = |version| VersionBound {
+        version,
+        inclusive: false,
+    };
+    let bounded = |lower, upper| VersionInterval {
+        lower,
+        upper: Some(upper),
+    };
+    let unbounded = |lower| VersionInterval { lower, upper: None };
+
+    // Cargo requirement semantics per op, over release versions only:
+    // partial comparators (`=1.2`, `>1`, `<=1.2`) cover the whole omitted
+    // component range, exactly as the semver crate matches them.
+    Some(match comparator.op {
+        semver::Op::Exact => match (minor, patch) {
+            (Some(_), Some(_)) => bounded(
+                inclusive_from(base),
+                VersionBound {
+                    version: base,
+                    inclusive: true,
+                },
+            ),
+            (Some(_), None) => bounded(inclusive_from(base), exclusive_to(next_minor??)),
+            (None, _) => bounded(inclusive_from(base), exclusive_to(next_major)),
+        },
+        semver::Op::Greater => match (minor, patch) {
+            (Some(_), Some(_)) => VersionInterval {
+                lower: VersionBound {
+                    version: base,
+                    inclusive: false,
+                },
+                upper: None,
+            },
+            (Some(_), None) => unbounded(inclusive_from(next_minor??)),
+            (None, _) => unbounded(inclusive_from(next_major)),
+        },
+        semver::Op::GreaterEq => unbounded(inclusive_from(base)),
+        semver::Op::Less => bounded(
+            inclusive_from(VersionTriple {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            }),
+            exclusive_to(base),
+        ),
+        semver::Op::LessEq => match (minor, patch) {
+            (Some(_), Some(_)) => bounded(
+                inclusive_from(VersionTriple {
+                    major: 0,
+                    minor: 0,
+                    patch: 0,
+                }),
+                VersionBound {
+                    version: base,
+                    inclusive: true,
+                },
+            ),
+            (Some(_), None) => bounded(
+                inclusive_from(VersionTriple {
+                    major: 0,
+                    minor: 0,
+                    patch: 0,
+                }),
+                exclusive_to(next_minor??),
+            ),
+            (None, _) => bounded(
+                inclusive_from(VersionTriple {
+                    major: 0,
+                    minor: 0,
+                    patch: 0,
+                }),
+                exclusive_to(next_major),
+            ),
+        },
+        semver::Op::Tilde => match (minor, patch) {
+            (Some(_), _) => bounded(inclusive_from(base), exclusive_to(next_minor??)),
+            (None, _) => bounded(inclusive_from(base), exclusive_to(next_major)),
+        },
+        semver::Op::Caret => {
+            let upper = if major > 0 || minor.is_none() {
+                next_major
+            } else if base.minor > 0 || patch.is_none() {
+                VersionTriple {
+                    major,
+                    minor: base.minor.checked_add(1)?,
+                    patch: 0,
+                }
+            } else {
+                next_patch??
+            };
+            bounded(inclusive_from(base), exclusive_to(upper))
+        }
+        semver::Op::Wildcard => match minor {
+            Some(_) => bounded(inclusive_from(base), exclusive_to(next_minor??)),
+            None => bounded(inclusive_from(base), exclusive_to(next_major)),
+        },
+        _ => return None,
+    })
+}
+
+fn requirement_interval(requirement: &str) -> Option<VersionInterval> {
+    let parsed = semver::VersionReq::parse(requirement).ok()?;
+    let mut interval = VersionInterval::all();
+    for comparator in &parsed.comparators {
+        interval = interval.intersect(comparator_interval(comparator)?)?;
+    }
+
+    Some(interval)
+}
+
+fn requirement_patched_overlap(requirement: &str, patched_versions: &[String]) -> PatchedOverlap {
+    let Some(parsed) = semver::VersionReq::parse(requirement)
+        .ok()
+        .filter(|parsed| {
+            parsed
+                .comparators
+                .iter()
+                .all(|comparator| comparator.pre.is_empty())
+        })
+    else {
+        return PatchedOverlap::Indeterminate;
+    };
+    let mut requirement_interval_value = VersionInterval::all();
+    for comparator in &parsed.comparators {
+        let Some(interval) = comparator_interval(comparator) else {
+            return PatchedOverlap::Indeterminate;
+        };
+        match requirement_interval_value.intersect(interval) {
+            Some(intersection) => requirement_interval_value = intersection,
+            // A self-contradictory requirement admits nothing, patched or
+            // otherwise; that is exclusion, not uncertainty.
+            None => return PatchedOverlap::ExcludesPatched,
+        }
+    }
+
+    let mut any_overlap = false;
+    for patched in patched_versions {
+        let Some(patched_interval) = requirement_interval(patched) else {
+            return PatchedOverlap::Indeterminate;
+        };
+        if requirement_interval_value.intersect(patched_interval).is_some() {
+            any_overlap = true;
+        }
+    }
+
+    if any_overlap {
+        PatchedOverlap::AdmitsPatched
+    } else {
+        PatchedOverlap::ExcludesPatched
+    }
+}
+
+/// One resolved parent whose declared requirement provably cannot reach any
+/// patched release of the vulnerable crate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvisoryRemediationBlocker {
+    parent: ExactCrateSpec,
+    requirement: String,
+}
+
+impl AdvisoryRemediationBlocker {
+    pub fn parent(&self) -> &ExactCrateSpec {
+        &self.parent
+    }
+
+    pub fn requirement(&self) -> &str {
+        &self.requirement
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdvisoryRemediation {
     kind: AdvisoryRemediationKind,
@@ -253,6 +541,7 @@ pub struct AdvisoryRemediation {
     target_crate: String,
     nearest_parent: Option<String>,
     command_hint: Option<String>,
+    blockers: Option<Vec<AdvisoryRemediationBlocker>>,
 }
 
 impl AdvisoryRemediation {
@@ -275,12 +564,20 @@ impl AdvisoryRemediation {
     pub fn command_hint(&self) -> Option<&str> {
         self.command_hint.as_deref()
     }
+
+    /// `None` when the requirement-edge analysis could not run or was
+    /// indeterminate; `Some(&[])` when it ran and proved no parent caps the
+    /// patched range; non-empty when the named parents provably cap it.
+    pub fn blockers(&self) -> Option<&[AdvisoryRemediationBlocker]> {
+        self.blockers.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdvisoryRemediationKind {
     DirectPinnedEdit,
     DirectUpdate,
+    TransitiveUpdate,
     TransitiveBump,
 }
 
@@ -289,6 +586,7 @@ impl AdvisoryRemediationKind {
         match self {
             Self::DirectPinnedEdit => "direct-pinned-edit",
             Self::DirectUpdate => "direct-update",
+            Self::TransitiveUpdate => "transitive-update",
             Self::TransitiveBump => "transitive-bump",
         }
     }
@@ -299,6 +597,7 @@ pub fn advisory_remediation(
     manifest_requirements: &[CargoManifestDirectRequirement],
     workspace_requirements: &[CargoManifestDirectRequirement],
     dependency_path: Option<&MetadataDependencyPath>,
+    requirement_edges: Option<&[MetadataRequirementEdge]>,
 ) -> Option<AdvisoryRemediation> {
     let patched_versions = finding.details().patched_versions();
     if patched_versions.is_empty() {
@@ -306,16 +605,61 @@ pub fn advisory_remediation(
     }
 
     let crate_name = finding.package().crate_name();
-    let direct =
-        direct_requirement_summary(finding.package(), manifest_requirements, workspace_requirements);
-    if let Some(direct) = direct {
-        if direct.exact_pinned {
+    let edges = requirement_edges.filter(|edges| !edges.is_empty());
+
+    // The resolve graph is version-precise and rename-resolved, so when
+    // requirement edges are available they outrank manifest-name matching: a
+    // workspace-member edge onto this exact package *is* the direct case.
+    let member_edges = edges
+        .map(|edges| {
+            edges
+                .iter()
+                .filter(|edge| edge.parent_is_workspace_member())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let is_direct;
+    let exact_pinned;
+    if !member_edges.is_empty() {
+        is_direct = true;
+        let known_member_requirements = member_edges
+            .iter()
+            .filter_map(|edge| edge.requirement())
+            .collect::<Vec<_>>();
+        exact_pinned = if known_member_requirements.is_empty() {
+            direct_requirement_summary(
+                finding.package(),
+                manifest_requirements,
+                workspace_requirements,
+            )
+            .is_some_and(|summary| summary.exact_pinned)
+        } else {
+            known_member_requirements.iter().any(|requirement| {
+                parse_exact_version_requirement(crate_name, requirement).is_ok()
+            })
+        };
+    } else if edges.is_some() {
+        is_direct = false;
+        exact_pinned = false;
+    } else {
+        let summary = direct_requirement_summary(
+            finding.package(),
+            manifest_requirements,
+            workspace_requirements,
+        );
+        is_direct = summary.is_some();
+        exact_pinned = summary.is_some_and(|summary| summary.exact_pinned);
+    }
+
+    if is_direct {
+        if exact_pinned {
             return Some(AdvisoryRemediation {
                 kind: AdvisoryRemediationKind::DirectPinnedEdit,
                 patched_versions: patched_versions.to_vec(),
                 target_crate: crate_name.to_owned(),
                 nearest_parent: None,
                 command_hint: None,
+                blockers: None,
             });
         }
 
@@ -325,12 +669,55 @@ pub fn advisory_remediation(
             target_crate: crate_name.to_owned(),
             nearest_parent: None,
             command_hint: Some(format!("cargo barbican update {crate_name}@<version>")),
+            blockers: None,
         });
     }
 
     let nearest_parent = dependency_path
         .and_then(|path| nearest_parent_crate(path, finding.package()))
         .map(str::to_owned);
+
+    if let Some(edges) = edges {
+        match analyse_requirement_edges(edges, patched_versions) {
+            RequirementEdgeAnalysis::Capped(blockers) => {
+                let primary = blockers
+                    .iter()
+                    .position(|blocker| {
+                        Some(blocker.parent().crate_name()) == nearest_parent.as_deref()
+                    })
+                    .unwrap_or(0);
+                let primary_crate = blockers[primary].parent().crate_name().to_owned();
+                let primary_pinned = direct_requirement_summary(
+                    blockers[primary].parent(),
+                    manifest_requirements,
+                    workspace_requirements,
+                )
+                .is_some_and(|summary| summary.exact_pinned);
+                let command_hint = (!primary_pinned)
+                    .then(|| format!("cargo barbican update {primary_crate}@<version>"));
+                return Some(AdvisoryRemediation {
+                    kind: AdvisoryRemediationKind::TransitiveBump,
+                    patched_versions: patched_versions.to_vec(),
+                    target_crate: primary_crate,
+                    nearest_parent,
+                    command_hint,
+                    blockers: Some(blockers),
+                });
+            }
+            RequirementEdgeAnalysis::Uncapped => {
+                return Some(AdvisoryRemediation {
+                    kind: AdvisoryRemediationKind::TransitiveUpdate,
+                    patched_versions: patched_versions.to_vec(),
+                    target_crate: crate_name.to_owned(),
+                    nearest_parent,
+                    command_hint: Some(format!("cargo barbican update {crate_name}@<version>")),
+                    blockers: Some(Vec::new()),
+                });
+            }
+            RequirementEdgeAnalysis::Indeterminate => {}
+        }
+    }
+
     let target_crate = nearest_parent
         .clone()
         .unwrap_or_else(|| crate_name.to_owned());
@@ -343,7 +730,56 @@ pub fn advisory_remediation(
         target_crate,
         nearest_parent,
         command_hint,
+        blockers: None,
     })
+}
+
+enum RequirementEdgeAnalysis {
+    Capped(Vec<AdvisoryRemediationBlocker>),
+    Uncapped,
+    Indeterminate,
+}
+
+/// A parent is a blocker when *any* of its declared requirements on the
+/// vulnerable crate excludes every patched range: that declaration will keep
+/// a vulnerable copy resolved no matter what else moves. Proving the crate
+/// bumpable in place requires every edge to determinately admit a patched
+/// release.
+fn analyse_requirement_edges(
+    edges: &[MetadataRequirementEdge],
+    patched_versions: &[String],
+) -> RequirementEdgeAnalysis {
+    let mut blockers: Vec<AdvisoryRemediationBlocker> = Vec::new();
+    let mut indeterminate = false;
+    for edge in edges {
+        let Some(requirement) = edge.requirement() else {
+            indeterminate = true;
+            continue;
+        };
+        match requirement_patched_overlap(requirement, patched_versions) {
+            PatchedOverlap::ExcludesPatched => {
+                if !blockers
+                    .iter()
+                    .any(|blocker| blocker.parent() == edge.parent())
+                {
+                    blockers.push(AdvisoryRemediationBlocker {
+                        parent: edge.parent().clone(),
+                        requirement: requirement.to_owned(),
+                    });
+                }
+            }
+            PatchedOverlap::AdmitsPatched => {}
+            PatchedOverlap::Indeterminate => indeterminate = true,
+        }
+    }
+
+    if !blockers.is_empty() {
+        RequirementEdgeAnalysis::Capped(blockers)
+    } else if indeterminate {
+        RequirementEdgeAnalysis::Indeterminate
+    } else {
+        RequirementEdgeAnalysis::Uncapped
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1093,7 +1529,7 @@ mod tests {
         let manifest_requirements = direct_requirements("[dependencies]\nplist = \"1.9\"\n");
         let path = dependency_path_to_quick_xml();
 
-        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], Some(&path))
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], Some(&path), None)
             .expect("patched transitive finding should have remediation");
 
         assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
@@ -1111,7 +1547,7 @@ mod tests {
         let finding = remediation_finding_for("serde", "1.0.228", ">=1.0.229");
         let path = dependency_path_to_direct_serde();
 
-        let remediation = advisory_remediation(&finding, &[], &[], Some(&path))
+        let remediation = advisory_remediation(&finding, &[], &[], Some(&path), None)
             .expect("patched finding should have generic transitive remediation");
 
         assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
@@ -1125,7 +1561,7 @@ mod tests {
         let finding = remediation_finding_for("tauri", "2.11.2", ">=2.11.5");
         let manifest_requirements = direct_requirements("[dependencies]\ntauri = \"=2.11.2\"\n");
 
-        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], None)
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], None, None)
             .expect("patched direct finding should have remediation");
 
         assert_eq!(
@@ -1149,6 +1585,7 @@ mod tests {
             &manifest_requirements,
             &workspace_requirements,
             None,
+            None,
         )
         .expect("patched direct finding should have remediation");
 
@@ -1164,7 +1601,7 @@ mod tests {
         let finding = remediation_finding_for("serde", "1.0.228", ">=1.0.229");
         let manifest_requirements = direct_requirements("[dependencies]\nserde = \"1\"\n");
 
-        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], None)
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], None, None)
             .expect("patched direct finding should have remediation");
 
         assert_eq!(remediation.kind(), AdvisoryRemediationKind::DirectUpdate);
@@ -1176,12 +1613,262 @@ mod tests {
     }
 
     #[test]
+    fn requirement_patched_overlap_decides_interval_overlap_exactly() {
+        use super::{PatchedOverlap, requirement_patched_overlap};
+
+        let cases: &[(&str, &[&str], PatchedOverlap)] = &[
+            ("^0.39", &[">=0.40.0"], PatchedOverlap::ExcludesPatched),
+            ("^0.39", &[">=0.39.5"], PatchedOverlap::AdmitsPatched),
+            ("1", &[">=1.0.229"], PatchedOverlap::AdmitsPatched),
+            ("=1.9.0", &[">=1.9.1"], PatchedOverlap::ExcludesPatched),
+            ("~1.2", &[">=1.3.0"], PatchedOverlap::ExcludesPatched),
+            (">1.2", &[">=1.3.0"], PatchedOverlap::AdmitsPatched),
+            ("0.39.*", &[">=0.40.0"], PatchedOverlap::ExcludesPatched),
+            ("*", &[">=0.40.0"], PatchedOverlap::AdmitsPatched),
+            (
+                ">=0.8, <0.9",
+                &[">=0.8.26, <0.9.0", ">=1.0.3"],
+                PatchedOverlap::AdmitsPatched,
+            ),
+            (
+                ">=0.8, <0.8.26",
+                &[">=0.8.26, <0.9.0", ">=1.0.3"],
+                PatchedOverlap::ExcludesPatched,
+            ),
+            ("^0.0.3", &[">=0.0.4"], PatchedOverlap::ExcludesPatched),
+            ("<=1.2", &[">=1.3.0"], PatchedOverlap::ExcludesPatched),
+            ("1.0.0-alpha", &[">=1.0.0"], PatchedOverlap::Indeterminate),
+            ("not-a-req", &[">=1.0.0"], PatchedOverlap::Indeterminate),
+            ("^1", &["also-not-a-range"], PatchedOverlap::Indeterminate),
+        ];
+        for (requirement, patched, expected) in cases {
+            let patched = patched
+                .iter()
+                .map(|range| (*range).to_owned())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                requirement_patched_overlap(requirement, &patched),
+                *expected,
+                "requirement {requirement:?} against {patched:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn remediation_names_the_provable_blocker_from_requirement_edges() {
+        let finding = remediation_finding();
+        let edges = quick_xml_requirement_edges("^0.39");
+        let path = dependency_path_to_quick_xml();
+
+        let remediation = advisory_remediation(&finding, &[], &[], Some(&path), Some(&edges))
+            .expect("capped transitive finding should have remediation");
+
+        assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
+        assert_eq!(remediation.target_crate(), "plist");
+        let blockers = remediation
+            .blockers()
+            .expect("blocker analysis should have completed");
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0].parent().to_string(), "plist@1.9.0");
+        assert_eq!(blockers[0].requirement(), "^0.39");
+        assert_eq!(
+            remediation.command_hint(),
+            Some("cargo barbican update plist@<version>")
+        );
+    }
+
+    #[test]
+    fn remediation_suggests_a_lockfile_update_when_no_parent_caps_the_patched_range() {
+        let finding = remediation_finding_for("quick-xml", "0.39.4", ">=0.39.5");
+        let edges = quick_xml_requirement_edges("^0.39");
+        let path = dependency_path_to_quick_xml();
+
+        let remediation = advisory_remediation(&finding, &[], &[], Some(&path), Some(&edges))
+            .expect("uncapped transitive finding should have remediation");
+
+        assert_eq!(
+            remediation.kind(),
+            AdvisoryRemediationKind::TransitiveUpdate
+        );
+        assert_eq!(remediation.target_crate(), "quick-xml");
+        assert_eq!(remediation.blockers(), Some(&[][..]));
+        assert_eq!(
+            remediation.command_hint(),
+            Some("cargo barbican update quick-xml@<version>")
+        );
+    }
+
+    #[test]
+    fn remediation_prefers_an_off_path_blocker_over_the_nearest_parent() {
+        let finding = remediation_finding();
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "root", "version": "0.1.0", "id": "path+file:///repo#root@0.1.0", "targets": [],
+     "dependencies": [
+       {"name": "plist", "req": ">=0.1"},
+       {"name": "other-parent", "req": ">=0.1"}
+     ]},
+    {"name": "plist", "version": "1.9.0", "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "targets": [],
+     "dependencies": [{"name": "quick-xml", "req": ">=0.39"}]},
+    {"name": "other-parent", "version": "0.5.0", "id": "registry+https://github.com/rust-lang/crates.io-index#other-parent@0.5.0", "targets": [],
+     "dependencies": [{"name": "quick-xml", "req": "^0.39"}]},
+    {"name": "quick-xml", "version": "0.39.4", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {"id": "path+file:///repo#root@0.1.0", "deps": [
+        {"name": "plist", "pkg": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0"},
+        {"name": "other_parent", "pkg": "registry+https://github.com/rust-lang/crates.io-index#other-parent@0.5.0"}
+      ]},
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "deps": [
+        {"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}
+      ]},
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#other-parent@0.5.0", "deps": [
+        {"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}
+      ]},
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "deps": []}
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("spec should parse");
+        let edges =
+            crate::requirement_edges_onto(&metadata, &target).expect("edges should collect");
+        let path = shortest_workspace_dependency_path(&metadata, &target)
+            .expect("path lookup should succeed")
+            .expect("path should exist");
+
+        let remediation = advisory_remediation(&finding, &[], &[], Some(&path), Some(&edges))
+            .expect("capped transitive finding should have remediation");
+
+        assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
+        // The nearest parent on the shortest path admits the patched range;
+        // the true cap is the off-path parent.
+        assert_eq!(remediation.target_crate(), "other-parent");
+        let blockers = remediation.blockers().expect("analysis should complete");
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0].parent().to_string(), "other-parent@0.5.0");
+    }
+
+    #[test]
+    fn remediation_classifies_direct_findings_from_workspace_member_edges() {
+        let finding = remediation_finding_for("tauri", "2.11.2", ">=2.11.5");
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "root", "version": "0.1.0", "id": "path+file:///repo#root@0.1.0", "targets": [],
+     "dependencies": [{"name": "tauri", "req": "=2.11.2"}]},
+    {"name": "tauri", "version": "2.11.2", "id": "registry+https://github.com/rust-lang/crates.io-index#tauri@2.11.2", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {"id": "path+file:///repo#root@0.1.0", "deps": [
+        {"name": "tauri", "pkg": "registry+https://github.com/rust-lang/crates.io-index#tauri@2.11.2"}
+      ]},
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#tauri@2.11.2", "deps": []}
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("tauri", "2.11.2").expect("spec should parse");
+        let edges =
+            crate::requirement_edges_onto(&metadata, &target).expect("edges should collect");
+
+        // No manifest requirements supplied at all: the member edge alone
+        // classifies the finding, immune to rename and dev-dependency
+        // blindness in manifest-name matching.
+        let remediation = advisory_remediation(&finding, &[], &[], None, Some(&edges))
+            .expect("direct finding should have remediation");
+
+        assert_eq!(
+            remediation.kind(),
+            AdvisoryRemediationKind::DirectPinnedEdit
+        );
+        assert_eq!(remediation.target_crate(), "tauri");
+    }
+
+    #[test]
+    fn remediation_hedges_when_a_requirement_edge_is_indeterminate() {
+        let finding = remediation_finding();
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "root", "version": "0.1.0", "id": "path+file:///repo#root@0.1.0", "targets": []},
+    {"name": "plist", "version": "1.9.0", "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "targets": []},
+    {"name": "quick-xml", "version": "0.39.4", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {"id": "path+file:///repo#root@0.1.0", "deps": [
+        {"name": "plist", "pkg": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0"}
+      ]},
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "deps": [
+        {"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}
+      ]},
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "deps": []}
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("spec should parse");
+        let edges =
+            crate::requirement_edges_onto(&metadata, &target).expect("edges should collect");
+        let path = dependency_path_to_quick_xml();
+
+        let remediation = advisory_remediation(&finding, &[], &[], Some(&path), Some(&edges))
+            .expect("finding should keep the hedged remediation");
+
+        assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
+        assert_eq!(remediation.blockers(), None);
+        assert_eq!(remediation.nearest_parent(), Some("plist"));
+    }
+
+    fn quick_xml_requirement_edges(
+        plist_requirement: &str,
+    ) -> Vec<crate::MetadataRequirementEdge> {
+        let metadata = parse_cargo_metadata(&format!(
+            r#"{{
+  "packages": [
+    {{"name": "root", "version": "0.1.0", "id": "path+file:///repo#root@0.1.0", "targets": [],
+     "dependencies": [{{"name": "plist", "req": "^1.9"}}]}},
+    {{"name": "plist", "version": "1.9.0", "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "targets": [],
+     "dependencies": [{{"name": "quick-xml", "req": "{plist_requirement}"}}]}},
+    {{"name": "quick-xml", "version": "0.39.4", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "targets": []}}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {{
+    "nodes": [
+      {{"id": "path+file:///repo#root@0.1.0", "deps": [
+        {{"name": "plist", "pkg": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0"}}
+      ]}},
+      {{"id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "deps": [
+        {{"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}}
+      ]}},
+      {{"id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "deps": []}}
+    ]
+  }}
+}}"#,
+        ))
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("spec should parse");
+
+        crate::requirement_edges_onto(&metadata, &target).expect("edges should collect")
+    }
+
+    #[test]
     fn remediation_treats_version_mismatched_direct_requirement_as_transitive() {
         let finding = remediation_finding();
         let manifest_requirements = direct_requirements("[dependencies]\nquick-xml = \"0.41\"\n");
         let path = dependency_path_to_quick_xml();
 
-        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], Some(&path))
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], Some(&path), None)
             .expect("patched transitive duplicate should have remediation");
 
         assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
@@ -1194,7 +1881,7 @@ mod tests {
         let finding = remediation_finding_for("serde", "1.0.228", ">=1.0.229");
         let manifest_requirements = direct_requirements("[dependencies]\nserde = \"=1.0.300\"\n");
 
-        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], None)
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], None, None)
             .expect("patched finding should have remediation");
 
         assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
@@ -1210,7 +1897,7 @@ mod tests {
         );
         let manifest_requirements = direct_requirements("[dependencies]\nserde = \"1\"\n");
 
-        assert!(advisory_remediation(&finding, &manifest_requirements, &[], None).is_none());
+        assert!(advisory_remediation(&finding, &manifest_requirements, &[], None, None).is_none());
     }
 
     #[test]

@@ -384,12 +384,30 @@ cargo barbican audit [--format text|json]
     can admit the finding's resolved version, so a vulnerable duplicate
     version capped by a parent is treated as transitive rather than pointed
     at the safe direct copy.
+    When frozen Cargo metadata is available, classification is
+    metadata-first: a workspace-member edge onto the exact vulnerable package
+    in the resolve graph decides the direct case, which is version-precise
+    and immune to manifest rename and duplicate-version blindness.
     Direct non-exact dependencies get a `cargo barbican update <crate>@<version>`
     template plus a `pick` pointer for selecting a patched release; direct
     exact `=` pins are reported as manifest edits because lockfile-only
-    updates cannot move them; transitive findings name the nearest parent from
-    the dependency path when one is known and otherwise stay generic. These
-    hints do not mutate the repo and must be verified with `--dry-run`.
+    updates cannot move them.
+    For transitive findings, `audit` reads the declared requirement edges
+    from cargo metadata (`packages[].dependencies[].req`) across all resolved
+    parents — not only the shortest-path parent — and decides by exact
+    semver-interval overlap whether any parent provably caps the patched
+    range:
+    - provably capped findings name each blocking parent and its requirement
+      ("capped by plist@1.9.0 (requires ^0.39)") and direct the fix at the
+      blocker — a manifest edit when the blocker is exact-pinned, an `update`
+      otherwise;
+    - provably uncapped findings report that the vulnerable crate itself can
+      move with a lockfile-only `cargo barbican update`;
+    - anything indeterminate (pre-release comparators, unparseable
+      requirements, resolve edges without a matching declaration, or missing
+      metadata) keeps the conservative nearest-parent hedge rather than
+      guessing.
+    These hints do not mutate the repo and must be verified with `--dry-run`.
     Remediation hints are best-effort enrichment: when workspace manifests
     cannot be read or parsed, the hints are omitted, a `note:` diagnostic is
     written to stderr, and the report and verdict still render.
@@ -445,23 +463,32 @@ contract, not a routine rewording.
 - `cargo barbican audit --format json` emits a stable JSON report on stdout.
   Its top-level `schema_version` identifies the JSON contract version. Adding,
   removing, or renaming fields, changing field meaning, or changing existing
-  field types requires a new `schema_version`. In schema version `2`,
+  field types requires a new `schema_version`. In schema version `3`,
   consumers may rely on the top-level `schema_version`, `status` (`"pass"` or
-  `"fail"`), `success`, `dependency_paths_available`, `findings`,
-  `completeness_failures`, `cargo_deny`, `cargo_audit`, and
-  `native_delegated_ignores` fields, plus each finding's advisory id, package
-  object, disposition (`"accepted"`, `"expired"`, or `"unreviewed"`),
-  title/risk/severity metadata, nullable `cvss` and `informational` strings,
-  patched ranges, dependency path, reviewed-exception object, and
-  remediation object. `remediation` is either `null` or an object with
-  `kind`, `patched`, `target_crate`, `nearest_parent`, and `command_hint`.
+  `"fail"`), `success`, `dependency_paths_available`,
+  `remediations_available`, `findings`, `completeness_failures`,
+  `cargo_deny`, `cargo_audit`, and `native_delegated_ignores` fields, plus
+  each finding's advisory id, package object, disposition (`"accepted"`,
+  `"expired"`, or `"unreviewed"`), title/risk/severity metadata, nullable
+  `cvss` and `informational` strings, patched ranges, dependency path,
+  reviewed-exception object, remediation object, and `governed_exception` —
+  `null`, or an object with a `command_hint` string for the `pin exception`
+  scaffolder on unreviewed findings with RustSec-form ids.
+  `remediation` is either `null` or an object with `kind`, `patched`,
+  `target_crate`, `nearest_parent`, `command_hint`, and `blockers`.
   `target_crate` is the crate the suggested action applies to: the vulnerable
-  crate itself for the direct kinds and for generic transitive hints, or the
-  nearest parent for parent-bump transitive hints.
-  The stable remediation kinds are `direct-pinned-edit`, `direct-update`, and
-  `transitive-bump`. `command_hint` is a template with `<version>` when an
-  update target is known; it is `null` for exact-pin manifest edits and for
-  generic transitive hints where no parent dependency path was available.
+  crate itself for the direct kinds and for `transitive-update`, the blocking
+  parent for capped transitive findings, or the nearest parent for hedged
+  transitive hints. The stable remediation kinds are `direct-pinned-edit`,
+  `direct-update`, `transitive-update`, and `transitive-bump`.
+  `blockers` is `null` when the requirement-edge analysis could not run or
+  was indeterminate, `[]` when it proved no parent caps the patched range,
+  and otherwise a list of `{crate, version, requirement}` objects naming each
+  resolved parent whose declared requirement provably excludes every patched
+  range. `command_hint` is a template with `<version>` when an update target
+  is known; it is `null` for exact-pin manifest edits (including exact-pinned
+  blockers) and for generic transitive hints where no parent dependency path
+  was available.
 - `Verify: PASS` — printed by `verify` on success; there is no matching
   `Verify: FAIL` token. A failing `verify` run stops at the failing step
   (`pin check`, `cargo build --locked`, or `cargo test --locked`), reports the
