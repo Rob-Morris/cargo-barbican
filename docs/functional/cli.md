@@ -250,6 +250,45 @@ cargo barbican pin add <crate>[@version]
     The scaffold activates the family for `pin check` but is not a completed
     review; the record stub must be completed by a human reviewer.
 
+cargo barbican pin exception <crate>[@version] <advisory-id>... [--review-by YYYY-MM-DD]
+    Scaffold the governed acceptance of one or more RustSec advisories for a
+    crate already resolved in `Cargo.lock`, fully offline. This is the
+    audit-side parallel to `pin add`: the governed way to accept an advisory
+    finding should be at least as easy as an ungoverned `deny.toml` ignore,
+    while staying bounded and evidence-backed. It:
+    - validates each advisory id against the RUSTSEC-YYYY-NNNN form
+    - reads the resolved version and `checksum_sha256` from `Cargo.lock`;
+      advisory exceptions require the checksum-bound resolved form, so a
+      lockfile entry without a crates.io checksum fails closed
+    - appends a `[[rust.families]]` stub exactly like `pin add`, plus a
+      `[rust.families.allowed_advisories]` entry binding each advisory with a
+      `review_by` re-review deadline — 30 days from today by default,
+      overridable with `--review-by`
+    - creates a review-record markdown stub pre-filled with the accepted
+      advisories alongside the resolved facts
+    - prints next steps: complete the record, prefer remediation over keeping
+      the exception, then run `pin check`, `audit`, and `verify`
+    The version component may be omitted when the crate resolves to exactly
+    one version. When the crate is already covered by an active reviewed
+    family, the command refuses to rewrite the existing family block and
+    instead prints the exact `allowed_advisories` fragment to add manually
+    plus the family's review record to update — appending TOML text cannot
+    attach a sub-table to a mid-file family, and a mechanical rewrite would
+    clobber policy comments.
+    Fail-closed: exits 1 without mutating anything on an invalid advisory id
+    or `--review-by` date, a crate or version missing from `Cargo.lock`, a
+    checksumless lockfile entry, an advisory already allowed by a reviewed
+    family, a covered family whose resolved version drifts from `Cargo.lock`,
+    a covered version-only entry without a checksum, a family-name or
+    record-path collision, or when `reviewed-targets.toml` is absent
+    (adopters run `policy init` first). Scaffold writes follow the same
+    wrong-type/symlink containment posture as `pin add`, and the appended
+    policy text is re-parsed before it is written.
+    The scaffold activates the exception for `audit` once the review record
+    exists, but it is not a completed review: the record stub must be
+    completed by a human reviewer, and `audit` fails the exception again once
+    `review_by` passes.
+
 cargo barbican pin check [--config reviewed-targets.toml]
     Check active reviewed Rust families against the current workspace manifests
     and `Cargo.lock`.
@@ -354,6 +393,10 @@ cargo barbican audit [--format text|json]
     Remediation hints are best-effort enrichment: when workspace manifests
     cannot be read or parsed, the hints are omitted, a `note:` diagnostic is
     written to stderr, and the report and verdict still render.
+    Unreviewed findings with RustSec-form ids also carry a
+    `governed exception:` pointer to `cargo barbican pin exception`, rendered
+    after the remediation hint so the governed acceptance path is as
+    discoverable as a native `deny.toml` ignore without outranking the fix.
 
     `--format json` emits a stable JSON report on stdout with
     `schema_version`, `status`, `success`, structured advisory `findings`,

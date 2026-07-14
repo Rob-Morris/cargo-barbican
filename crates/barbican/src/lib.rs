@@ -91,12 +91,14 @@ pub use reviewed_targets::{
     ExecutionSurfaceKind, IsoDateError, ReviewedAdvisoryException,
     ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException, ReviewedResolvedTarget,
     ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError, RustSecAdvisoryId,
-    RustSecAdvisoryIdError, format_iso_date, parse_reviewed_targets_toml,
+    RustSecAdvisoryIdError, format_iso_date, parse_iso_date, parse_reviewed_targets_toml,
 };
 pub use scaffold::{
-    PinAddPlan, PinAddRejection, PinAddTarget, PinAddTargetError, compose_pin_family_stub,
-    compose_pin_review_record, parse_pin_add_target, pin_family_name, pin_review_record_path,
-    plan_pin_add,
+    PIN_EXCEPTION_DEFAULT_REVIEW_DAYS, PinAddPlan, PinAddRejection, PinAddTarget,
+    PinAddTargetError, PinExceptionAdvisory, PinExceptionPlan, PinExceptionRejection,
+    compose_pin_family_stub, compose_pin_review_record, parse_pin_add_target,
+    pin_exception_default_review_by, pin_family_name, pin_review_record_path, plan_pin_add,
+    plan_pin_exception,
 };
 pub use sha256::{Sha256Digest, Sha256DigestError};
 pub use spec::{

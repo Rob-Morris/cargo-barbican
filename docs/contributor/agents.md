@@ -89,6 +89,7 @@ current implemented surface is:
 - `cargo barbican policy init`
 - `cargo barbican inventory`
 - `cargo barbican pin add`
+- `cargo barbican pin exception`
 - `cargo barbican pin check`
 - `cargo barbican review`
 - `cargo barbican audit`
@@ -159,6 +160,12 @@ The current intake layer now includes the first pre-add deep-review slice:
 - `cargo barbican pin add` exists as the offline reviewed-family scaffolder:
   it composes the `reviewed-targets.toml` family stub and the review-record
   stub from resolved `Cargo.lock` facts, and fails closed on any conflict
+- `cargo barbican pin exception` exists as the audit-side governed
+  advisory-exception scaffolder paralleling `pin add`: it composes a
+  checksum-bound family stub with bounded `allowed_advisories` entries and a
+  pre-filled review-record stub, refuses to rewrite existing family blocks
+  (printing the exact fragment instead), and audit points at it from each
+  unreviewed RustSec finding
 - `cargo barbican audit` now surfaces remediation facts on findings: advisory
   title, risk label, patched-version ranges, and — when frozen cargo metadata
   is available — the shortest dependency path from a workspace member to the

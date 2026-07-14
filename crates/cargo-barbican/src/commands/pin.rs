@@ -4,8 +4,10 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    OffsetDateTime, PinAddRejection, parse_pin_add_target, parse_reviewed_targets_toml,
-    pin_family_name, pin_review_record_path, plan_pin_add,
+    OffsetDateTime, PinAddPlan, PinAddRejection, PinExceptionAdvisory, PinExceptionRejection,
+    RustSecAdvisoryId, format_iso_date, parse_iso_date, parse_pin_add_target,
+    parse_reviewed_targets_toml, pin_exception_default_review_by, pin_family_name,
+    pin_review_record_path, plan_pin_add, plan_pin_exception,
 };
 
 use crate::cli::{PinCommand, REVIEWED_TARGETS_CONFIG_FILE};
@@ -26,6 +28,19 @@ pub(super) fn run_pin(
 ) -> Result<ExitCode, CommandError> {
     match command {
         PinCommand::Add { spec } => run_pin_add(&spec, current_dir, now, stdout, stderr),
+        PinCommand::Exception {
+            spec,
+            advisories,
+            review_by,
+        } => run_pin_exception(
+            &spec,
+            &advisories,
+            review_by.as_deref(),
+            current_dir,
+            now,
+            stdout,
+            stderr,
+        ),
         PinCommand::Check { config } => {
             super::pin_check::run_pin_check(&config, current_dir, stdout)
         }
@@ -73,17 +88,75 @@ fn run_pin_add(
         Err(rejection) => return fail(stderr, render_pin_add_rejection(&rejection)),
     };
 
+    if let Some(exit) = write_family_scaffold(current_dir, config_path, &plan, "pin add", stderr)? {
+        return Ok(exit);
+    }
+
+    writeln!(stdout, "Pin add:").map_err(CommandError::Io)?;
+    writeln!(stdout, "- {}: created", plan.review_record()).map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "- {REVIEWED_TARGETS_CONFIG_FILE}: appended reviewed family \"{}\" for {}",
+        plan.family_name(),
+        plan.exact()
+    )
+    .map_err(CommandError::Io)?;
+    if plan.checksum().is_none() {
+        writeln!(
+            stdout,
+            "- note: no Cargo.lock checksum for {}; the family pins by exact version only",
+            plan.exact()
+        )
+        .map_err(CommandError::Io)?;
+    }
+    let exact_requirement = format!("={}", plan.exact().version());
+    if plan.direct_requirement().is_some() {
+        writeln!(
+            stdout,
+            "- note: exact direct manifest pin \"{exact_requirement}\" included in the family"
+        )
+        .map_err(CommandError::Io)?;
+    } else if plan.has_non_conforming_direct_requirement() {
+        writeln!(
+            stdout,
+            "- note: {} is a direct dependency but its manifest requirement is not uniformly the exact pin \"{exact_requirement}\"; no direct entry scaffolded — consider exact-pinning the manifest",
+            plan.exact().crate_name()
+        )
+        .map_err(CommandError::Io)?;
+    }
+    writeln!(
+        stdout,
+        "\nNext steps:\n- Complete the review record at {}; the scaffold is not a completed review.\n- Run `cargo barbican pin check`, then `cargo barbican audit`, then `cargo barbican verify`.",
+        plan.review_record()
+    )
+    .map_err(CommandError::Io)?;
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The shared fail-closed scaffold write sequence for `pin add` and
+/// `pin exception`: refuse existing record paths, re-parse the appended
+/// policy before writing, and clean up the record if the config write fails.
+/// Returns `Some(exit)` when the write was refused with a rendered failure.
+fn write_family_scaffold(
+    current_dir: &Path,
+    config_path: &Path,
+    plan: &PinAddPlan,
+    command_label: &str,
+    stderr: &mut dyn Write,
+) -> Result<Option<ExitCode>, CommandError> {
     match confined_scaffold_state(current_dir, Path::new(plan.review_record()))? {
         ScaffoldState::Missing => {}
         _ => {
             return fail(
                 stderr,
                 format!(
-                    "pin add {}: review record path already exists at {}; refusing to overwrite",
-                    target.crate_name(),
+                    "{command_label} {}: review record path already exists at {}; refusing to overwrite",
+                    plan.exact().crate_name(),
                     plan.review_record()
                 ),
-            );
+            )
+            .map(Some);
         }
     }
 
@@ -131,46 +204,195 @@ fn run_pin_add(
         });
     }
 
-    writeln!(stdout, "Pin add:").map_err(CommandError::Io)?;
-    writeln!(stdout, "- {}: created", plan.review_record()).map_err(CommandError::Io)?;
+    Ok(None)
+}
+
+fn run_pin_exception(
+    spec: &str,
+    advisory_args: &[String],
+    review_by: Option<&str>,
+    current_dir: &Path,
+    now: OffsetDateTime,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError> {
+    let target = match parse_pin_add_target(spec) {
+        Ok(target) => target,
+        Err(error) => return fail(stderr, format!("pin exception {spec}: {error}")),
+    };
+    let review_by_date = match review_by {
+        Some(text) => match parse_iso_date(text) {
+            Ok(date) => date,
+            Err(error) => {
+                return fail(stderr, format!("pin exception --review-by {text}: {error}"));
+            }
+        },
+        None => match pin_exception_default_review_by(now.date()) {
+            Some(date) => date,
+            None => {
+                return fail(
+                    stderr,
+                    "pin exception: cannot derive the default review-by date; pass --review-by",
+                );
+            }
+        },
+    };
+    let mut advisories = Vec::new();
+    for raw in advisory_args {
+        match RustSecAdvisoryId::parse(raw) {
+            Ok(advisory_id) => {
+                advisories.push(PinExceptionAdvisory::new(advisory_id, review_by_date));
+            }
+            Err(error) => return fail(stderr, format!("pin exception {raw}: {error}")),
+        }
+    }
+
+    let config_path = Path::new(REVIEWED_TARGETS_CONFIG_FILE);
+    let Some(reviewed_targets) = load_reviewed_targets(current_dir, config_path)? else {
+        return fail(
+            stderr,
+            format!(
+                "pin exception: {REVIEWED_TARGETS_CONFIG_FILE} not found; run `cargo barbican policy init` first"
+            ),
+        );
+    };
+
+    let lockfile = super::load_current_lockfile(current_dir, Path::new("Cargo.lock"))?;
+    let manifest_requirements = load_current_manifest_direct_requirements(current_dir)?;
+    let date = now.date();
+    let family_name = pin_family_name(target.crate_name(), date);
+    let review_record = pin_review_record_path(REVIEW_RECORDS_DIR, target.crate_name(), date);
+
+    let plan = match plan_pin_exception(
+        &lockfile,
+        &reviewed_targets,
+        &manifest_requirements,
+        &target,
+        &advisories,
+        family_name,
+        review_record,
+        date,
+    ) {
+        Ok(plan) => plan,
+        Err(rejection) => return render_pin_exception_rejection(&rejection, stderr),
+    };
+
+    if let Some(exit) =
+        write_family_scaffold(current_dir, config_path, plan.base(), "pin exception", stderr)?
+    {
+        return Ok(exit);
+    }
+
+    let accepted = plan
+        .advisories()
+        .iter()
+        .map(|advisory| advisory.advisory_id().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    writeln!(stdout, "Pin exception:").map_err(CommandError::Io)?;
+    writeln!(stdout, "- {}: created", plan.base().review_record()).map_err(CommandError::Io)?;
     writeln!(
         stdout,
-        "- {REVIEWED_TARGETS_CONFIG_FILE}: appended reviewed family \"{}\" for {}",
-        plan.family_name(),
-        plan.exact()
+        "- {REVIEWED_TARGETS_CONFIG_FILE}: appended reviewed family \"{}\" accepting {} for {}",
+        plan.base().family_name(),
+        accepted,
+        plan.base().exact()
     )
     .map_err(CommandError::Io)?;
-    if plan.checksum().is_none() {
-        writeln!(
-            stdout,
-            "- note: no Cargo.lock checksum for {}; the family pins by exact version only",
-            plan.exact()
-        )
-        .map_err(CommandError::Io)?;
-    }
-    let exact_requirement = format!("={}", plan.exact().version());
-    if plan.direct_requirement().is_some() {
-        writeln!(
-            stdout,
-            "- note: exact direct manifest pin \"{exact_requirement}\" included in the family"
-        )
-        .map_err(CommandError::Io)?;
-    } else if plan.has_non_conforming_direct_requirement() {
-        writeln!(
-            stdout,
-            "- note: {} is a direct dependency but its manifest requirement is not uniformly the exact pin \"{exact_requirement}\"; no direct entry scaffolded — consider exact-pinning the manifest",
-            plan.exact().crate_name()
-        )
-        .map_err(CommandError::Io)?;
-    }
     writeln!(
         stdout,
-        "\nNext steps:\n- Complete the review record at {}; the scaffold is not a completed review.\n- Run `cargo barbican pin check`, then `cargo barbican audit`, then `cargo barbican verify`.",
-        plan.review_record()
+        "- review by {}: audit fails these exceptions once past this date",
+        format_iso_date(review_by_date)
+    )
+    .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "\nNext steps:\n- Complete the review record at {}; the scaffold is not a completed review.\n- Prefer remediation: bump the graph to a patched release and remove the exception when one is adoptable.\n- Run `cargo barbican pin check`, then `cargo barbican audit`, then `cargo barbican verify`.",
+        plan.base().review_record()
     )
     .map_err(CommandError::Io)?;
 
     Ok(ExitCode::SUCCESS)
+}
+
+fn render_pin_exception_rejection(
+    rejection: &PinExceptionRejection,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError> {
+    match rejection {
+        PinExceptionRejection::Target(target) => fail(
+            stderr,
+            render_pin_add_rejection(target).replacen("pin add", "pin exception", 1),
+        ),
+        PinExceptionRejection::MissingChecksum {
+            crate_name,
+            version,
+        } => fail(
+            stderr,
+            format!(
+                "pin exception {crate_name}@{version}: Cargo.lock records no crates.io checksum; advisory exceptions require a checksum-bound resolved target"
+            ),
+        ),
+        PinExceptionRejection::DuplicateAdvisory { advisory_id } => fail(
+            stderr,
+            format!("pin exception: duplicate advisory id {advisory_id}"),
+        ),
+        PinExceptionRejection::AlreadyAllowed {
+            advisory_id,
+            family,
+        } => fail(
+            stderr,
+            format!(
+                "pin exception: {advisory_id} is already allowed by reviewed family \"{family}\" in {REVIEWED_TARGETS_CONFIG_FILE}"
+            ),
+        ),
+        PinExceptionRejection::CoveredResolvedMismatch {
+            family,
+            crate_name,
+            reviewed_version,
+            resolved_version,
+        } => fail(
+            stderr,
+            format!(
+                "pin exception {crate_name}: reviewed family \"{family}\" resolves {crate_name} at {reviewed_version} but Cargo.lock resolves {resolved_version}; reconcile the family with `cargo barbican pin check` first"
+            ),
+        ),
+        PinExceptionRejection::CoveredWithoutChecksum { family, crate_name } => fail(
+            stderr,
+            format!(
+                "pin exception {crate_name}: reviewed family \"{family}\" covers {crate_name} without a checksum_sha256; upgrade its resolved entry to the structured checksum form before adding advisory exceptions"
+            ),
+        ),
+        PinExceptionRejection::CoveredFamilyManualEdit {
+            family,
+            review_record,
+            crate_name,
+            fragment,
+            extend_existing,
+        } => {
+            let exit = fail(
+                stderr,
+                format!(
+                    "pin exception {crate_name}: crate is already covered by reviewed family \"{family}\"; refusing to rewrite an existing family block automatically"
+                ),
+            )?;
+            let instruction = if *extend_existing {
+                format!(
+                    "Append this entry to the existing allowed_advisories list for {crate_name} in family \"{family}\" ({REVIEWED_TARGETS_CONFIG_FILE}):"
+                )
+            } else {
+                format!(
+                    "Add this inside the [[rust.families]] block for family \"{family}\" in {REVIEWED_TARGETS_CONFIG_FILE} (before any following family):"
+                )
+            };
+            writeln!(
+                stderr,
+                "\n{instruction}\n\n{fragment}\nThen record the accepted advisories in {review_record} and re-run `cargo barbican pin check` and `cargo barbican audit`."
+            )
+            .map_err(CommandError::Io)?;
+            Ok(exit)
+        }
+    }
 }
 
 fn render_pin_add_rejection(rejection: &PinAddRejection) -> String {
@@ -252,6 +474,7 @@ mod tests {
             true,
             "serde-2026-07-02",
             Some("=1.0.228"),
+            &[],
             OffsetDateTime::from_unix_timestamp(1_590_969_600)
                 .expect("fixed timestamp should parse")
                 .date(),

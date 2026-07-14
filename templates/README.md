@@ -38,7 +38,7 @@ Still pending:
 Each template file shipped to a consumer should include a header comment:
 
 ```
-# Synced from cargo-barbican v0.21.1
+# Synced from cargo-barbican v0.22.0
 ```
 
 Template-specific follow-up comments may differ. Some copied templates, such

@@ -7,8 +7,8 @@ use time::Date;
 use crate::lockfile::{LockedPackage, Lockfile};
 use crate::manifest::CargoManifestDirectRequirement;
 use crate::reviewed_targets::{
-    RawReviewedResolvedTarget, RawReviewedRustFamily, RawReviewedTargets, RawRustReviewedTargets,
-    ReviewedTargets, format_iso_date,
+    RawReviewedAdvisory, RawReviewedResolvedTarget, RawReviewedRustFamily, RawReviewedTargets,
+    RawRustReviewedTargets, ReviewedTargets, RustSecAdvisoryId, format_iso_date,
 };
 use crate::sha256::Sha256Digest;
 use crate::spec::{ExactCrateSpec, ExactCrateSpecError, VersionMarker, split_crate_version_spec};
@@ -62,12 +62,45 @@ pub enum PinAddTargetError {
     InvalidExactSpec(#[from] ExactCrateSpecError),
 }
 
+pub const PIN_EXCEPTION_DEFAULT_REVIEW_DAYS: i64 = 30;
+
+/// The default re-review deadline for a scaffolded advisory exception: a
+/// bounded acceptance, not an indefinite ignore, so audit forces a revisit.
+pub fn pin_exception_default_review_by(today: Date) -> Option<Date> {
+    today.checked_add(time::Duration::days(PIN_EXCEPTION_DEFAULT_REVIEW_DAYS))
+}
+
 pub fn pin_family_name(crate_name: &str, date: Date) -> String {
     format!("{crate_name}-{}", format_iso_date(date))
 }
 
 pub fn pin_review_record_path(records_dir: &str, crate_name: &str, date: Date) -> String {
     format!("{records_dir}/{}-{crate_name}.md", format_iso_date(date))
+}
+
+/// One advisory a scaffolded reviewed exception accepts, with the re-review
+/// deadline the exception is bounded by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinExceptionAdvisory {
+    advisory_id: RustSecAdvisoryId,
+    review_by: Date,
+}
+
+impl PinExceptionAdvisory {
+    pub fn new(advisory_id: RustSecAdvisoryId, review_by: Date) -> Self {
+        Self {
+            advisory_id,
+            review_by,
+        }
+    }
+
+    pub fn advisory_id(&self) -> &RustSecAdvisoryId {
+        &self.advisory_id
+    }
+
+    pub fn review_by(&self) -> Date {
+        self.review_by
+    }
 }
 
 /// Composes the reviewed-targets policy fragment for a scaffolded family by
@@ -79,6 +112,7 @@ pub fn compose_pin_family_stub(
     spec: &ExactCrateSpec,
     checksum_sha256: Option<&Sha256Digest>,
     direct_requirement: Option<&str>,
+    advisory_exceptions: &[PinExceptionAdvisory],
 ) -> String {
     let crate_name = spec.crate_name().to_owned();
     let mut direct = BTreeMap::new();
@@ -93,6 +127,19 @@ pub fn compose_pin_family_stub(
         },
         None => RawReviewedResolvedTarget::Version(spec.version().to_owned()),
     };
+    let mut allowed_advisories = BTreeMap::new();
+    if !advisory_exceptions.is_empty() {
+        allowed_advisories.insert(
+            crate_name.clone(),
+            advisory_exceptions
+                .iter()
+                .map(|advisory| RawReviewedAdvisory {
+                    id: advisory.advisory_id().to_string(),
+                    review_by: format_iso_date(advisory.review_by()),
+                })
+                .collect(),
+        );
+    }
     let resolved = BTreeMap::from([(crate_name, resolved_target)]);
 
     let family = RawReviewedRustFamily {
@@ -102,7 +149,7 @@ pub fn compose_pin_family_stub(
         resolved,
         allowed_surfaces: BTreeMap::new(),
         allowed_age_exceptions: BTreeMap::new(),
-        allowed_advisories: BTreeMap::new(),
+        allowed_advisories,
     };
     let document = RawReviewedTargets {
         rust: RawRustReviewedTargets {
@@ -122,6 +169,7 @@ pub fn compose_pin_review_record(
     from_crates_io: bool,
     family_name: &str,
     direct_requirement: Option<&str>,
+    advisory_exceptions: &[PinExceptionAdvisory],
     date: Date,
 ) -> String {
     let crate_name = spec.crate_name();
@@ -139,6 +187,19 @@ pub fn compose_pin_review_record(
     let direct_set = match direct_requirement {
         Some(requirement) => format!(" `{crate_name}` `{requirement}`"),
         None => String::new(),
+    };
+    let advisory_set = if advisory_exceptions.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", rendered_advisory_exceptions(advisory_exceptions))
+    };
+    let advisory_findings = if advisory_exceptions.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " accepted under bounded reviewed exceptions scaffolded by `cargo barbican pin exception`: {}",
+            rendered_advisory_exceptions(advisory_exceptions)
+        )
     };
 
     let mut record = String::new();
@@ -175,7 +236,7 @@ pub fn compose_pin_review_record(
 - Resolved reviewed set: {resolved_set}
 - Allowed execution surfaces:
 - Allowed release-age exceptions:
-- Allowed advisory exceptions:
+- Allowed advisory exceptions:{advisory_set}
 
 ## Release Age
 
@@ -186,7 +247,7 @@ pub fn compose_pin_review_record(
 ## Advisory Review
 
 - Sources checked:
-- Findings:
+- Findings:{advisory_findings}
 
 ## Source / Upstream Review
 
@@ -212,6 +273,20 @@ pub fn compose_pin_review_record(
     );
 
     record
+}
+
+fn rendered_advisory_exceptions(advisory_exceptions: &[PinExceptionAdvisory]) -> String {
+    advisory_exceptions
+        .iter()
+        .map(|advisory| {
+            format!(
+                "`{}` (review by {})",
+                advisory.advisory_id(),
+                format_iso_date(advisory.review_by())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Why `plan_pin_add` refused to build a plan. Carries the data needed to
@@ -353,6 +428,7 @@ pub fn plan_pin_add(
         exact,
         package.checksum(),
         direct_requirement.as_deref(),
+        &[],
     );
     let record_stub = compose_pin_review_record(
         exact,
@@ -360,6 +436,7 @@ pub fn plan_pin_add(
         package.is_crates_io(),
         &family_name,
         direct_requirement.as_deref(),
+        &[],
         date,
     );
 
@@ -373,6 +450,244 @@ pub fn plan_pin_add(
         family_stub,
         record_stub,
     })
+}
+
+/// Why `plan_pin_exception` refused to build a plan. As with
+/// [`PinAddRejection`], the shell owns the exact wording; the covered-family
+/// variants deliberately carry the composed policy fragment because the safe
+/// resolution there is a human edit of an existing family block, which this
+/// tool refuses to rewrite mechanically.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinExceptionRejection {
+    Target(PinAddRejection),
+    MissingChecksum {
+        crate_name: String,
+        version: String,
+    },
+    DuplicateAdvisory {
+        advisory_id: RustSecAdvisoryId,
+    },
+    AlreadyAllowed {
+        advisory_id: RustSecAdvisoryId,
+        family: String,
+    },
+    CoveredResolvedMismatch {
+        family: String,
+        crate_name: String,
+        reviewed_version: String,
+        resolved_version: String,
+    },
+    CoveredWithoutChecksum {
+        family: String,
+        crate_name: String,
+    },
+    CoveredFamilyManualEdit {
+        family: String,
+        review_record: String,
+        crate_name: String,
+        fragment: String,
+        extend_existing: bool,
+    },
+}
+
+/// The advisory-exception scaffold `pin exception` would create: the same
+/// family scaffold as `pin add` plus the bounded `allowed_advisories`
+/// entries and a review-record stub pre-filled with the accepted advisories.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinExceptionPlan {
+    base: PinAddPlan,
+    advisories: Vec<PinExceptionAdvisory>,
+}
+
+impl PinExceptionPlan {
+    pub fn base(&self) -> &PinAddPlan {
+        &self.base
+    }
+
+    pub fn advisories(&self) -> &[PinExceptionAdvisory] {
+        &self.advisories
+    }
+}
+
+/// The one `pin exception` decision pipeline. Pure and offline, mirroring
+/// `plan_pin_add`: version disambiguation, duplicate/already-allowed advisory
+/// checks, covered-family refusals with a composed fragment, and — for
+/// uncovered crates — a checksum-bound family scaffold carrying the bounded
+/// advisory exceptions.
+pub fn plan_pin_exception(
+    lockfile: &Lockfile,
+    reviewed_targets: &ReviewedTargets,
+    manifest_requirements: &[CargoManifestDirectRequirement],
+    target: &PinAddTarget,
+    advisories: &[PinExceptionAdvisory],
+    family_name: String,
+    review_record: String,
+    date: Date,
+) -> Result<PinExceptionPlan, PinExceptionRejection> {
+    let mut seen = Vec::new();
+    for advisory in advisories {
+        if seen.contains(&advisory.advisory_id()) {
+            return Err(PinExceptionRejection::DuplicateAdvisory {
+                advisory_id: advisory.advisory_id().clone(),
+            });
+        }
+        seen.push(advisory.advisory_id());
+    }
+
+    let matching_packages = lockfile
+        .packages()
+        .iter()
+        .filter(|package| package.name == target.crate_name())
+        .collect::<Vec<_>>();
+    if matching_packages.is_empty() {
+        return Err(PinExceptionRejection::Target(
+            PinAddRejection::NotInLockfile {
+                crate_name: target.crate_name().to_owned(),
+            },
+        ));
+    }
+    let package =
+        select_locked_package(&matching_packages, target).map_err(PinExceptionRejection::Target)?;
+
+    for advisory in advisories {
+        if let Some(existing) = reviewed_targets.advisory_exceptions().iter().find(|exception| {
+            exception.spec().crate_name() == package.name
+                && exception.advisory_id() == advisory.advisory_id()
+        }) {
+            return Err(PinExceptionRejection::AlreadyAllowed {
+                advisory_id: advisory.advisory_id().clone(),
+                family: existing.family().to_owned(),
+            });
+        }
+    }
+
+    if let Some(family) = reviewed_targets
+        .rust_families()
+        .iter()
+        .find(|family| family.resolved().contains_key(target.crate_name()))
+    {
+        let reviewed = &family.resolved()[target.crate_name()];
+        if reviewed.version() != package.version {
+            return Err(PinExceptionRejection::CoveredResolvedMismatch {
+                family: family.name().to_owned(),
+                crate_name: target.crate_name().to_owned(),
+                reviewed_version: reviewed.version().to_owned(),
+                resolved_version: package.version.clone(),
+            });
+        }
+        if reviewed.checksum_sha256().is_none() {
+            return Err(PinExceptionRejection::CoveredWithoutChecksum {
+                family: family.name().to_owned(),
+                crate_name: target.crate_name().to_owned(),
+            });
+        }
+        let extend_existing = reviewed_targets
+            .advisory_exceptions()
+            .iter()
+            .any(|exception| {
+                exception.family() == family.name()
+                    && exception.spec().crate_name() == target.crate_name()
+            });
+        return Err(PinExceptionRejection::CoveredFamilyManualEdit {
+            family: family.name().to_owned(),
+            review_record: family.review_record().to_owned(),
+            crate_name: target.crate_name().to_owned(),
+            fragment: compose_allowed_advisories_fragment(
+                target.crate_name(),
+                advisories,
+                extend_existing,
+            ),
+            extend_existing,
+        });
+    }
+
+    let Some(checksum) = package.checksum() else {
+        return Err(PinExceptionRejection::MissingChecksum {
+            crate_name: target.crate_name().to_owned(),
+            version: package.version.clone(),
+        });
+    };
+
+    if reviewed_targets
+        .rust_families()
+        .iter()
+        .any(|family| family.name() == family_name)
+    {
+        return Err(PinExceptionRejection::Target(
+            PinAddRejection::FamilyAlreadyExists {
+                crate_name: target.crate_name().to_owned(),
+                family_name,
+            },
+        ));
+    }
+
+    let observed_direct = manifest_requirements
+        .iter()
+        .filter(|requirement| requirement.name() == package.name)
+        .collect::<Vec<_>>();
+    let exact = package.exact_spec();
+    let direct_requirement = exact_direct_requirement(&observed_direct, exact);
+    let has_non_conforming_direct_requirement =
+        direct_requirement.is_none() && !observed_direct.is_empty();
+
+    let family_stub = compose_pin_family_stub(
+        &family_name,
+        &review_record,
+        exact,
+        Some(checksum),
+        direct_requirement.as_deref(),
+        advisories,
+    );
+    let record_stub = compose_pin_review_record(
+        exact,
+        Some(checksum),
+        package.is_crates_io(),
+        &family_name,
+        direct_requirement.as_deref(),
+        advisories,
+        date,
+    );
+
+    Ok(PinExceptionPlan {
+        base: PinAddPlan {
+            family_name,
+            review_record,
+            exact: exact.clone(),
+            checksum: Some(checksum.clone()),
+            direct_requirement,
+            has_non_conforming_direct_requirement,
+            family_stub,
+            record_stub,
+        },
+        advisories: advisories.to_vec(),
+    })
+}
+
+/// The `allowed_advisories` text a human pastes into an existing family
+/// block. When the family already carries advisories for the crate, only the
+/// array entries are composed, to be appended to the existing list.
+fn compose_allowed_advisories_fragment(
+    crate_name: &str,
+    advisories: &[PinExceptionAdvisory],
+    extend_existing: bool,
+) -> String {
+    let entries = advisories
+        .iter()
+        .map(|advisory| {
+            format!(
+                "{{ id = \"{}\", review_by = \"{}\" }}",
+                advisory.advisory_id(),
+                format_iso_date(advisory.review_by())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if extend_existing {
+        entries
+    } else {
+        format!("[rust.families.allowed_advisories]\n{crate_name} = [{entries}]\n")
+    }
 }
 
 fn select_locked_package<'a>(
@@ -445,9 +760,320 @@ mod tests {
     };
 
     use super::{
-        PinAddRejection, PinAddTargetError, compose_pin_family_stub, compose_pin_review_record,
-        parse_pin_add_target, pin_family_name, pin_review_record_path, plan_pin_add,
+        PinAddRejection, PinAddTargetError, PinExceptionAdvisory, PinExceptionRejection,
+        compose_pin_family_stub, compose_pin_review_record, parse_pin_add_target, pin_family_name,
+        pin_review_record_path, plan_pin_add, plan_pin_exception,
     };
+    use crate::RustSecAdvisoryId;
+
+    fn test_advisory(id: &str) -> PinExceptionAdvisory {
+        PinExceptionAdvisory::new(
+            RustSecAdvisoryId::parse(id).expect("advisory id should parse"),
+            Date::from_calendar_date(2026, Month::August, 1).expect("date should construct"),
+        )
+    }
+
+    #[test]
+    fn plan_pin_exception_scaffolds_a_family_with_bounded_advisories() {
+        let lockfile = serde_lockfile();
+        let reviewed_targets = empty_reviewed_targets();
+        let manifest_requirements = direct_requirements("[dependencies]\nserde = \"=1.0.228\"\n");
+        let target = parse_pin_add_target("serde").expect("target should parse");
+        let advisories = vec![
+            test_advisory("RUSTSEC-2026-0001"),
+            test_advisory("RUSTSEC-2026-0002"),
+        ];
+
+        let plan = plan_pin_exception(
+            &lockfile,
+            &reviewed_targets,
+            &manifest_requirements,
+            &target,
+            &advisories,
+            "serde-2026-07-02".to_owned(),
+            "docs/dependency-reviews/2026-07-02-serde.md".to_owned(),
+            test_date(),
+        )
+        .expect("plan should build");
+
+        assert_eq!(plan.advisories().len(), 2);
+        assert_eq!(plan.base().family_name(), "serde-2026-07-02");
+        assert_eq!(plan.base().checksum(), Some(&test_checksum()));
+
+        let parsed = parse_reviewed_targets_toml(&format!("[rust]\n{}", plan.base().family_stub()))
+            .expect("composed exception stub should parse as reviewed-targets policy");
+        let exceptions = parsed.advisory_exceptions();
+        assert_eq!(exceptions.len(), 2);
+        assert_eq!(exceptions[0].advisory_id().as_str(), "RUSTSEC-2026-0001");
+        assert_eq!(exceptions[0].spec().to_string(), "serde@1.0.228");
+        assert_eq!(format_iso_date(exceptions[0].review_by()), "2026-08-01");
+
+        let record = plan.base().record_stub();
+        assert!(record.contains(
+            "- Allowed advisory exceptions: `RUSTSEC-2026-0001` (review by 2026-08-01), `RUSTSEC-2026-0002` (review by 2026-08-01)"
+        ));
+        assert!(record.contains("accepted under bounded reviewed exceptions"));
+    }
+
+    #[test]
+    fn plan_pin_exception_requires_a_lockfile_checksum() {
+        let lockfile = parse_lockfile(
+            "[[package]]\nname = \"local-crate\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("lockfile should parse");
+        let reviewed_targets = empty_reviewed_targets();
+        let target = parse_pin_add_target("local-crate").expect("target should parse");
+
+        let rejection = plan_pin_exception(
+            &lockfile,
+            &reviewed_targets,
+            &[],
+            &target,
+            &[test_advisory("RUSTSEC-2026-0001")],
+            "local-crate-2026-07-02".to_owned(),
+            "docs/dependency-reviews/2026-07-02-local-crate.md".to_owned(),
+            test_date(),
+        )
+        .expect_err("plan should be rejected");
+
+        assert_eq!(
+            rejection,
+            PinExceptionRejection::MissingChecksum {
+                crate_name: "local-crate".to_owned(),
+                version: "0.1.0".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn plan_pin_exception_rejects_duplicate_advisory_arguments() {
+        let lockfile = serde_lockfile();
+        let reviewed_targets = empty_reviewed_targets();
+        let target = parse_pin_add_target("serde").expect("target should parse");
+
+        let rejection = plan_pin_exception(
+            &lockfile,
+            &reviewed_targets,
+            &[],
+            &target,
+            &[
+                test_advisory("RUSTSEC-2026-0001"),
+                test_advisory("RUSTSEC-2026-0001"),
+            ],
+            "serde-2026-07-02".to_owned(),
+            "docs/dependency-reviews/2026-07-02-serde.md".to_owned(),
+            test_date(),
+        )
+        .expect_err("plan should be rejected");
+
+        assert!(matches!(
+            rejection,
+            PinExceptionRejection::DuplicateAdvisory { advisory_id }
+                if advisory_id.as_str() == "RUSTSEC-2026-0001"
+        ));
+    }
+
+    #[test]
+    fn plan_pin_exception_reports_an_already_allowed_advisory() {
+        let lockfile = serde_lockfile();
+        let reviewed_targets = covered_serde_reviewed_targets(
+            r#"
+[rust.families.allowed_advisories]
+serde = [{ id = "RUSTSEC-2026-0001", review_by = "2026-09-21" }]
+"#,
+        );
+        let target = parse_pin_add_target("serde").expect("target should parse");
+
+        let rejection = plan_pin_exception(
+            &lockfile,
+            &reviewed_targets,
+            &[],
+            &target,
+            &[test_advisory("RUSTSEC-2026-0001")],
+            "serde-2026-07-02".to_owned(),
+            "docs/dependency-reviews/2026-07-02-serde.md".to_owned(),
+            test_date(),
+        )
+        .expect_err("plan should be rejected");
+
+        assert!(matches!(
+            rejection,
+            PinExceptionRejection::AlreadyAllowed { advisory_id, family }
+                if advisory_id.as_str() == "RUSTSEC-2026-0001" && family == "serde-family"
+        ));
+    }
+
+    #[test]
+    fn plan_pin_exception_refuses_covered_families_with_a_paste_ready_fragment() {
+        let lockfile = serde_lockfile();
+        let reviewed_targets = covered_serde_reviewed_targets("");
+        let target = parse_pin_add_target("serde").expect("target should parse");
+
+        let rejection = plan_pin_exception(
+            &lockfile,
+            &reviewed_targets,
+            &[],
+            &target,
+            &[test_advisory("RUSTSEC-2026-0002")],
+            "serde-2026-07-02".to_owned(),
+            "docs/dependency-reviews/2026-07-02-serde.md".to_owned(),
+            test_date(),
+        )
+        .expect_err("plan should be rejected");
+
+        let PinExceptionRejection::CoveredFamilyManualEdit {
+            family,
+            review_record,
+            crate_name,
+            fragment,
+            extend_existing,
+        } = rejection
+        else {
+            panic!("expected a covered-family manual-edit rejection");
+        };
+        assert_eq!(family, "serde-family");
+        assert_eq!(review_record, "docs/dependency-reviews/2026-05-27-serde.md");
+        assert_eq!(crate_name, "serde");
+        assert!(!extend_existing);
+        assert_eq!(
+            fragment,
+            "[rust.families.allowed_advisories]\nserde = [{ id = \"RUSTSEC-2026-0002\", review_by = \"2026-08-01\" }]\n"
+        );
+    }
+
+    #[test]
+    fn plan_pin_exception_composes_entry_only_fragments_for_existing_advisory_lists() {
+        let lockfile = serde_lockfile();
+        let reviewed_targets = covered_serde_reviewed_targets(
+            r#"
+[rust.families.allowed_advisories]
+serde = [{ id = "RUSTSEC-2026-0001", review_by = "2026-09-21" }]
+"#,
+        );
+        let target = parse_pin_add_target("serde").expect("target should parse");
+
+        let rejection = plan_pin_exception(
+            &lockfile,
+            &reviewed_targets,
+            &[],
+            &target,
+            &[test_advisory("RUSTSEC-2026-0002")],
+            "serde-2026-07-02".to_owned(),
+            "docs/dependency-reviews/2026-07-02-serde.md".to_owned(),
+            test_date(),
+        )
+        .expect_err("plan should be rejected");
+
+        let PinExceptionRejection::CoveredFamilyManualEdit {
+            fragment,
+            extend_existing,
+            ..
+        } = rejection
+        else {
+            panic!("expected a covered-family manual-edit rejection");
+        };
+        assert!(extend_existing);
+        assert_eq!(
+            fragment,
+            "{ id = \"RUSTSEC-2026-0002\", review_by = \"2026-08-01\" }"
+        );
+    }
+
+    #[test]
+    fn plan_pin_exception_reports_covered_families_without_checksums() {
+        let lockfile = serde_lockfile();
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = "1.0.228"
+"#,
+        )
+        .expect("policy should parse");
+        let target = parse_pin_add_target("serde").expect("target should parse");
+
+        let rejection = plan_pin_exception(
+            &lockfile,
+            &reviewed_targets,
+            &[],
+            &target,
+            &[test_advisory("RUSTSEC-2026-0002")],
+            "serde-2026-07-02".to_owned(),
+            "docs/dependency-reviews/2026-07-02-serde.md".to_owned(),
+            test_date(),
+        )
+        .expect_err("plan should be rejected");
+
+        assert_eq!(
+            rejection,
+            PinExceptionRejection::CoveredWithoutChecksum {
+                family: "serde-family".to_owned(),
+                crate_name: "serde".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn plan_pin_exception_reports_covered_resolved_version_drift() {
+        let lockfile = serde_lockfile();
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = { version = "1.0.200", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+        )
+        .expect("policy should parse");
+        let target = parse_pin_add_target("serde").expect("target should parse");
+
+        let rejection = plan_pin_exception(
+            &lockfile,
+            &reviewed_targets,
+            &[],
+            &target,
+            &[test_advisory("RUSTSEC-2026-0002")],
+            "serde-2026-07-02".to_owned(),
+            "docs/dependency-reviews/2026-07-02-serde.md".to_owned(),
+            test_date(),
+        )
+        .expect_err("plan should be rejected");
+
+        assert_eq!(
+            rejection,
+            PinExceptionRejection::CoveredResolvedMismatch {
+                family: "serde-family".to_owned(),
+                crate_name: "serde".to_owned(),
+                reviewed_version: "1.0.200".to_owned(),
+                resolved_version: "1.0.228".to_owned(),
+            }
+        );
+    }
+
+    fn covered_serde_reviewed_targets(allowed_advisories: &str) -> crate::ReviewedTargets {
+        parse_reviewed_targets_toml(&format!(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = {{ version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }}
+{allowed_advisories}"#,
+        ))
+        .expect("policy should parse")
+    }
 
     fn test_date() -> Date {
         Date::from_calendar_date(2026, Month::July, 2).expect("test date should construct")
@@ -519,6 +1145,7 @@ mod tests {
             &spec,
             Some(&checksum),
             Some("=1.0.228"),
+            &[],
         );
 
         // The stub is generated by serialising the same raw schema
@@ -557,6 +1184,7 @@ mod tests {
             &spec,
             None,
             None,
+            &[],
         );
 
         assert!(stub.contains("local-crate = \"0.1.0\"\n"));
@@ -576,6 +1204,7 @@ mod tests {
             true,
             "serde-2026-07-02",
             Some("=1.0.228"),
+            &[],
             test_date(),
         );
 
@@ -613,6 +1242,7 @@ mod tests {
             false,
             "local-crate-2026-07-02",
             None,
+            &[],
             test_date(),
         );
 

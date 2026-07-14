@@ -237,6 +237,12 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   `dependency_paths_available` flag) while the report and
   advisory-disposition verdict still render; enumeration completeness
   failures and scanner errors remain blocking
+- paired with a governed acceptance path: each unreviewed RustSec finding
+  carries a pointer to `cargo barbican pin exception`, the offline
+  scaffolder that composes a checksum-bound reviewed family with bounded
+  `allowed_advisories` entries and a review-record stub, so the governed
+  exception is as easy as a native `deny.toml` ignore without being
+  ungoverned
 
 The reviewed-target enforcement baseline is:
 

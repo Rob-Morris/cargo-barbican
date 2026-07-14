@@ -278,6 +278,30 @@ pub(crate) enum PinCommand {
         spec: String,
     },
     #[command(
+        about = "Scaffold a bounded reviewed advisory exception from Cargo.lock",
+        long_about = "Scaffolds the governed acceptance of one or more RustSec advisories for a \
+            crate already resolved in Cargo.lock, fully offline: a reviewed-targets.toml family \
+            stub carrying checksum-bound allowed_advisories entries with a re-review deadline, \
+            plus a review-record markdown stub pre-filled with the accepted advisories. The \
+            scaffold is not a completed review. When the crate is already covered by a reviewed \
+            family, the command prints the exact policy fragment to add and refuses to rewrite \
+            the existing family block."
+    )]
+    Exception {
+        #[arg(help = "Crate name, optionally with @version when multiple versions are resolved")]
+        spec: String,
+        #[arg(
+            required = true,
+            help = "RustSec advisory ids to accept, e.g. RUSTSEC-2026-0001"
+        )]
+        advisories: Vec<String>,
+        #[arg(
+            long,
+            help = "Re-review deadline as YYYY-MM-DD; defaults to 30 days from today"
+        )]
+        review_by: Option<String>,
+    },
+    #[command(
         about = "Enforce reviewed-target policy",
         long_about = "Checks active reviewed Rust families in reviewed-targets.toml against the \
             current workspace manifests and Cargo.lock: review records exist, direct \

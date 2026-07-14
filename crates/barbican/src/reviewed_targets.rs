@@ -767,7 +767,7 @@ fn resolve_allowance_checksum<'a>(
         })
 }
 
-fn parse_iso_date(value: &str) -> Result<Date, IsoDateError> {
+pub fn parse_iso_date(value: &str) -> Result<Date, IsoDateError> {
     let bytes = value.as_bytes();
     if bytes.len() != ISO_DATE_LEN
         || !bytes[0..4].iter().all(u8::is_ascii_digit)
@@ -1004,8 +1004,8 @@ pub(crate) struct RawReviewedRustFamily {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawReviewedAdvisory {
-    id: String,
-    review_by: String,
+    pub(crate) id: String,
+    pub(crate) review_by: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

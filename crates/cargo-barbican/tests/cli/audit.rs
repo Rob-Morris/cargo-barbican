@@ -106,6 +106,9 @@ fn audit_fails_unreviewed_advisory_with_cargo_deny_scanner() {
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("Audit: FAIL"));
     assert!(rendered.contains("FAIL RUSTSEC-2026-0001 serde@1.0.228: unreviewed advisory finding"));
+    assert!(rendered.contains(
+        "governed exception: cargo barbican pin exception serde@1.0.228 RUSTSEC-2026-0001"
+    ));
     assert!(!rendered.contains("Allowed policy exceptions:"));
 }
 

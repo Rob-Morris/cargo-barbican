@@ -409,6 +409,7 @@ fn render_audit_report(
                 .map_err(CommandError::Io)?;
                 render_dependency_path(stdout, finding, dependency_paths)?;
                 render_remediation(stdout, finding, remediations)?;
+                render_governed_exception_pointer(stdout, finding)?;
             }
         }
     }
@@ -659,6 +660,26 @@ fn render_remediation(
         stdout,
         "  remediation: {}",
         render_remediation_advice(remediation)
+    )
+    .map_err(CommandError::Io)
+}
+
+/// Rendered after the remediation hint so the remediate-first incentive
+/// order is preserved: the governed acceptance path is offered, but never
+/// ahead of the fix. Only RustSec-form ids are offered — `pin exception`
+/// cannot accept unnormalised scanner ids.
+fn render_governed_exception_pointer(
+    stdout: &mut dyn Write,
+    finding: &AdvisoryFinding,
+) -> Result<(), CommandError> {
+    let AdvisoryFindingId::RustSec(advisory_id) = finding.advisory_id() else {
+        return Ok(());
+    };
+    writeln!(
+        stdout,
+        "  governed exception: cargo barbican pin exception {} {} (scaffolds a bounded reviewed exception; prefer remediation)",
+        finding.package(),
+        advisory_id
     )
     .map_err(CommandError::Io)
 }
