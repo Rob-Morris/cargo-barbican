@@ -543,6 +543,157 @@ mod tests {
     }
 
     #[test]
+    fn dependency_path_prefers_the_shorter_route_in_a_diamond_graph() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
+    {"name": "short", "id": "registry+https://github.com/rust-lang/crates.io-index#short@1.0.0", "version": "1.0.0", "targets": []},
+    {"name": "long-a", "id": "registry+https://github.com/rust-lang/crates.io-index#long-a@1.0.0", "version": "1.0.0", "targets": []},
+    {"name": "long-b", "id": "registry+https://github.com/rust-lang/crates.io-index#long-b@1.0.0", "version": "1.0.0", "targets": []},
+    {"name": "leaf", "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "version": "2.0.0", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [
+          {"name": "long_a", "pkg": "registry+https://github.com/rust-lang/crates.io-index#long-a@1.0.0"},
+          {"name": "short", "pkg": "registry+https://github.com/rust-lang/crates.io-index#short@1.0.0"}
+        ]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#short@1.0.0",
+        "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#long-a@1.0.0",
+        "deps": [{"name": "long_b", "pkg": "registry+https://github.com/rust-lang/crates.io-index#long-b@1.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#long-b@1.0.0",
+        "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0",
+        "deps": []
+      }
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("leaf", "2.0.0").expect("target should parse");
+
+        let path = shortest_workspace_dependency_path(&metadata, &target)
+            .expect("path computation should succeed")
+            .expect("target should be reachable");
+
+        assert_eq!(
+            path.packages()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec![
+                "root@0.1.0".to_owned(),
+                "short@1.0.0".to_owned(),
+                "leaf@2.0.0".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dependency_path_starts_from_the_nearest_workspace_member() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "member-far", "id": "path+file:///repo#member-far@0.1.0", "version": "0.1.0", "targets": []},
+    {"name": "member-near", "id": "path+file:///repo#member-near@0.1.0", "version": "0.1.0", "targets": []},
+    {"name": "mid", "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0", "version": "1.0.0", "targets": []},
+    {"name": "leaf", "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "version": "2.0.0", "targets": []}
+  ],
+  "workspace_members": [
+    "path+file:///repo#member-far@0.1.0",
+    "path+file:///repo#member-near@0.1.0"
+  ],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#member-far@0.1.0",
+        "deps": [{"name": "mid", "pkg": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0"}]
+      },
+      {
+        "id": "path+file:///repo#member-near@0.1.0",
+        "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0",
+        "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0",
+        "deps": []
+      }
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("leaf", "2.0.0").expect("target should parse");
+
+        let path = shortest_workspace_dependency_path(&metadata, &target)
+            .expect("path computation should succeed")
+            .expect("target should be reachable");
+
+        assert_eq!(
+            path.packages()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["member-near@0.1.0".to_owned(), "leaf@2.0.0".to_owned()]
+        );
+    }
+
+    #[test]
+    fn dependency_path_terminates_on_cyclic_resolve_graphs() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
+    {"name": "cycle-a", "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0", "version": "1.0.0", "targets": []},
+    {"name": "cycle-b", "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-b@1.0.0", "version": "1.0.0", "targets": []}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {
+    "nodes": [
+      {
+        "id": "path+file:///repo#root@0.1.0",
+        "deps": [{"name": "cycle_a", "pkg": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0",
+        "deps": [{"name": "cycle_b", "pkg": "registry+https://github.com/rust-lang/crates.io-index#cycle-b@1.0.0"}]
+      },
+      {
+        "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-b@1.0.0",
+        "deps": [{"name": "cycle_a", "pkg": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0"}]
+      }
+    ]
+  }
+}"#,
+        )
+        .expect("metadata should parse");
+        let target = ExactCrateSpec::from_parts("leaf", "2.0.0").expect("target should parse");
+
+        assert_eq!(
+            shortest_workspace_dependency_path(&metadata, &target)
+                .expect("path computation should terminate"),
+            None
+        );
+    }
+
+    #[test]
     fn dependency_path_is_none_when_target_package_is_absent() {
         let metadata = parse_cargo_metadata(
             r#"{

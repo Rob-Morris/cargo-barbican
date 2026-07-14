@@ -215,6 +215,29 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   because the graph is unresolved or metadata cannot be parsed, inventory still
   renders the offline report and marks live graph surfaces as not collected
 
+`cargo barbican audit` is currently:
+
+- delegated-scanner based: it runs `cargo-deny` (and/or `cargo-audit`,
+  per `delegates.advisories.lockfile_scanner`) with native advisory ignores
+  neutralised, then computes a Barbican-owned verdict rather than inheriting
+  scanner exit codes
+- reconciliation-driven: every enumerated finding is reconciled against
+  reviewed advisory exceptions in `reviewed-targets.toml`; unreviewed and
+  expired findings fail, accepted exceptions are rendered visibly
+- machine-consumable: `--format json` emits a stable `schema_version`ed
+  report whose fields and value sets are defined in the CLI output-stability
+  contract
+- remediation-oriented: failing findings with patched releases carry the
+  shortest workspace-member dependency path and a conservative read-only
+  remediation hint that never suggests moving an exact `=` pin with a
+  lockfile-only update; a manifest requirement classifies a finding as
+  direct only when it can admit the finding's resolved version
+- explicit about degraded enrichment: dependency-path and remediation
+  context failures produce stderr notes (and the JSON
+  `dependency_paths_available` flag) while the report and
+  advisory-disposition verdict still render; enumeration completeness
+  failures and scanner errors remain blocking
+
 The reviewed-target enforcement baseline is:
 
 - repo-root `reviewed-targets.toml` is the machine-enforced source of truth

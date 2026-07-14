@@ -307,7 +307,7 @@ pub fn advisory_remediation(
 
     let crate_name = finding.package().crate_name();
     let direct =
-        direct_requirement_summary(crate_name, manifest_requirements, workspace_requirements);
+        direct_requirement_summary(finding.package(), manifest_requirements, workspace_requirements);
     if let Some(direct) = direct {
         if direct.exact_pinned {
             return Some(AdvisoryRemediation {
@@ -351,24 +351,37 @@ struct DirectRequirementSummary {
     exact_pinned: bool,
 }
 
+/// A manifest requirement only makes the *finding* direct when it can admit
+/// the finding's resolved version. Matching by crate name alone classified a
+/// capped transitive duplicate (for example a vulnerable `hashbrown 0.12`
+/// beside a safe direct `hashbrown = "0.15"`) as direct, steering the
+/// remediation at the already-safe copy.
 fn direct_requirement_summary(
-    crate_name: &str,
+    package: &ExactCrateSpec,
     manifest_requirements: &[CargoManifestDirectRequirement],
     workspace_requirements: &[CargoManifestDirectRequirement],
 ) -> Option<DirectRequirementSummary> {
+    let resolved_version = semver::Version::parse(package.version()).ok()?;
     let matching = manifest_requirements
         .iter()
-        .filter(|requirement| requirement.name() == crate_name);
+        .filter(|requirement| requirement.name() == package.crate_name());
 
     let mut found = false;
     let mut exact_pinned = false;
     for requirement in matching {
+        let Some(version_requirement) =
+            effective_direct_requirement(requirement, workspace_requirements)
+        else {
+            continue;
+        };
+        let Ok(parsed_requirement) = semver::VersionReq::parse(version_requirement) else {
+            continue;
+        };
+        if !parsed_requirement.matches(&resolved_version) {
+            continue;
+        }
         found = true;
-        if effective_direct_requirement(requirement, workspace_requirements).is_some_and(
-            |version_requirement| {
-                parse_exact_version_requirement(crate_name, version_requirement).is_ok()
-            },
-        ) {
+        if parse_exact_version_requirement(package.crate_name(), version_requirement).is_ok() {
             exact_pinned = true;
         }
     }
@@ -1163,6 +1176,33 @@ mod tests {
     }
 
     #[test]
+    fn remediation_treats_version_mismatched_direct_requirement_as_transitive() {
+        let finding = remediation_finding();
+        let manifest_requirements = direct_requirements("[dependencies]\nquick-xml = \"0.41\"\n");
+        let path = dependency_path_to_quick_xml();
+
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], Some(&path))
+            .expect("patched transitive duplicate should have remediation");
+
+        assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
+        assert_eq!(remediation.target_crate(), "plist");
+        assert_eq!(remediation.nearest_parent(), Some("plist"));
+    }
+
+    #[test]
+    fn remediation_ignores_exact_pin_of_a_different_version() {
+        let finding = remediation_finding_for("serde", "1.0.228", ">=1.0.229");
+        let manifest_requirements = direct_requirements("[dependencies]\nserde = \"=1.0.300\"\n");
+
+        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], None)
+            .expect("patched finding should have remediation");
+
+        assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
+        assert_eq!(remediation.target_crate(), "serde");
+        assert_eq!(remediation.command_hint(), None);
+    }
+
+    #[test]
     fn remediation_is_absent_without_patched_versions() {
         let finding = AdvisoryFinding::new(
             AdvisoryFindingId::parse("RUSTSEC-2026-0001"),
@@ -1191,6 +1231,39 @@ mod tests {
             "RUSTSEC-2026-0001"
         );
         assert_eq!(report.findings()[0].package().to_string(), "serde@1.0.228");
+    }
+
+    #[test]
+    fn parses_cargo_audit_cvss_from_string_and_number_and_uses_it_as_risk_fallback() {
+        for cvss_json in [r#""9.8""#, "9.8"] {
+            let report = parse_cargo_audit_json(&format!(
+                r#"{{
+  "vulnerabilities": {{
+    "found": true,
+    "count": 1,
+    "list": [
+      {{
+        "advisory": {{ "id": "RUSTSEC-2026-0001", "cvss": {cvss_json} }},
+        "package": {{ "name": "serde", "version": "1.0.228" }},
+        "versions": {{ "patched": [], "unaffected": [] }}
+      }}
+    ]
+  }},
+  "settings": {{ "ignore": [] }},
+  "warnings": {{}}
+}}"#,
+            ))
+            .expect("cargo-audit output should parse");
+
+            let details = report.findings()[0].details();
+            assert_eq!(details.cvss(), Some("9.8"));
+            assert_eq!(details.severity(), None);
+            assert_eq!(
+                details.risk_label(),
+                Some("9.8"),
+                "risk label should fall back to cvss when severity and informational are absent"
+            );
+        }
     }
 
     #[test]

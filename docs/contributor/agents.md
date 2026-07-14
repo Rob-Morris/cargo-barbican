@@ -159,6 +159,18 @@ The current intake layer now includes the first pre-add deep-review slice:
 - `cargo barbican pin add` exists as the offline reviewed-family scaffolder:
   it composes the `reviewed-targets.toml` family stub and the review-record
   stub from resolved `Cargo.lock` facts, and fails closed on any conflict
+- `cargo barbican audit` now surfaces remediation facts on findings: advisory
+  title, risk label, patched-version ranges, and — when frozen cargo metadata
+  is available — the shortest dependency path from a workspace member to the
+  affected package
+- `cargo barbican audit --format json` emits a stable `schema_version`ed JSON
+  report for CI and tooling, defined in the CLI output-stability contract
+- failing findings with patched releases carry a conservative read-only
+  remediation hint (`direct-pinned-edit`, `direct-update`, or
+  `transitive-bump`); a manifest requirement classifies a finding as direct
+  only when it can admit the finding's resolved version, and dependency-path
+  and remediation enrichment degrade with explicit stderr notes instead of
+  suppressing the report
 
 ## Source material to read before implementing
 

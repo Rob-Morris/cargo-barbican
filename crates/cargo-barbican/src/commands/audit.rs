@@ -117,7 +117,15 @@ where
         );
     let passed = outcome.is_success() && !native_ignores_fail;
     let dependency_paths = collect_dependency_paths(current_dir, runner, &outcome, output_format);
-    let remediations = collect_remediations(current_dir, &outcome, &dependency_paths)?;
+    let remediations = collect_remediations(current_dir, &outcome, &dependency_paths);
+    if let Some(reason) = remediations.unavailable_reason() {
+        writeln!(
+            stderr,
+            "note: remediation context unavailable: {}",
+            escape_diagnostic_for_terminal(reason)
+        )
+        .map_err(CommandError::Io)?;
+    }
 
     match output_format {
         AuditOutputFormat::Text => {
@@ -211,11 +219,15 @@ where
     DependencyPathReport::available(paths)
 }
 
+/// Remediation hints are best-effort guidance, so a manifest that barbican
+/// cannot read or parse degrades to hint-less findings with an explicit
+/// note instead of suppressing the whole report — the verdict stays driven
+/// solely by advisory disposition, matching the dependency-path posture.
 fn collect_remediations(
     current_dir: &Path,
     outcome: &AdvisoryAuditOutcome,
     dependency_paths: &DependencyPathReport,
-) -> Result<AdvisoryRemediationReport, CommandError> {
+) -> AdvisoryRemediationReport {
     let remediation_candidates = outcome
         .reconciliation()
         .dispositions()
@@ -230,11 +242,14 @@ fn collect_remediations(
         .collect::<Vec<_>>();
 
     if remediation_candidates.is_empty() {
-        return Ok(AdvisoryRemediationReport::default());
+        return AdvisoryRemediationReport::default();
     }
 
     let (manifest_requirements, workspace_requirements) =
-        load_current_manifest_direct_and_workspace_requirements(current_dir)?;
+        match load_current_manifest_direct_and_workspace_requirements(current_dir) {
+            Ok(requirements) => requirements,
+            Err(error) => return AdvisoryRemediationReport::unavailable(error.to_string()),
+        };
     let remediations = remediation_candidates
         .into_iter()
         .filter_map(|finding| {
@@ -248,7 +263,10 @@ fn collect_remediations(
         })
         .collect();
 
-    Ok(AdvisoryRemediationReport { remediations })
+    AdvisoryRemediationReport {
+        remediations,
+        unavailable_reason: None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -269,9 +287,21 @@ impl From<&AdvisoryFinding> for AdvisoryRemediationKey {
 #[derive(Default)]
 struct AdvisoryRemediationReport {
     remediations: BTreeMap<AdvisoryRemediationKey, AdvisoryRemediation>,
+    unavailable_reason: Option<String>,
 }
 
 impl AdvisoryRemediationReport {
+    fn unavailable(reason: String) -> Self {
+        Self {
+            remediations: BTreeMap::new(),
+            unavailable_reason: Some(reason),
+        }
+    }
+
+    fn unavailable_reason(&self) -> Option<&str> {
+        self.unavailable_reason.as_deref()
+    }
+
     fn get(&self, finding: &AdvisoryFinding) -> Option<&AdvisoryRemediation> {
         self.remediations
             .get(&AdvisoryRemediationKey::from(finding))
@@ -645,8 +675,9 @@ fn render_remediation_advice(remediation: &AdvisoryRemediation) -> String {
                 .command_hint()
                 .expect("direct update remediation has a command hint");
             format!(
-                "run {}; choose a patched release with {}; verify with {} --dry-run",
+                "run {}; choose a patched release ({}) with {}; verify with {} --dry-run",
                 escape_render_field(command_hint),
+                render_patched_ranges(remediation.patched_versions()),
                 render_pick_hint(remediation.target_crate(), remediation.patched_versions()),
                 escape_render_field(command_hint),
             )

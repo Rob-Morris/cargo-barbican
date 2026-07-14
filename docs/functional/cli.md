@@ -338,15 +338,22 @@ cargo barbican audit [--format text|json]
     The default `--format text` report is human-oriented. When scanner output
     carries advisory metadata, finding lines include the advisory title, risk
     label, and patched-version ranges. When frozen Cargo metadata can be
-    collected, unaccepted findings also include the shortest workspace-root
-    dependency path to the affected package. Unreviewed and expired findings
-    with patched-version ranges also include a read-only remediation hint.
+    collected, unaccepted findings also include the shortest dependency path
+    from a workspace member to the affected package. Unreviewed and expired
+    findings with patched-version ranges also include a read-only remediation
+    hint. A manifest requirement only classifies a finding as direct when it
+    can admit the finding's resolved version, so a vulnerable duplicate
+    version capped by a parent is treated as transitive rather than pointed
+    at the safe direct copy.
     Direct non-exact dependencies get a `cargo barbican update <crate>@<version>`
     template plus a `pick` pointer for selecting a patched release; direct
     exact `=` pins are reported as manifest edits because lockfile-only
     updates cannot move them; transitive findings name the nearest parent from
     the dependency path when one is known and otherwise stay generic. These
     hints do not mutate the repo and must be verified with `--dry-run`.
+    Remediation hints are best-effort enrichment: when workspace manifests
+    cannot be read or parsed, the hints are omitted, a `note:` diagnostic is
+    written to stderr, and the report and verdict still render.
 
     `--format json` emits a stable JSON report on stdout with
     `schema_version`, `status`, `success`, structured advisory `findings`,
@@ -396,13 +403,18 @@ contract, not a routine rewording.
   Its top-level `schema_version` identifies the JSON contract version. Adding,
   removing, or renaming fields, changing field meaning, or changing existing
   field types requires a new `schema_version`. In schema version `2`,
-  consumers may rely on the top-level `schema_version`, `status`, `success`,
-  `dependency_paths_available`, `findings`, `completeness_failures`,
-  `cargo_deny`, `cargo_audit`, and `native_delegated_ignores` fields, plus
-  each finding's advisory id, package object, disposition, title/risk/severity
-  metadata, patched ranges, dependency path, reviewed-exception object, and
+  consumers may rely on the top-level `schema_version`, `status` (`"pass"` or
+  `"fail"`), `success`, `dependency_paths_available`, `findings`,
+  `completeness_failures`, `cargo_deny`, `cargo_audit`, and
+  `native_delegated_ignores` fields, plus each finding's advisory id, package
+  object, disposition (`"accepted"`, `"expired"`, or `"unreviewed"`),
+  title/risk/severity metadata, nullable `cvss` and `informational` strings,
+  patched ranges, dependency path, reviewed-exception object, and
   remediation object. `remediation` is either `null` or an object with
   `kind`, `patched`, `target_crate`, `nearest_parent`, and `command_hint`.
+  `target_crate` is the crate the suggested action applies to: the vulnerable
+  crate itself for the direct kinds and for generic transitive hints, or the
+  nearest parent for parent-bump transitive hints.
   The stable remediation kinds are `direct-pinned-edit`, `direct-update`, and
   `transitive-bump`. `command_hint` is a template with `<version>` when an
   update target is known; it is `null` for exact-pin manifest edits and for
@@ -432,6 +444,10 @@ Every command follows one rule for where output goes:
   `inspect`, and `assess` print for each spec or finding they evaluate. These
   lines are evidence, not the terminal failure signal, and are covered by the
   output-stability contract above only where explicitly listed.
+- **stderr** also carries non-failure `note:` diagnostics when best-effort
+  report enrichment degrades — for example `audit`'s dependency-path and
+  remediation context notes — so a missing enrichment stays visible without
+  entering the stdout report body or changing the verdict.
 - **stderr** carries the terminal failure line and every propagated error.
   Any `CommandError` that reaches the top of a command — a missing or
   malformed input file, a failed `git`/`cargo` subprocess, an invalid

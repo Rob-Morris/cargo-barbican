@@ -261,6 +261,139 @@ lockfile_scanner = "cargo-audit"
             "command_hint": "cargo barbican update mid@<version>"
         })
     );
+    assert_eq!(report["findings"][0]["severity"], "high");
+    assert!(report["findings"][0]["cvss"].is_null());
+    assert!(report["findings"][0]["informational"].is_null());
+    assert_eq!(report["completeness_failures"], serde_json::json!([]));
+    assert_eq!(
+        report["cargo_deny"],
+        serde_json::json!({ "no_advisory_errors": [], "non_advisory_errors": [] })
+    );
+    assert_eq!(
+        report["cargo_audit"],
+        serde_json::json!({ "settings_ignore": [], "idless_warnings": 0 })
+    );
+    assert_eq!(report["native_delegated_ignores"], serde_json::json!([]));
+}
+
+#[test]
+fn audit_json_reports_scanner_diagnostics_and_native_ignores_in_contract_fields() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_deny_json(&cargo_deny_bans_error_jsonl())
+        .with_cargo_audit_json(&cargo_audit_ignored_and_idless_json());
+    let temp_dir = fresh_temp_dir();
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates]
+unmanaged_delegated_policy = "deny"
+
+[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("deny.toml"),
+        r#"[advisories]
+ignore = ["RUSTSEC-2026-0002"]
+"#,
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(report["status"], "fail");
+    assert_eq!(
+        report["cargo_deny"]["no_advisory_errors"],
+        serde_json::json!([{ "line": 1, "severity": "error", "code": "banned" }])
+    );
+    assert_eq!(
+        report["cargo_deny"]["non_advisory_errors"],
+        serde_json::json!([{ "check": "bans", "errors": 1 }])
+    );
+    assert_eq!(
+        report["cargo_audit"]["settings_ignore"],
+        serde_json::json!(["RUSTSEC-2026-0001"])
+    );
+    assert_eq!(report["cargo_audit"]["idless_warnings"], 1);
+    assert_eq!(
+        report["native_delegated_ignores"],
+        serde_json::json!([{
+            "source": "deny.toml",
+            "advisory_ids": ["RUSTSEC-2026-0002"],
+            "policy": "deny"
+        }])
+    );
+}
+
+#[test]
+fn audit_json_reports_completeness_failures_for_missing_summary_checks() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json(
+        r#"{"type":"summary","fields":{"bans":{"errors":0,"warnings":0,"helps":0,"notes":0},"sources":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
+"#,
+    );
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(report["status"], "fail");
+    assert_eq!(
+        report["completeness_failures"],
+        serde_json::json!(["cargo-deny summary missing advisories check"])
+    );
+}
+
+#[test]
+fn audit_json_outputs_direct_update_remediation_for_unpinned_direct_dependency() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(serde_direct_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(
+        report["findings"][0]["remediation"],
+        serde_json::json!({
+            "kind": "direct-update",
+            "patched": [">=1.0.229"],
+            "target_crate": "serde",
+            "nearest_parent": null,
+            "command_hint": "cargo barbican update serde@<version>"
+        })
+    );
 }
 
 #[test]
@@ -334,7 +467,7 @@ fn audit_text_remediation_suggests_direct_update_for_unpinned_direct_dependency(
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stderr.is_empty());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
-    assert!(rendered.contains("remediation: run cargo barbican update serde@<version>; choose a patched release with cargo barbican pick serde@'>=1.0.229'; verify with cargo barbican update serde@<version> --dry-run"));
+    assert!(rendered.contains("remediation: run cargo barbican update serde@<version>; choose a patched release (>=1.0.229) with cargo barbican pick serde@'>=1.0.229'; verify with cargo barbican update serde@<version> --dry-run"));
 }
 
 #[test]
@@ -457,6 +590,127 @@ fn audit_json_outputs_expired_exception_details() {
         report["findings"][0]["exception"]["review_by"],
         "2000-01-01"
     );
+    assert_eq!(
+        report["findings"][0]["remediation"],
+        serde_json::json!({
+            "kind": "direct-pinned-edit",
+            "patched": [">=1.0.229"],
+            "target_crate": "serde",
+            "nearest_parent": null,
+            "command_hint": null
+        })
+    );
+}
+
+#[test]
+fn audit_degrades_remediation_and_keeps_the_report_when_manifests_cannot_be_parsed() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(serde_direct_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "not toml [");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(rendered.contains("FAIL RUSTSEC-2026-0001 serde@1.0.228"));
+    assert!(!rendered.contains("remediation:"));
+    assert!(rendered_error.contains("note: remediation context unavailable:"));
+}
+
+#[test]
+fn audit_json_emits_null_remediation_when_manifests_cannot_be_parsed() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(serde_direct_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "not toml [");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains("note: remediation context unavailable:"));
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+
+    assert_eq!(report["status"], "fail");
+    assert_eq!(report["findings"][0]["advisory_id"], "RUSTSEC-2026-0001");
+    assert!(report["findings"][0]["remediation"].is_null());
+}
+
+#[test]
+fn audit_text_escapes_untrusted_advisory_title_and_patched_ranges() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_audit_json(&cargo_audit_advisory_json_for(
+        "RUSTSEC-2026-0001",
+        "serde",
+        "1.0.228",
+        r"evil \u001b[31mtitle",
+        "high",
+        &[r"\u001b[32m>=1.0.229"],
+    ));
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(!rendered.contains('\u{1b}'), "raw escape byte must not reach the terminal");
+    assert!(rendered.contains(r"title: evil \x1b[31mtitle"));
+    assert!(rendered.contains(r"fixed in \x1b[32m>=1.0.229"));
+}
+
+#[test]
+fn audit_text_remediation_honours_workspace_inherited_exact_pins_end_to_end() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json(&cargo_audit_tauri_advisory_json())
+        .with_frozen_metadata(tauri_direct_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(
+        &temp_dir,
+        "[workspace]\nmembers = [\"member\"]\n\n[workspace.dependencies]\ntauri = \"=2.11.2\"\n",
+    );
+    fs::create_dir_all(temp_dir.join("member")).expect("member dir should create");
+    fs::write(
+        temp_dir.join("member/Cargo.toml"),
+        "[package]\nname = \"member\"\nversion = \"0.1.0\"\n\n[dependencies]\ntauri = { workspace = true }\n",
+    )
+    .expect("member manifest should write");
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("remediation: edit the pinned tauri manifest requirement to a patched release (>=2.11.5); a lockfile-only update cannot move an exact = pin"));
 }
 
 #[test]
