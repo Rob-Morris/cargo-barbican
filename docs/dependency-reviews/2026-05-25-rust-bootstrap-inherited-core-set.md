@@ -89,7 +89,7 @@
 ## Commands Run
 
 ```bash
-python3 /Users/robmorris/Development/undertask/scripts/check-crate-release-age.py --min-age-days 7 \
+python3 check-crate-release-age.py --min-age-days 7 \
   serde@1.0.228 \
   serde_json@1.0.149 \
   clap@4.6.1 \
@@ -98,14 +98,14 @@ python3 /Users/robmorris/Development/undertask/scripts/check-crate-release-age.p
 
 cargo generate-lockfile
 
-python3 /Users/robmorris/Development/undertask/scripts/check-cargo-lock-release-age.py --min-age-days 7 --base-ref HEAD
-python3 /Users/robmorris/Development/undertask/scripts/assess-dependency-update.py --ecosystem rust --policy-mode elevated-risk
+python3 check-cargo-lock-release-age.py --min-age-days 7 --base-ref HEAD
+python3 assess-dependency-update.py --ecosystem rust --policy-mode elevated-risk
 
 cargo tree -i serde_json
 cargo update -p serde_json --precise 1.0.149
 
-python3 /Users/robmorris/Development/undertask/scripts/check-cargo-lock-release-age.py --min-age-days 7 --base-ref HEAD
-python3 /Users/robmorris/Development/undertask/scripts/assess-dependency-update.py --ecosystem rust --policy-mode elevated-risk
+python3 check-cargo-lock-release-age.py --min-age-days 7 --base-ref HEAD
+python3 assess-dependency-update.py --ecosystem rust --policy-mode elevated-risk
 
 cargo tree --depth 1
 cargo audit

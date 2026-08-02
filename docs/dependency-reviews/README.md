@@ -4,10 +4,19 @@ This directory contains checked-in review records for every deliberate
 dependency change in this repo and every dependency-tool install used by
 its workflow.
 
-The format and policy are inherited from [undertask's review process](https://github.com/rob-morris/undertask/tree/main/docs/dependency-reviews).
-Records here may **inherit** from undertask's records: a record for
-`serde @ 1.0.228` may cite undertask's matching record and skip the
-first-principles review.
+A review record is a short, dated Markdown file that captures why one exact
+crate version (or dependency tool) was accepted: its classification, the
+release-age check, the advisory and source review, the commands run, and the
+outcome. Each record is the durable evidence behind a single intake decision.
+
+A first-principles review — evaluating the target on its own merits — is the
+norm, and the default for any repo adopting cargo-barbican fresh. A record may
+instead **inherit** from a matching prior review when the source, exact
+version, and trust model all line up: it then cites that prior record and skips
+repeating the first-principles work. This repo's own records inherit some
+entries from undertask, the private predecessor project cargo-barbican grew out
+of; a repo with no such predecessor simply records first-principles reviews and
+leaves the inheritance fields empty.
 
 For later checked-pin enforcement, the machine-readable companion file is
 `reviewed-targets.toml` at the repo root. Active Rust families there carry:

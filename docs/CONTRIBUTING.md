@@ -47,10 +47,10 @@ Every direct dependency change, dependency-tool install, and `deny.toml`
 policy change needs a checked-in record under `docs/dependency-reviews/`
 before the change lands.
 
-Records may inherit from
-[undertask](https://github.com/rob-morris/undertask)'s review records when the
-source, version, and trust model match. First-principles reviews are required
-for anything outside that inherited set.
+First-principles reviews are the default. A record may instead inherit from a
+matching review in undertask (the private predecessor project cargo-barbican
+grew out of) when the source, version, and trust model match; anything outside
+that inherited set is reviewed first-principles.
 
 ## Version History
 

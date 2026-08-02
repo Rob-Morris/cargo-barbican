@@ -56,7 +56,7 @@
 
 ```bash
 cargo audit --version
-python3 /Users/robmorris/Development/undertask/scripts/check-crate-release-age.py --min-age-days 7 cargo-audit@0.22.1
+python3 check-crate-release-age.py --min-age-days 7 cargo-audit@0.22.1
 curl -L --max-time 30 https://crates.io/api/v1/crates/cargo-audit/0.22.1
 curl -L --max-time 30 https://crates.io/api/v1/crates/cargo-audit/0.22.1/download
 tar -tzf /tmp/cargo-audit-0.22.1.crate

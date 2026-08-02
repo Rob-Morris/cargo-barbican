@@ -19,13 +19,12 @@ the current contributor-facing constraints.
 ## Source Material
 
 cargo-barbican was extracted from the Rust supply-chain policy tooling in
-[`~/Development/undertask/scripts/`](https://github.com/rob-morris/undertask).
-undertask is the origin and a working reference, not the specification:
-cargo-barbican is a portable policy product in its own right and has grown a
-surface beyond the original scripts. Read undertask's scripts as reference
-before reinventing equivalent behaviour.
+undertask, a private predecessor project. undertask is the origin and a working
+reference, not the specification: cargo-barbican is a portable policy product in
+its own right and has grown a surface beyond the original scripts.
 
-Relevant undertask files:
+For maintainers with access to that private repo, the reference-implementation
+files worth consulting before reinventing equivalent behaviour are:
 
 - `scripts/check-crate-release-age.py`
 - `scripts/check-cargo-lock-release-age.py`

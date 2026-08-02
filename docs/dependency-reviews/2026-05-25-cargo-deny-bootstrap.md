@@ -64,7 +64,7 @@
 
 ```bash
 cargo deny --version
-python3 /Users/robmorris/Development/undertask/scripts/check-crate-release-age.py --min-age-days 7 cargo-deny@0.19.6
+python3 check-crate-release-age.py --min-age-days 7 cargo-deny@0.19.6
 rg -n 'package *= *"cargo-deny"|name *= *"cargo-deny"' ~/.cargo/advisory-db
 cargo deny check advisories bans sources
 ```

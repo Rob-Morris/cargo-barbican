@@ -17,8 +17,8 @@ constraints.
 
 A Cargo subcommand for Rust supply-chain hardening. Pure Rust. A portable,
 policy-first tool that gives a Rust repo one dependency-intake gate — extracted
-from [`undertask`](https://github.com/rob-morris/undertask)'s Rust scripts as
-its origin and reference, but a product in its own right, not a 1:1 port.
+from the Rust scripts in `undertask` (a private predecessor project) as its
+origin and reference, but a product in its own right, not a 1:1 port.
 
 The full current design, behaviour, and contributor constraints are in the
 architecture, functional, and contributor docs. This file is a route-map.
