@@ -16,6 +16,7 @@ routes to its artefacts.
 
 - [Contributing](CONTRIBUTING.md) — contributor entry point at the chosen location
 - [Changelog](CHANGELOG.md) — shipped version-history index with per-version files under `changelog/`
+- [Security Policy](../SECURITY.md) — private vulnerability reporting and supported release lines
 - [Design Brief](design.md) — compatibility pointer to the canonical design docs
 - [Integration Pointer](integration.md) — compatibility pointer to the canonical user integration guide
 

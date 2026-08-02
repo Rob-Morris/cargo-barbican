@@ -39,6 +39,10 @@ This repo follows the
 [`Agent-Ready Documentation Standard v1.0.0`](docs/standards/agent-ready-documentation.md).
 [`docs/README.md`](docs/README.md) is the documentation entry point.
 
+[`SECURITY.md`](SECURITY.md) is the security reporting surface: report suspected
+vulnerabilities privately through the channels it names, never in a public
+issue.
+
 ## Before Committing
 
 Follow [`.canaries/pre-commit.md`](.canaries/pre-commit.md), write
