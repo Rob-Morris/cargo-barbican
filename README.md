@@ -1,11 +1,22 @@
 # cargo-barbican
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.24.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.25.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
 repository one policy gate for deciding what can enter the dependency graph,
 what needs human review, and what must be blocked before build/test execution.
+
+> [!WARNING]
+> **Early insiders release — use at your own risk.** cargo-barbican is
+> pre-1.0 and distributed as an early-adopter build for maintainers who can
+> review the policy and CI changes it generates. Command surfaces, output
+> contracts, and config keys may change between releases without a
+> deprecation period. It is a policy checkpoint, not a security guarantee: a
+> passing gate does not certify a dependency is safe. Provided as-is with no
+> warranty of any kind — see [LICENSE](LICENSE). macOS and Linux are the
+> supported platforms; Windows is untested and experimental. Read
+> [Insiders Release Scope](#insiders-release-scope) before adopting it.
 
 Use it to:
 
@@ -74,7 +85,7 @@ support is explicitly delivered.
 Install the insiders release candidate from its immutable git tag:
 
 ```bash
-cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.25.0
 ```
 
 The tag is the install identity; do not replace it with a moving branch in
@@ -273,3 +284,26 @@ tools instead of becoming a cross-ecosystem package-management framework.
 - [docs/contributor/specification.md](docs/contributor/specification.md) — contributor constraints
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) — shipped version history
 - [AGENTS.md](AGENTS.md) — route-map for agents working in this repo
+
+## Security
+
+Report suspected vulnerabilities privately — please do not open a public
+issue. [SECURITY.md](SECURITY.md) names the reporting channels, the response
+windows you can expect, and which release lines receive fixes.
+
+## Contributing
+
+Contributions are welcome, and the bar for dependency changes is deliberately
+high — this repo runs its own gate on itself. Start with
+[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for the contributor workflow, then
+[docs/contributor/process.md](docs/contributor/process.md) for the commit-time
+checks and [docs/contributor/specification.md](docs/contributor/specification.md)
+for the constraints on new work.
+
+Every direct dependency change, dependency-tool install, and `deny.toml` policy
+change needs a checked-in review record under
+[docs/dependency-reviews/](docs/dependency-reviews/README.md) before it lands.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Rob Morris.

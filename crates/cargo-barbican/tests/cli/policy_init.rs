@@ -40,7 +40,7 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
     assert!(rendered.contains("- docs/dependency-reviews: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews/README.md: created\n"));
     assert!(rendered.contains(
-        "Review the manual adoption guide: https://github.com/rob-morris/cargo-barbican/blob/main/docs/user/adoption.md"
+        "Review the manual adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/main/docs/user/adoption.md"
     ));
     assert!(rendered.contains("Review current dependencies"));
     assert!(stderr.is_empty());
@@ -88,6 +88,10 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     let workflow = fs::read_to_string(temp_dir.join(".github/workflows/barbican.yml"))
         .expect("workflow should exist");
     for gate_command in [
+        // Without the all-targets fetch, the gate's frozen cross-platform
+        // metadata fails on any runner whose cache lacks other platforms'
+        // crates.
+        "cargo fetch --locked",
         "cargo barbican gatehouse pre-release",
         "cargo barbican age-lock --base-ref",
         "cargo barbican assess --base-ref",
@@ -105,7 +109,7 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     );
     assert!(!workflow.contains("cargo barbican inventory --enforce"));
     assert!(workflow.contains("cargo install --locked"));
-    assert!(workflow.contains("--tag v0.24.0"));
+    assert!(workflow.contains("--tag v0.25.0"));
     assert!(workflow.contains("cargo-deny@0.19.6"));
     assert!(workflow.contains("cargo-audit@0.22.1"));
     assert!(

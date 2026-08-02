@@ -70,4 +70,10 @@ jobs:
           cargo-deny@${{ env.CARGO_DENY_VERSION }}
       - name: Add audit tools to PATH
         run: echo "$HOME/.cargo-tools/bin" >> "$GITHUB_PATH"
+      - name: Fetch dependencies for every target platform
+        # The gate resolves frozen cross-platform cargo metadata, which needs
+        # every platform's crates in the local cache — including ones a build
+        # on this runner never downloads (e.g. Windows-only crates). Plain
+        # `cargo fetch` with no --target populates them all.
+        run: cargo fetch --locked
       - run: sh scripts/verify.sh

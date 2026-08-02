@@ -248,7 +248,10 @@ cargo barbican policy init [--ci <system>]
     The only supported value is `github`, which writes
     `.github/workflows/barbican.yml`: a workflow that installs cargo-barbican,
     cargo-deny, and cargo-audit with `--locked`, pins its third-party actions
-    by full commit SHA, and runs the gate —
+    by full commit SHA, fetches the locked dependency graph for every target
+    platform (`cargo fetch --locked` with no `--target`, because the gate
+    resolves frozen cross-platform cargo metadata and would otherwise fail on
+    a runner cache missing other platforms' crates), and runs the gate —
     `cargo barbican gatehouse pre-release`, plus `cargo barbican age-lock` and
     `cargo barbican assess` against the pull-request base. This flag is
     independent of the base scaffold above and of `barbican.toml` validity.
@@ -297,11 +300,14 @@ cargo barbican inventory [--enforce]
       expired, or stale, and separately reports each exception's binding state
       against the current lockfile (`resolved-target` matched or not matched)
       and review record (completed or not completed)
-    - reports advisory delegation config: selected lockfile scanner,
-      configured `cargo-deny` checks, unmanaged delegated-ignore policy,
-      native advisory ignores in `deny.toml` / `.cargo/audit.toml`, and whether
-      `cargo-deny` would use a checked-in `deny.toml` or Barbican's generated
-      default base for non-advisory posture
+    - reports advisory delegation config: selected lockfile scanner, the
+      resolved `cargo-deny` check set with its source (an explicit
+      `delegates.cargo_deny.checks` list, or the presence-driven default),
+      the licences posture (enforced, skipped, or disabled, with the reason),
+      unmanaged delegated-ignore policy, native advisory ignores in
+      `deny.toml` / `.cargo/audit.toml`, and whether `cargo-deny` would use a
+      checked-in `deny.toml` or Barbican's generated default base for
+      non-advisory posture
     Missing `reviewed-targets.toml` is not an error; the report states that no
     reviewed-target policy is configured yet. Malformed `reviewed-targets.toml`,
     malformed workspace manifests, and missing or malformed `Cargo.lock` fail
@@ -521,6 +527,15 @@ cargo barbican audit [--format text|json]
     advisory ignore. Accepted exceptions and native delegated ignores are
     rendered.
 
+    When `delegates.cargo_deny.checks` is unset, the `cargo-deny` check set
+    is presence-driven: `advisories`, `bans`, and `sources` always run, and
+    `licenses` joins them whenever the checked-in `deny.toml` declares a
+    `[licenses]` policy — a checked-in licence policy is expressed intent to
+    enforce it. An explicit `checks` list is authoritative in both
+    directions. Both report formats always state the resulting licences
+    posture (`enforced`, `skipped`, or `disabled`, with the reason), so the
+    effective state is never invisible.
+
     Before delegating, `audit` checks that each required scanner binary is on
     `PATH` (`cargo-deny` always; `cargo-audit` only when it is the configured
     lockfile scanner). A missing binary fails closed with an actionable
@@ -649,7 +664,7 @@ contract, not a routine rewording.
 - `cargo barbican audit --format json` emits a stable JSON report on stdout.
   Its top-level `schema_version` identifies the JSON contract version. Adding,
   removing, or renaming fields, changing field meaning, or changing existing
-  field types requires a new `schema_version`. In schema version `3`,
+  field types requires a new `schema_version`. In schema version `4`,
   consumers may rely on the top-level `schema_version`, `status` (`"pass"` or
   `"fail"`), `success`, `dependency_paths_available`,
   `remediations_available`, `findings`, `completeness_failures`,
@@ -660,6 +675,10 @@ contract, not a routine rewording.
   reviewed-exception object, remediation object, and `governed_exception` —
   `null`, or an object with a `command_hint` string for the `pin exception`
   scaffolder on unreviewed findings with RustSec-form ids.
+  Schema version `4` adds `cargo_deny.licenses`: an object with `posture`
+  (`"enforced"`, `"skipped"`, or `"disabled"`) and `reason`
+  (`"deny-toml-policy"`, `"explicit-checks"`, or `"no-deny-toml-policy"`)
+  reporting whether the `cargo-deny` licenses check ran and why.
   `remediation` is either `null` or an object with `kind`, `patched`,
   `target_crate`, `nearest_parent`, `command_hint`, and `blockers`.
   `target_crate` is the crate the suggested action applies to: the vulnerable

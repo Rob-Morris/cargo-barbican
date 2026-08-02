@@ -41,15 +41,17 @@ pub use assessment::{
 pub use cargo_config::{CargoConfigError, cargo_config_source_override_key};
 pub use config::{
     AdvisoryDelegatesConfig, BarbicanConfig, CargoDenyCheck, CargoDenyDelegatesConfig,
-    ConfigLoadError, DelegatesConfig, HighScrutinyConfig, LockfileAdvisoryScanner,
-    MAXIMUM_RELEASE_AGE_MINIMUM_DAYS, ReleaseAgeConfig, UnmanagedDelegatedPolicyMode,
+    CargoDenyLicensesPosture, ConfigLoadError, DEFAULT_CARGO_DENY_CHECKS, DelegatesConfig,
+    HighScrutinyConfig, LockfileAdvisoryScanner, MAXIMUM_RELEASE_AGE_MINIMUM_DAYS,
+    ReleaseAgeConfig, UnmanagedDelegatedPolicyMode,
 };
 pub use crates_io::{
     CrateRelease, CratesIoClient, CratesIoClientError, VersionInfo, parse_version_response_body,
     parse_versions_response_body,
 };
 pub use deny_config::{
-    CargoDenyRuntimeConfigError, advisory_ignores_from_toml, generate_cargo_deny_runtime_config,
+    CargoDenyRuntimeConfigError, advisory_ignores_from_toml, deny_toml_declares_licenses_policy,
+    generate_cargo_deny_runtime_config,
 };
 pub use inspect::{CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate_at};
 pub use inventory::{

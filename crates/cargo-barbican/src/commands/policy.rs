@@ -21,10 +21,10 @@ const DEFAULT_DEPENDENCY_REVIEWS_README: &str =
     include_str!("../../../../templates/dependency-reviews/README.md");
 
 const ADOPTION_GUIDE_PATH: &str =
-    "https://github.com/rob-morris/cargo-barbican/blob/main/docs/user/adoption.md";
+    "https://github.com/Rob-Morris/cargo-barbican/blob/main/docs/user/adoption.md";
 
 const PRE_COMMIT_HOOK_TEMPLATE_PATH: &str =
-    "https://github.com/rob-morris/cargo-barbican/blob/main/templates/hooks/pre-commit";
+    "https://github.com/Rob-Morris/cargo-barbican/blob/main/templates/hooks/pre-commit";
 
 const GITHUB_WORKFLOW_PATH: &str = ".github/workflows/barbican.yml";
 
@@ -33,7 +33,7 @@ const GITHUB_WORKFLOW_PATH: &str = ".github/workflows/barbican.yml";
 /// so the workflow's own `${{ ... }}` expressions pass through verbatim rather
 /// than colliding with Rust's format braces. Third-party actions are pinned by
 /// full commit SHA to match the repo's own dogfooded `ci.yml`.
-const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.24.0
+const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.25.0
 #
 # cargo-barbican enforcement gate (server-side, authoritative).
 #
@@ -77,9 +77,15 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Install cargo-barbican, cargo-deny, and cargo-audit
         run: |
-          cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0 cargo-barbican
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.25.0 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
+      - name: Fetch dependencies for every target platform
+        # The gate resolves frozen cross-platform cargo metadata, which needs
+        # every platform's crates in the local cache — including ones a build
+        # on this runner never downloads (e.g. Windows-only crates). Plain
+        # `cargo fetch` with no --target populates them all.
+        run: cargo fetch --locked
       - name: Pre-release supply-chain gate
         run: cargo barbican gatehouse pre-release
       - name: Age-lock and assess against the PR base
@@ -432,6 +438,10 @@ mod tests {
     #[test]
     fn github_ci_workflow_runs_the_enforcement_gate_with_pinned_actions() {
         for gate_command in [
+            // Fetching without --target pre-populates every platform's crates,
+            // so the gate's frozen cross-platform metadata resolves offline
+            // even on a cold runner cache.
+            "cargo fetch --locked",
             "cargo barbican gatehouse pre-release",
             "cargo barbican age-lock --base-ref",
             "cargo barbican assess --base-ref",
@@ -449,7 +459,7 @@ mod tests {
         );
         assert!(!GITHUB_CI_WORKFLOW.contains("cargo barbican inventory --enforce"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo install --locked"));
-        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.24.0"));
+        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.25.0"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-deny@0.19.6"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-audit@0.22.1"));
         // Third-party actions must stay pinned by full commit SHA with a

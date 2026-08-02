@@ -28,7 +28,7 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.25.0
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -47,7 +47,10 @@ cargo barbican policy init --ci github
 This writes `.github/workflows/barbican.yml` — a single fail-closed gate job
 that runs on pull requests and pushes to `main`, installs the tooling with
 `--locked`,
-pins its third-party actions by commit SHA, and runs `gatehouse pre-release`
+pins its third-party actions by commit SHA, fetches the locked dependency
+graph for every target platform (the gate resolves frozen cross-platform
+cargo metadata, so the cache must hold crates a build on the runner's own
+platform never downloads), and runs `gatehouse pre-release`
 plus `age-lock` and `assess`
 against the pull-request base. If the file already exists it is never
 overwritten: the command fails closed and re-prints the intended contents so
@@ -87,10 +90,17 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.25.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
+
+      - name: Fetch dependencies for every target platform
+        # The gate resolves frozen cross-platform cargo metadata, which needs
+        # every platform's crates in the local cache — including ones a build
+        # on this runner never downloads (e.g. Windows-only crates). Plain
+        # `cargo fetch` with no --target populates them all.
+        run: cargo fetch --locked
 
       - run: cargo barbican gatehouse pre-release
 
@@ -112,7 +122,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.25.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1

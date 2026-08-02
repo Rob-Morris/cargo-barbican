@@ -5,7 +5,7 @@ members = ["crates/barbican", "crates/cargo-barbican"]
 [workspace.package]
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/rob-morris/cargo-barbican"
+repository = "https://github.com/Rob-Morris/cargo-barbican"
 authors = ["Rob Morris <r@underware.gg>"]
 rust-version = "1.95"
 

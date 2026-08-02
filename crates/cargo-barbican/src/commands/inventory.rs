@@ -1,13 +1,15 @@
 use std::collections::BTreeSet;
+use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    BarbicanConfig, CargoManifestDirectRequirement, CargoManifestError, CargoManifestPackage,
-    Inventory, InventoryAdvisoryExceptionStatus, InventoryDirectRequirements, InventoryGap,
-    InventoryReadinessSummary, OffsetDateTime, WorkspacePackageIdentity, build_inventory,
-    build_inventory_graph_facts, check_reviewed_rust_targets, parse_cargo_metadata,
+    BarbicanConfig, CargoDenyCheck, CargoDenyLicensesPosture, CargoManifestDirectRequirement,
+    CargoManifestError, CargoManifestPackage, Inventory, InventoryAdvisoryExceptionStatus,
+    InventoryDirectRequirements, InventoryGap, InventoryReadinessSummary, OffsetDateTime,
+    WorkspacePackageIdentity, build_inventory, build_inventory_graph_facts,
+    check_reviewed_rust_targets, deny_toml_declares_licenses_policy, parse_cargo_metadata,
     parse_manifest_package_identity, parse_workspace_dependency_requirements,
     parse_workspace_package_version,
 };
@@ -63,6 +65,7 @@ pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
     let delegation_report = InventoryDelegationReport {
         config: &config,
         deny_toml_present: user_deny_toml.is_some(),
+        cargo_deny_resolution: resolve_cargo_deny_delegation(&config, user_deny_toml.as_deref())?,
         native_ignores: &native_ignores,
     };
     let readiness = inventory.readiness_summary();
@@ -716,7 +719,35 @@ fn render_advisory_exceptions(
 struct InventoryDelegationReport<'a> {
     config: &'a BarbicanConfig,
     deny_toml_present: bool,
+    cargo_deny_resolution: ResolvedCargoDenyDelegation,
     native_ignores: &'a [NativeDelegatedIgnore],
+}
+
+struct ResolvedCargoDenyDelegation {
+    checks: Vec<CargoDenyCheck>,
+    posture: CargoDenyLicensesPosture,
+    explicit: bool,
+}
+
+/// A malformed deny.toml has already failed the command closed inside
+/// `load_native_delegated_ignores`, so propagating the same parse error here
+/// keeps one fail-closed posture rather than inventing a degraded render.
+fn resolve_cargo_deny_delegation(
+    config: &BarbicanConfig,
+    user_deny_toml: Option<&str>,
+) -> Result<ResolvedCargoDenyDelegation, CommandError> {
+    let cargo_deny = &config.delegates.cargo_deny;
+    let declares_licenses_policy = match user_deny_toml {
+        Some(text) if !cargo_deny.is_explicit() => deny_toml_declares_licenses_policy(text)
+            .map_err(|error| CommandError::Io(io::Error::other(error)))?,
+        _ => false,
+    };
+
+    Ok(ResolvedCargoDenyDelegation {
+        checks: cargo_deny.resolved_checks(declares_licenses_policy),
+        posture: cargo_deny.licenses_posture(declares_licenses_policy),
+        explicit: cargo_deny.is_explicit(),
+    })
 }
 
 fn render_advisory_delegation(
@@ -732,16 +763,26 @@ fn render_advisory_delegation(
     .map_err(CommandError::Io)?;
     writeln!(
         stdout,
-        "  cargo-deny checks: {}",
+        "  cargo-deny checks: {} ({})",
         report
-            .config
-            .delegates
-            .cargo_deny
+            .cargo_deny_resolution
             .checks
             .iter()
             .map(|check| check.as_str())
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", "),
+        if report.cargo_deny_resolution.explicit {
+            "delegates.cargo_deny.checks"
+        } else {
+            "default"
+        }
+    )
+    .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  cargo-deny licenses check: {} ({})",
+        report.cargo_deny_resolution.posture.status(),
+        report.cargo_deny_resolution.posture.reason()
     )
     .map_err(CommandError::Io)?;
     writeln!(

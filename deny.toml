@@ -14,6 +14,26 @@ unmaintained = "workspace"
 unsound = "workspace"
 ignore = []
 
+[licenses]
+# Declaring this table is an expressed intent to enforce it: with no explicit
+# delegates.cargo_deny.checks list in barbican.toml, `cargo barbican audit`
+# runs the cargo-deny licenses check because this policy is present.
+#
+# The list is deliberately minimal — every entry is a licence the resolved
+# graph actually requires, so an unused entry is a signal to re-review rather
+# than dead permissiveness. Each is OSI-approved and permissive; no copyleft
+# licence is accepted. See docs/dependency-reviews/2026-08-03-licence-policy.md.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "ISC",
+  "Unicode-3.0",
+  "BSD-3-Clause",
+  "CDLA-Permissive-2.0",
+]
+# Flag entries that stop being needed, so the list tracks the real graph.
+unused-allowed-license = "warn"
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

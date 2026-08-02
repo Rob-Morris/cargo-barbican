@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.24.0
+# Synced from cargo-barbican v0.25.0
 # Review and edit this local policy after copying or running `cargo barbican policy init`.
 
 [release_age]
@@ -22,5 +22,8 @@ unmanaged_delegated_policy = "warn" # warn | deny | allow
 lockfile_scanner = "cargo-deny" # cargo-deny | cargo-audit | both
 
 [delegates.cargo_deny]
-# cargo-deny check groups Barbican runs and reconciles.
-checks = ["advisories", "bans", "sources"] # advisories | bans | sources | licenses
+# cargo-deny check groups Barbican runs and reconciles. Unset, the default is
+# advisories, bans, and sources, plus licenses whenever the checked-in
+# deny.toml declares a [licenses] policy. Set an explicit list to override in
+# either direction — an explicit list is authoritative.
+# checks = ["advisories", "bans", "sources"] # advisories | bans | sources | licenses

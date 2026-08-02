@@ -112,7 +112,7 @@ it treats native advisory suppression it finds in their config files.
 | --- | --- | --- |
 | `unmanaged_delegated_policy` | `"warn"` | `"warn"`, `"deny"`, `"allow"` |
 | `advisories.lockfile_scanner` | `"cargo-deny"` | `"cargo-deny"`, `"cargo-audit"`, `"both"` |
-| `cargo_deny.checks` | `["advisories", "bans", "sources"]` | array drawn from `"advisories"`, `"bans"`, `"sources"`, `"licenses"` |
+| `cargo_deny.checks` | unset — presence-driven (see below) | array drawn from `"advisories"`, `"bans"`, `"sources"`, `"licenses"` |
 
 **`unmanaged_delegated_policy`** controls how `audit` reports native advisory
 ignores found in a checked-in `deny.toml` (`[advisories] ignore`) or
@@ -133,16 +133,29 @@ runs and reconciles for lockfile advisory findings: `cargo-deny`,
 `audit` to succeed.
 
 **`cargo_deny.checks`** lists the `cargo-deny` check groups `audit` runs.
-Validation fails closed on:
+
+When the key is **unset** (the default), the check set is presence-driven:
+`advisories`, `bans`, and `sources` always run, and `licenses` joins them
+whenever the checked-in `deny.toml` declares a `[licenses]` policy. A
+checked-in licence policy is treated as expressed intent to enforce it — a
+repo cannot carry a `[licenses]` section that the gate silently never runs.
+With no `deny.toml`, or a `deny.toml` without a `[licenses]` table, the
+licenses check is skipped.
+
+An **explicit** list is authoritative in both directions: include
+`"licenses"` to run the check regardless of `deny.toml` content (with no
+checked-in `[licenses]` policy, the generated empty policy rejects every
+licence — fail closed), or omit it to skip the check even when `deny.toml`
+declares a policy. `audit` and `inventory` always report the resulting
+licences posture, so the effective state is never invisible.
+
+Validation of an explicit list fails closed on:
 
 - an **empty** list — `delegates.cargo_deny.checks must not be empty`;
 - **duplicate** entries;
 - a list that omits `"advisories"` while `advisories.lockfile_scanner` is
   `"cargo-deny"` or `"both"` — the scanner that owns advisory evidence must
   actually run the advisories check.
-
-`"licenses"` is valid but not in the default set; add it when the repo wants
-`cargo-deny` licence checking under the same `audit` invocation.
 
 ```toml
 [delegates]
@@ -176,10 +189,11 @@ unmanaged_delegated_policy = "warn"
 
 [delegates.advisories]
 lockfile_scanner = "cargo-deny"
-
-[delegates.cargo_deny]
-checks = ["advisories", "bans", "sources"]
 ```
+
+with the `cargo-deny` check set resolved from the checked-in `deny.toml`:
+`advisories`, `bans`, and `sources`, plus `licenses` when `deny.toml`
+declares a `[licenses]` policy.
 
 Minimal override — everything else keeps its default:
 
@@ -441,12 +455,14 @@ source supplied the minimum.
   `delegates.unmanaged_delegated_policy`. The same neutralise-and-report
   treatment applies to `.cargo/audit.toml` ignores when `cargo-audit` is
   the configured scanner.
-- **`[bans]` and `[sources]` (and `[licenses]`, when enabled) are trusted
-  as checked in.** The runtime config preserves the repo's non-advisory
-  posture from `deny.toml`; when no `deny.toml` exists, `audit` falls back
-  to a generated default base. This is why the `policy init` scaffold's
-  `deny.toml` carries bans/sources posture only and deliberately contains
-  no `[advisories]` section.
+- **`[bans]`, `[sources]`, and `[licenses]` are trusted as checked in.**
+  The runtime config preserves the repo's non-advisory posture from
+  `deny.toml`; when no `deny.toml` exists, `audit` falls back to a
+  generated default base. A checked-in `[licenses]` policy additionally
+  opts the repo into the licenses check by default (see
+  `cargo_deny.checks` above). This is why the `policy init` scaffold's
+  `deny.toml` carries bans/sources posture plus a commented `[licenses]`
+  example, and deliberately contains no `[advisories]` section.
 
 `inventory` reports this boundary without running the scanners: the
 configured scanner, checks, unmanaged-ignore policy, any native advisory

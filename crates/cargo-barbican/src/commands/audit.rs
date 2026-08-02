@@ -9,12 +9,13 @@ use std::process::ExitCode;
 use barbican::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
     AdvisoryFindingId, AdvisoryRemediation, AdvisoryRemediationBlocker, AdvisoryRemediationKind,
-    CargoDenyNoAdvisoryDiagnostic, ExactCrateSpec, LockfileAdvisoryScanner, MetadataDependencyPath,
-    MetadataRequirementEdge, OffsetDateTime, ReviewRecordFact, ReviewedAdvisoryException,
-    ReviewedTargets, RustReviewedTargetsReport, UnmanagedDelegatedPolicyMode, advisory_remediation,
-    check_reviewed_rust_targets, evaluate_advisory_audit, generate_cargo_deny_runtime_config,
-    parse_cargo_audit_json, parse_cargo_deny_json_lines, parse_cargo_metadata,
-    requirement_edges_onto, shortest_workspace_dependency_path,
+    CargoDenyLicensesPosture, CargoDenyNoAdvisoryDiagnostic, ExactCrateSpec,
+    LockfileAdvisoryScanner, MetadataDependencyPath, MetadataRequirementEdge, OffsetDateTime,
+    ReviewRecordFact, ReviewedAdvisoryException, ReviewedTargets, RustReviewedTargetsReport,
+    UnmanagedDelegatedPolicyMode, advisory_remediation, check_reviewed_rust_targets,
+    deny_toml_declares_licenses_policy, evaluate_advisory_audit,
+    generate_cargo_deny_runtime_config, parse_cargo_audit_json, parse_cargo_deny_json_lines,
+    parse_cargo_metadata, requirement_edges_onto, shortest_workspace_dependency_path,
 };
 use serde_json::json;
 
@@ -56,6 +57,20 @@ where
 
     let user_deny_toml = read_optional_text_no_symlink(current_dir, Path::new("deny.toml"))
         .map_err(CommandError::Io)?;
+    let declares_licenses_policy = user_deny_toml
+        .as_deref()
+        .map(deny_toml_declares_licenses_policy)
+        .transpose()
+        .map_err(|error| CommandError::Io(io::Error::other(error)))?
+        .unwrap_or(false);
+    let cargo_deny_checks = config
+        .delegates
+        .cargo_deny
+        .resolved_checks(declares_licenses_policy);
+    let licenses_posture = config
+        .delegates
+        .cargo_deny
+        .licenses_posture(declares_licenses_policy);
     let native_ignores = load_native_delegated_ignores(current_dir)?;
 
     if let Some(exit_code) = ensure_delegate_available(runner, Delegate::CargoDeny, stderr)? {
@@ -63,32 +78,27 @@ where
     }
 
     let scratch = ScratchDir::create("cargo-barbican-audit", false).map_err(CommandError::Io)?;
-    let generated_config = generate_cargo_deny_runtime_config(
-        user_deny_toml.as_deref(),
-        &config.delegates.cargo_deny.checks,
-    )
-    .map_err(|error| CommandError::Io(io::Error::other(error)))?;
+    let generated_config =
+        generate_cargo_deny_runtime_config(user_deny_toml.as_deref(), &cargo_deny_checks)
+            .map_err(|error| CommandError::Io(io::Error::other(error)))?;
     let generated_config_path = scratch.path().join("deny.toml");
     fs::write(&generated_config_path, generated_config).map_err(CommandError::Io)?;
 
-    let cargo_deny_report = match runner.cargo_deny_json(
-        current_dir,
-        &generated_config_path,
-        &config.delegates.cargo_deny.checks,
-    ) {
-        Ok(output) => match parse_cargo_deny_json_lines(&output.stderr) {
-            Ok(report) => report,
+    let cargo_deny_report =
+        match runner.cargo_deny_json(current_dir, &generated_config_path, &cargo_deny_checks) {
+            Ok(output) => match parse_cargo_deny_json_lines(&output.stderr) {
+                Ok(report) => report,
+                Err(error) => {
+                    return fail(
+                        stderr,
+                        delegate_output_failure(Delegate::CargoDeny, &output, &error.to_string()),
+                    );
+                }
+            },
             Err(error) => {
-                return fail(
-                    stderr,
-                    delegate_output_failure(Delegate::CargoDeny, &output, &error.to_string()),
-                );
+                return fail(stderr, format!("{}: {error}", Delegate::CargoDeny.binary()));
             }
-        },
-        Err(error) => {
-            return fail(stderr, format!("{}: {error}", Delegate::CargoDeny.binary()));
-        }
-    };
+        };
 
     let cargo_audit_report = if matches!(
         config.delegates.advisories.lockfile_scanner,
@@ -122,7 +132,7 @@ where
 
     let outcome = evaluate_advisory_audit(
         config.delegates.advisories.lockfile_scanner,
-        &config.delegates.cargo_deny.checks,
+        &cargo_deny_checks,
         Some(&cargo_deny_report),
         cargo_audit_report.as_ref(),
         &bound_exceptions,
@@ -168,6 +178,7 @@ where
                 &remediations,
                 &native_ignores,
                 config.delegates.unmanaged_delegated_policy,
+                licenses_posture,
             )?;
         }
         AuditOutputFormat::Json => render_audit_json_report(
@@ -178,6 +189,7 @@ where
             &remediations,
             &native_ignores,
             config.delegates.unmanaged_delegated_policy,
+            licenses_posture,
         )?,
     }
 
@@ -499,9 +511,17 @@ fn render_audit_report(
     remediations: &AdvisoryRemediationReport,
     native_ignores: &[NativeDelegatedIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
+    licenses_posture: CargoDenyLicensesPosture,
 ) -> Result<(), CommandError> {
     writeln!(stdout, "Audit: {}", if passed { "PASS" } else { "FAIL" })
         .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "cargo-deny licenses check: {} ({})",
+        licenses_posture.status(),
+        licenses_posture.reason()
+    )
+    .map_err(CommandError::Io)?;
 
     render_allowed_policy_exceptions(stdout, outcome.accepted_exceptions())?;
     render_native_ignores(stdout, native_ignores, unmanaged_policy)?;
@@ -593,6 +613,7 @@ fn render_audit_json_report(
     remediations: &AdvisoryRemediationReport,
     native_ignores: &[NativeDelegatedIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
+    licenses_posture: CargoDenyLicensesPosture,
 ) -> Result<(), CommandError> {
     let findings = outcome
         .reconciliation()
@@ -601,7 +622,7 @@ fn render_audit_json_report(
         .map(|disposition| finding_json(disposition, dependency_paths, remediations))
         .collect::<Vec<_>>();
     let report = json!({
-        "schema_version": 3,
+        "schema_version": 4,
         "status": if passed { "pass" } else { "fail" },
         "success": passed,
         "dependency_paths_available": dependency_paths.available,
@@ -613,6 +634,10 @@ fn render_audit_json_report(
             .map(render_completeness_failure)
             .collect::<Vec<_>>(),
         "cargo_deny": {
+            "licenses": {
+                "posture": licenses_posture.status(),
+                "reason": licenses_posture.reason_token(),
+            },
             "no_advisory_errors": outcome
                 .cargo_deny_no_advisory_errors()
                 .iter()

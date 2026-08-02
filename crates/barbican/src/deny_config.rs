@@ -40,6 +40,17 @@ pub fn generate_cargo_deny_runtime_config(
     toml::to_string_pretty(root).map_err(CargoDenyRuntimeConfigError::Serialize)
 }
 
+/// Any root `licenses` key counts as a declared policy: a malformed
+/// non-table value flows into the generated runtime config, where cargo-deny
+/// rejects it loudly, rather than being silently skipped here.
+pub fn deny_toml_declares_licenses_policy(text: &str) -> Result<bool, CargoDenyRuntimeConfigError> {
+    let root = toml::from_str::<Value>(text).map_err(CargoDenyRuntimeConfigError::Parse)?;
+    let root = root
+        .as_table()
+        .ok_or(CargoDenyRuntimeConfigError::ExpectedTable)?;
+    Ok(root.contains_key("licenses"))
+}
+
 pub fn advisory_ignores_from_toml(text: &str) -> Result<Vec<String>, CargoDenyRuntimeConfigError> {
     let root = toml::from_str::<Value>(text).map_err(CargoDenyRuntimeConfigError::Parse)?;
     let root = root
@@ -118,10 +129,35 @@ pub enum CargoDenyRuntimeConfigError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CargoDenyRuntimeConfigError, advisory_ignores_from_toml, generate_cargo_deny_runtime_config,
+        CargoDenyRuntimeConfigError, advisory_ignores_from_toml,
+        deny_toml_declares_licenses_policy, generate_cargo_deny_runtime_config,
     };
     use crate::CargoDenyCheck;
     use toml::Value;
+
+    #[test]
+    fn detects_declared_licenses_policy() {
+        assert!(
+            deny_toml_declares_licenses_policy("[licenses]\nallow = [\"MIT\"]\n")
+                .expect("deny.toml should parse")
+        );
+        assert!(
+            deny_toml_declares_licenses_policy("[licenses]\n").expect("deny.toml should parse")
+        );
+        assert!(
+            !deny_toml_declares_licenses_policy("[bans]\nwildcards = \"deny\"\n")
+                .expect("deny.toml should parse")
+        );
+        assert!(!deny_toml_declares_licenses_policy("").expect("empty deny.toml should parse"));
+    }
+
+    #[test]
+    fn declared_licenses_policy_detection_fails_closed_on_unparseable_toml() {
+        let error = deny_toml_declares_licenses_policy("[licenses\n")
+            .expect_err("malformed deny.toml should fail");
+
+        assert!(matches!(error, CargoDenyRuntimeConfigError::Parse(_)));
+    }
 
     #[test]
     fn forces_advisory_section_regardless_of_user_input() {

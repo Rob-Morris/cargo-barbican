@@ -29,6 +29,176 @@ fn audit_runs_cargo_deny_json_by_default() {
 }
 
 #[test]
+fn audit_auto_includes_licenses_check_when_deny_toml_declares_policy() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner =
+        FakeCommandRunner::default().with_cargo_deny_json(clean_cargo_deny_with_licenses_jsonl());
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    fs::write(
+        temp_dir.join("deny.toml"),
+        "[licenses]\nallow = [\"MIT\", \"Apache-2.0\"]\n",
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    let deny_calls = runner.recorded_deny_json_calls();
+    assert_eq!(deny_calls.len(), 1);
+    assert_eq!(
+        deny_calls[0].2,
+        vec![
+            barbican::CargoDenyCheck::Advisories,
+            barbican::CargoDenyCheck::Bans,
+            barbican::CargoDenyCheck::Sources,
+            barbican::CargoDenyCheck::Licenses,
+        ]
+    );
+    let generated_configs = runner.recorded_deny_json_config_texts();
+    assert_eq!(generated_configs.len(), 1);
+    assert!(generated_configs[0].contains("[licenses]"));
+    assert!(generated_configs[0].contains("Apache-2.0"));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(
+        rendered.contains(
+            "cargo-deny licenses check: enforced (deny.toml declares a [licenses] policy)"
+        )
+    );
+}
+
+#[test]
+fn audit_skips_licenses_check_without_a_declared_policy() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    fs::write(temp_dir.join("deny.toml"), "[bans]\nwildcards = \"deny\"\n")
+        .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    let deny_calls = runner.recorded_deny_json_calls();
+    assert_eq!(deny_calls.len(), 1);
+    assert!(
+        !deny_calls[0]
+            .2
+            .contains(&barbican::CargoDenyCheck::Licenses)
+    );
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(
+        rendered.contains("cargo-deny licenses check: skipped (no [licenses] policy in deny.toml)")
+    );
+}
+
+#[test]
+fn audit_explicit_checks_disable_licenses_despite_a_declared_policy() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.cargo_deny]
+checks = ["advisories", "bans", "sources"]
+"#,
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("deny.toml"),
+        "[licenses]\nallow = [\"MIT\"]\n",
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    let deny_calls = runner.recorded_deny_json_calls();
+    assert_eq!(deny_calls.len(), 1);
+    assert!(
+        !deny_calls[0]
+            .2
+            .contains(&barbican::CargoDenyCheck::Licenses)
+    );
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains(
+        "cargo-deny licenses check: disabled (delegates.cargo_deny.checks omits licenses)"
+    ));
+}
+
+#[test]
+fn audit_fails_on_licenses_rejections_when_policy_is_enforced() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner =
+        FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_licenses_error_jsonl());
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    fs::write(
+        temp_dir.join("deny.toml"),
+        "[licenses]\nallow = [\"MIT\"]\n",
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(
+        rendered.contains(
+            "cargo-deny licenses check: enforced (deny.toml declares a [licenses] policy)"
+        )
+    );
+    assert!(rendered.contains("FAIL cargo-deny licenses check reported 5 error(s)"));
+}
+
+#[test]
+fn audit_json_reports_enforced_licenses_posture_from_deny_toml_policy() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner =
+        FakeCommandRunner::default().with_cargo_deny_json(clean_cargo_deny_with_licenses_jsonl());
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    fs::write(
+        temp_dir.join("deny.toml"),
+        "[licenses]\nallow = [\"MIT\"]\n",
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+    assert_eq!(report["schema_version"], 4);
+    assert_eq!(
+        report["cargo_deny"]["licenses"],
+        serde_json::json!({ "posture": "enforced", "reason": "deny-toml-policy" })
+    );
+}
+
+#[test]
 fn audit_reports_failures() {
     let cli = Cli::parse_from(["cargo-barbican", "audit"]);
     let client = FakeCratesIoClient::default();
@@ -454,7 +624,7 @@ lockfile_scanner = "cargo-audit"
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
 
-    assert_eq!(report["schema_version"], 3);
+    assert_eq!(report["schema_version"], 4);
     assert_eq!(report["status"], "fail");
     assert_eq!(report["success"], false);
     assert_eq!(report["dependency_paths_available"], true);
@@ -492,7 +662,11 @@ lockfile_scanner = "cargo-audit"
     assert_eq!(report["completeness_failures"], serde_json::json!([]));
     assert_eq!(
         report["cargo_deny"],
-        serde_json::json!({ "no_advisory_errors": [], "non_advisory_errors": [] })
+        serde_json::json!({
+            "licenses": { "posture": "skipped", "reason": "no-deny-toml-policy" },
+            "no_advisory_errors": [],
+            "non_advisory_errors": []
+        })
     );
     assert_eq!(
         report["cargo_audit"],
@@ -880,7 +1054,7 @@ fn audit_json_outputs_null_remediation_when_patched_versions_are_empty() {
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
 
-    assert_eq!(report["schema_version"], 3);
+    assert_eq!(report["schema_version"], 4);
     assert!(
         report["findings"][0]["patched"]
             .as_array()

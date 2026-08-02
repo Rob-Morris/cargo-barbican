@@ -810,7 +810,10 @@ stale = [{ id = "RUSTSEC-2000-0001", review_by = "2000-01-01" }]
     assert!(stdout.contains("stale@1.0.0 RUSTSEC-2000-0001 family=stale-family review_record=docs/dependency-reviews/stale.md review_by=2000-01-01 status=stale resolved-target=not matched review-record=not-completed"));
     assert!(stdout.contains("Advisory delegation:"));
     assert!(stdout.contains("lockfile scanner: both"));
-    assert!(stdout.contains("cargo-deny checks: advisories, bans"));
+    assert!(stdout.contains("cargo-deny checks: advisories, bans (delegates.cargo_deny.checks)"));
+    assert!(stdout.contains(
+        "cargo-deny licenses check: disabled (delegates.cargo_deny.checks omits licenses)"
+    ));
     assert!(stdout.contains("unmanaged delegated policy: deny"));
     assert!(stdout.contains("native delegated advisory ignores:"));
     assert!(stdout.contains("deny.toml ignores RUSTSEC-2026-0001"));
@@ -873,6 +876,29 @@ loose = [{ id = "RUSTSEC-2027-0002", review_by = "2027-10-01" }]
 }
 
 #[test]
+fn inventory_reports_auto_included_licenses_check_from_deny_toml_policy() {
+    let temp_dir = fresh_temp_dir();
+    write_inventory_fixture(&temp_dir);
+    fs::write(
+        temp_dir.join("deny.toml"),
+        "[licenses]\nallow = [\"MIT\"]\n",
+    )
+    .expect("deny config should write");
+
+    let runner = FakeCommandRunner::default();
+    let (exit_code, stdout, stderr) = run_inventory_with_runner(&temp_dir, &runner);
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("cargo-deny checks: advisories, bans, sources, licenses (default)"));
+    assert!(
+        stdout.contains(
+            "cargo-deny licenses check: enforced (deny.toml declares a [licenses] policy)"
+        )
+    );
+}
+
+#[test]
 fn inventory_without_reviewed_targets_reports_no_policy() {
     let temp_dir = fresh_temp_dir();
     write_inventory_fixture(&temp_dir);
@@ -893,7 +919,10 @@ fn inventory_without_reviewed_targets_reports_no_policy() {
     assert!(stdout.contains("exceptions: none"));
     assert!(stdout.contains("Advisory delegation:"));
     assert!(stdout.contains("lockfile scanner: cargo-deny"));
-    assert!(stdout.contains("cargo-deny checks: advisories, bans, sources"));
+    assert!(stdout.contains("cargo-deny checks: advisories, bans, sources (default)"));
+    assert!(
+        stdout.contains("cargo-deny licenses check: skipped (no [licenses] policy in deny.toml)")
+    );
     assert!(stdout.contains("unmanaged delegated policy: warn"));
     assert!(stdout.contains("native delegated advisory ignores: none"));
     assert!(stdout.contains("live graph surface status: collected via cargo metadata --frozen"));

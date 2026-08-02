@@ -1272,6 +1272,18 @@ pub(crate) fn clean_cargo_deny_jsonl() -> &'static str {
 "#
 }
 
+pub(crate) fn clean_cargo_deny_with_licenses_jsonl() -> &'static str {
+    r#"{"type":"summary","fields":{"advisories":{"errors":0,"warnings":0,"helps":0,"notes":0},"bans":{"errors":0,"warnings":0,"helps":0,"notes":0},"sources":{"errors":0,"warnings":0,"helps":0,"notes":0},"licenses":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
+"#
+}
+
+pub(crate) fn cargo_deny_licenses_error_jsonl() -> String {
+    r#"{"type":"diagnostic","fields":{"severity":"error","code":"rejected"}}
+{"type":"summary","fields":{"advisories":{"errors":0,"warnings":0,"helps":0,"notes":0},"bans":{"errors":0,"warnings":0,"helps":0,"notes":0},"sources":{"errors":0,"warnings":0,"helps":0,"notes":0},"licenses":{"errors":5,"warnings":0,"helps":0,"notes":0}}}
+"#
+    .to_owned()
+}
+
 pub(crate) fn clean_cargo_audit_json() -> &'static str {
     r#"{
   "vulnerabilities": { "found": false, "count": 0, "list": [] },

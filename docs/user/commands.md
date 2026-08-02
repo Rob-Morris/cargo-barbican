@@ -1042,6 +1042,14 @@ expired. Native advisory ignores in `deny.toml` or `.cargo/audit.toml` are
 neutralised and reported according to
 `delegates.unmanaged_delegated_policy` (`warn` | `deny` | `allow`).
 
+By default `audit` runs the `cargo-deny` `advisories`, `bans`, and `sources`
+checks, and adds the `licenses` check whenever the checked-in `deny.toml`
+declares a `[licenses]` policy — a checked-in licence policy is enforced, not
+silently skipped. An explicit `delegates.cargo_deny.checks` list overrides
+this in either direction, and the report always states the resulting licences
+posture. See
+[configuration.md](configuration.md) for the resolution rules.
+
 To accept a finding when no patched release is adoptable yet, use the governed
 `cargo barbican pin exception` path rather than a native ignore.
 

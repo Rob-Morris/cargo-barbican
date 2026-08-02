@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.24.0
+# Synced from cargo-barbican v0.25.0
 # Runtime advisory checks are owned by cargo-barbican audit.
 #
 # Do not add [advisories] here to weaken advisory handling. During audit,
@@ -9,7 +9,15 @@
 # - unsound = "all"
 #
 # This checked-in file carries the non-advisory cargo-deny posture that
-# cargo-barbican preserves for bans and sources checks.
+# cargo-barbican preserves for bans, sources, and licenses checks.
+#
+# Declaring a [licenses] policy here is an expressed intent to enforce it:
+# unless barbican.toml sets an explicit delegates.cargo_deny.checks list,
+# audit runs the cargo-deny licenses check whenever this file carries a
+# [licenses] table, and skips it when there is none.
+#
+# [licenses]
+# allow = ["MIT", "Apache-2.0"]
 
 # Optional repo-specific graph scope. cargo-barbican preserves targets/features
 # scope but strips graph exclusion keys that can hide advisories.

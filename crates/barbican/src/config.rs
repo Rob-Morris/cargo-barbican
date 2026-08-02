@@ -86,20 +86,94 @@ pub enum LockfileAdvisoryScanner {
     Both,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct CargoDenyDelegatesConfig {
-    pub checks: Vec<CargoDenyCheck>,
+    pub checks: Option<Vec<CargoDenyCheck>>,
 }
 
-impl Default for CargoDenyDelegatesConfig {
-    fn default() -> Self {
-        Self {
-            checks: vec![
-                CargoDenyCheck::Advisories,
-                CargoDenyCheck::Bans,
-                CargoDenyCheck::Sources,
-            ],
+pub const DEFAULT_CARGO_DENY_CHECKS: [CargoDenyCheck; 3] = [
+    CargoDenyCheck::Advisories,
+    CargoDenyCheck::Bans,
+    CargoDenyCheck::Sources,
+];
+
+impl CargoDenyDelegatesConfig {
+    /// An explicit `checks` list is authoritative in both directions. When the
+    /// list is unset, a checked-in `[licenses]` policy is treated as expressed
+    /// intent to enforce it, so the licenses check joins the default set.
+    pub fn resolved_checks(&self, deny_toml_declares_licenses_policy: bool) -> Vec<CargoDenyCheck> {
+        match &self.checks {
+            Some(checks) => checks.clone(),
+            None => {
+                let mut checks = DEFAULT_CARGO_DENY_CHECKS.to_vec();
+                if deny_toml_declares_licenses_policy {
+                    checks.push(CargoDenyCheck::Licenses);
+                }
+                checks
+            }
+        }
+    }
+
+    pub fn licenses_posture(
+        &self,
+        deny_toml_declares_licenses_policy: bool,
+    ) -> CargoDenyLicensesPosture {
+        match &self.checks {
+            Some(checks) if checks.contains(&CargoDenyCheck::Licenses) => {
+                CargoDenyLicensesPosture::EnforcedExplicitChecks
+            }
+            Some(_) => CargoDenyLicensesPosture::DisabledExplicitChecks,
+            None if deny_toml_declares_licenses_policy => {
+                CargoDenyLicensesPosture::EnforcedDenyTomlPolicy
+            }
+            None => CargoDenyLicensesPosture::SkippedNoPolicy,
+        }
+    }
+
+    pub fn is_explicit(&self) -> bool {
+        self.checks.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CargoDenyLicensesPosture {
+    EnforcedDenyTomlPolicy,
+    EnforcedExplicitChecks,
+    SkippedNoPolicy,
+    DisabledExplicitChecks,
+}
+
+impl CargoDenyLicensesPosture {
+    pub fn is_enforced(self) -> bool {
+        matches!(
+            self,
+            Self::EnforcedDenyTomlPolicy | Self::EnforcedExplicitChecks
+        )
+    }
+
+    pub fn status(self) -> &'static str {
+        match self {
+            Self::EnforcedDenyTomlPolicy | Self::EnforcedExplicitChecks => "enforced",
+            Self::SkippedNoPolicy => "skipped",
+            Self::DisabledExplicitChecks => "disabled",
+        }
+    }
+
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::EnforcedDenyTomlPolicy => "deny.toml declares a [licenses] policy",
+            Self::EnforcedExplicitChecks => "delegates.cargo_deny.checks includes licenses",
+            Self::SkippedNoPolicy => "no [licenses] policy in deny.toml",
+            Self::DisabledExplicitChecks => "delegates.cargo_deny.checks omits licenses",
+        }
+    }
+
+    pub fn reason_token(self) -> &'static str {
+        match self {
+            Self::EnforcedDenyTomlPolicy => "deny-toml-policy",
+            Self::EnforcedExplicitChecks | Self::DisabledExplicitChecks => "explicit-checks",
+            Self::SkippedNoPolicy => "no-deny-toml-policy",
         }
     }
 }
@@ -140,32 +214,30 @@ impl BarbicanConfig {
             });
         }
 
-        if self.delegates.cargo_deny.checks.is_empty() {
-            return Err(ConfigLoadError::EmptyCargoDenyChecks);
-        }
+        if let Some(checks) = &self.delegates.cargo_deny.checks {
+            if checks.is_empty() {
+                return Err(ConfigLoadError::EmptyCargoDenyChecks);
+            }
 
-        let mut cargo_deny_checks = Vec::new();
-        for check in &self.delegates.cargo_deny.checks {
-            if cargo_deny_checks.contains(check) {
-                return Err(ConfigLoadError::DuplicateCargoDenyCheck {
-                    check: check.as_str(),
+            let mut cargo_deny_checks = Vec::new();
+            for check in checks {
+                if cargo_deny_checks.contains(check) {
+                    return Err(ConfigLoadError::DuplicateCargoDenyCheck {
+                        check: check.as_str(),
+                    });
+                }
+                cargo_deny_checks.push(*check);
+            }
+
+            if matches!(
+                self.delegates.advisories.lockfile_scanner,
+                LockfileAdvisoryScanner::CargoDeny | LockfileAdvisoryScanner::Both
+            ) && !checks.contains(&CargoDenyCheck::Advisories)
+            {
+                return Err(ConfigLoadError::CargoDenyAdvisoryCheckRequired {
+                    scanner: self.delegates.advisories.lockfile_scanner.as_str(),
                 });
             }
-            cargo_deny_checks.push(*check);
-        }
-
-        if matches!(
-            self.delegates.advisories.lockfile_scanner,
-            LockfileAdvisoryScanner::CargoDeny | LockfileAdvisoryScanner::Both
-        ) && !self
-            .delegates
-            .cargo_deny
-            .checks
-            .contains(&CargoDenyCheck::Advisories)
-        {
-            return Err(ConfigLoadError::CargoDenyAdvisoryCheckRequired {
-                scanner: self.delegates.advisories.lockfile_scanner.as_str(),
-            });
         }
 
         Ok(self)
@@ -206,8 +278,8 @@ impl LockfileAdvisoryScanner {
 #[cfg(test)]
 mod tests {
     use super::{
-        BarbicanConfig, CargoDenyCheck, ConfigLoadError, LockfileAdvisoryScanner,
-        UnmanagedDelegatedPolicyMode,
+        BarbicanConfig, CargoDenyCheck, CargoDenyLicensesPosture, ConfigLoadError,
+        LockfileAdvisoryScanner, UnmanagedDelegatedPolicyMode,
     };
 
     #[test]
@@ -229,14 +301,88 @@ mod tests {
             config.delegates.advisories.lockfile_scanner,
             LockfileAdvisoryScanner::CargoDeny
         );
+        assert_eq!(config.delegates.cargo_deny.checks, None);
         assert_eq!(
-            config.delegates.cargo_deny.checks,
+            config.delegates.cargo_deny.resolved_checks(false),
             vec![
                 CargoDenyCheck::Advisories,
                 CargoDenyCheck::Bans,
                 CargoDenyCheck::Sources,
             ]
         );
+    }
+
+    #[test]
+    fn unset_checks_resolve_licenses_from_deny_toml_policy_presence() {
+        let config = BarbicanConfig::from_toml_str("").expect("empty config should parse");
+
+        assert!(!config.delegates.cargo_deny.is_explicit());
+        assert_eq!(
+            config.delegates.cargo_deny.resolved_checks(true),
+            vec![
+                CargoDenyCheck::Advisories,
+                CargoDenyCheck::Bans,
+                CargoDenyCheck::Sources,
+                CargoDenyCheck::Licenses,
+            ]
+        );
+        assert_eq!(
+            config.delegates.cargo_deny.licenses_posture(true),
+            CargoDenyLicensesPosture::EnforcedDenyTomlPolicy
+        );
+        assert_eq!(
+            config.delegates.cargo_deny.licenses_posture(false),
+            CargoDenyLicensesPosture::SkippedNoPolicy
+        );
+    }
+
+    #[test]
+    fn explicit_checks_are_authoritative_in_both_directions() {
+        let with_licenses = BarbicanConfig::from_toml_str(
+            r#"
+[delegates.cargo_deny]
+checks = ["advisories", "bans", "sources", "licenses"]
+"#,
+        )
+        .expect("config should parse");
+        let without_licenses = BarbicanConfig::from_toml_str(
+            r#"
+[delegates.cargo_deny]
+checks = ["advisories", "bans", "sources"]
+"#,
+        )
+        .expect("config should parse");
+
+        for declares_policy in [false, true] {
+            assert!(
+                with_licenses
+                    .delegates
+                    .cargo_deny
+                    .resolved_checks(declares_policy)
+                    .contains(&CargoDenyCheck::Licenses)
+            );
+            assert_eq!(
+                with_licenses
+                    .delegates
+                    .cargo_deny
+                    .licenses_posture(declares_policy),
+                CargoDenyLicensesPosture::EnforcedExplicitChecks
+            );
+            assert!(
+                !without_licenses
+                    .delegates
+                    .cargo_deny
+                    .resolved_checks(declares_policy)
+                    .contains(&CargoDenyCheck::Licenses)
+            );
+            assert_eq!(
+                without_licenses
+                    .delegates
+                    .cargo_deny
+                    .licenses_posture(declares_policy),
+                CargoDenyLicensesPosture::DisabledExplicitChecks
+            );
+        }
     }
 
     #[test]
@@ -282,12 +428,12 @@ checks = ["advisories", "bans", "sources", "licenses"]
         );
         assert_eq!(
             config.delegates.cargo_deny.checks,
-            vec![
+            Some(vec![
                 CargoDenyCheck::Advisories,
                 CargoDenyCheck::Bans,
                 CargoDenyCheck::Sources,
                 CargoDenyCheck::Licenses,
-            ]
+            ])
         );
     }
 
@@ -418,7 +564,7 @@ checks = ["bans", "sources"]
         );
         assert_eq!(
             config.delegates.cargo_deny.checks,
-            vec![CargoDenyCheck::Bans, CargoDenyCheck::Sources]
+            Some(vec![CargoDenyCheck::Bans, CargoDenyCheck::Sources])
         );
     }
 
