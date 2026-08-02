@@ -16,6 +16,7 @@ fn pick_smoke_tests_fetch_versions_against_a_local_http_server() {
     let client = UreqCratesIoClient::new(base_url);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -52,6 +53,7 @@ fn pick_selects_newest_policy_compliant_version() {
     );
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -73,10 +75,54 @@ fn pick_selects_newest_policy_compliant_version() {
     assert!(rendered.contains("Pick serde@1.5.0"));
     assert!(rendered.contains("selected: serde@1.5.0"));
     assert!(rendered.contains("release age: OK   serde@1.5.0"));
-    assert!(rendered.contains("2.0.0: does not match requirement"));
     assert!(rendered.contains("1.6.0-alpha.1: pre-release"));
     assert!(rendered.contains("1.7.0: too fresh"));
     assert!(rendered.contains("1.4.0: yanked"));
+    // The single out-of-range 2.0.0 collapses into the summary line rather
+    // than an itemised "does not match requirement" entry.
+    assert!(rendered.contains("1 version excluded: outside requested range"));
+    assert!(!rendered.contains("does not match requirement"));
+}
+
+#[test]
+fn pick_collapses_multiple_out_of_range_versions_into_one_summary_line() {
+    let cli = Cli::parse_from(["cargo-barbican", "pick", "serde@^1"]);
+    let client = FakeCratesIoClient::default().with_versions(
+        "serde",
+        &[
+            ("3.0.0", "2020-05-01T00:00:00Z", false),
+            ("2.5.0", "2020-05-01T00:00:00Z", false),
+            ("2.0.0", "2020-05-01T00:00:00Z", false),
+            ("1.5.0", "2020-05-01T00:00:00Z", false),
+            ("1.4.0", "2020-05-01T00:00:00Z", true),
+        ],
+    );
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pick serde@1.5.0"));
+    // The yanked exclusion stays itemised while the three out-of-range
+    // versions (2.0.0, 2.5.0, 3.0.0) collapse into one summary line.
+    assert!(rendered.contains("- 1.4.0: yanked"));
+    assert!(rendered.contains("- 3 versions excluded: outside requested range"));
+    assert!(!rendered.contains("does not match requirement"));
 }
 
 #[test]
@@ -86,6 +132,7 @@ fn pick_fails_closed_when_no_version_satisfies_policy() {
         .with_versions("serde", &[("1.0.0", "2020-05-30T00:00:00Z", false)]);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -115,6 +162,7 @@ fn pick_reports_invalid_specs_before_fetching_versions() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -142,6 +190,7 @@ fn pick_reports_version_fetch_failures() {
     );
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -171,6 +220,7 @@ fn pick_escapes_untrusted_version_strings() {
     );
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 

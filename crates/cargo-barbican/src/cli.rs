@@ -33,7 +33,7 @@ pub(crate) enum Command {
         long_about = "Checks that each exact crate@version was published at least the \
             configured minimum number of days ago. A matching reviewed release-age exception in \
             reviewed-targets.toml can allow an otherwise too-fresh version when its review \
-            record exists and its checksum matches the fetched crates.io artefact."
+            record is completed and its checksum matches the fetched crates.io artefact."
     )]
     Age {
         #[arg(long, value_parser = min_age_days_parser(), help = MIN_AGE_DAYS_HELP)]
@@ -182,7 +182,15 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: GatehouseCommand,
     },
-    #[command(about = "Manage the explicit policy scaffold")]
+    #[command(
+        about = "Manage the explicit policy scaffold",
+        long_about = "policy manages the explicit on-disk policy scaffold a repo adopts \
+            cargo-barbican with. Its one subcommand, init, creates any missing barbican.toml, \
+            deny.toml, reviewed-targets.toml, and docs/dependency-reviews/ files — and, with \
+            --ci, a ready-to-run CI enforcement workflow — while preserving whatever is already \
+            present. It scaffolds structure only: it does not review, certify, or enforce any \
+            dependency. Run it once when first adopting cargo-barbican in a repo."
+    )]
     Policy {
         #[command(subcommand)]
         command: PolicyCommand,
@@ -192,11 +200,29 @@ pub(crate) enum Command {
         long_about = "Prints a read-only dependency inventory and reviewed-policy coverage \
             audit: direct dependency exact-pin status, resolved crates.io packages and \
             checksums, non-crates.io sources, reviewed-family coverage, declared allowed \
-            execution surfaces, missing review records, and live graph execution surfaces from \
-            cargo metadata --frozen. This is an audit view, not an enforcement gate."
+            execution surfaces, incomplete review records, and live graph execution surfaces from \
+            cargo metadata --frozen. Without --enforce this is an audit view, not an \
+            enforcement gate. With --enforce it also applies a coverage-floor gate that fails \
+            closed when a direct dependency has entered the graph without an active reviewed \
+            family covering it."
     )]
-    Inventory,
-    #[command(about = "Manage reviewed-target policy")]
+    Inventory {
+        #[arg(
+            long,
+            help = "Apply the coverage-floor gate and fail closed (exit 1) when a direct dependency lacks active reviewed-family coverage"
+        )]
+        enforce: bool,
+    },
+    #[command(
+        about = "Manage reviewed-target policy",
+        long_about = "pin manages reviewed-target policy: the reviewed families in \
+            reviewed-targets.toml and their checked-in review records that gate which crates \
+            may enter the dependency graph. add scaffolds a reviewed family and review-record \
+            stub for a crate already resolved in Cargo.lock; exception scaffolds a bounded, \
+            checksum-pinned acceptance of specific RustSec advisories for such a crate; and \
+            check enforces the active reviewed families against the current workspace manifests \
+            and Cargo.lock. Use add and exception to grow the policy, and check to enforce it."
+    )]
     Pin {
         #[command(subcommand)]
         command: PinCommand,
@@ -243,6 +269,16 @@ pub(crate) enum Command {
 #[derive(Debug, Subcommand)]
 pub(crate) enum GatehouseCommand {
     #[command(
+        about = "Run the standard pre-release supply-chain gate",
+        long_about = "Runs the standard pre-release workflow over the current Rust workspace: \
+            inventory --enforce for the direct-dependency coverage floor, audit for advisory and \
+            source-policy enforcement, then verify for reviewed-target, locked-build, and \
+            locked-test enforcement. The command fails fast at each gate. The base commands \
+            remain the canonical policy primitives; this command composes them without adding \
+            policy exceptions or changing their verdicts."
+    )]
+    PreRelease,
+    #[command(
         about = "Build a pre-add intake dossier for one exact crates.io candidate",
         long_about = "Builds a human-readable pre-add intake dossier combining exact candidate \
             inspection, an isolated disposable Cargo project pinned to =version, a generated \
@@ -259,9 +295,23 @@ pub(crate) enum PolicyCommand {
         about = "Create the explicit policy scaffold for adoption",
         long_about = "Creates missing barbican.toml, deny.toml, reviewed-targets.toml, and \
             docs/dependency-reviews/ files, preserving existing regular files and validating an \
-            existing barbican.toml. Does not review or certify existing dependencies."
+            existing barbican.toml. Does not review or certify existing dependencies. With \
+            --ci, also emits a ready-to-run CI enforcement workflow, failing closed rather than \
+            overwriting an existing workflow file."
     )]
-    Init,
+    Init {
+        #[arg(
+            long,
+            value_enum,
+            help = "Also emit a CI enforcement workflow that runs the gate (fails closed if the workflow file already exists)"
+        )]
+        ci: Option<CiSystem>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum CiSystem {
+    Github,
 }
 
 #[derive(Debug, Subcommand)]

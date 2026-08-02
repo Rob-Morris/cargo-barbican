@@ -38,9 +38,10 @@ impl RustReviewedTargetsReport {
 
     /// The one advisory-exception binding join: an exception is bound (safe to
     /// render or apply as an accepted policy exception) only when its
-    /// family's review record actually exists on disk, not merely referenced
-    /// in policy. `review_record_facts` carries that record-exists fact per
-    /// family, keeping the filesystem check itself in the shell.
+    /// family's review record is a completed review on disk, not merely
+    /// referenced in policy and not an unreviewed scaffold stub.
+    /// `review_record_facts` carries that per-family record status, keeping the
+    /// filesystem read itself in the shell.
     pub fn advisory_exceptions_bound_to_reviewed_records(
         &self,
         review_record_facts: &[ReviewRecordFact],
@@ -50,7 +51,7 @@ impl RustReviewedTargetsReport {
             .filter(|family| {
                 review_record_facts
                     .iter()
-                    .any(|fact| fact.family_name() == family.name() && fact.exists())
+                    .any(|fact| fact.family_name() == family.name() && fact.is_satisfied())
             })
             .flat_map(RustReviewedFamilyReport::advisory_exceptions_with_matching_resolved_target)
             .collect()
@@ -426,9 +427,10 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::{
-        CargoManifestDirectRequirement, CargoManifestError, ReviewRecordFact, Sha256Digest,
-        check_reviewed_rust_targets, parse_lockfile, parse_manifest_direct_requirements,
-        parse_manifest_patched_crate_names, parse_reviewed_targets_toml, patched_reviewed_crates,
+        CargoManifestDirectRequirement, CargoManifestError, ReviewRecordFact, ReviewRecordStatus,
+        Sha256Digest, check_reviewed_rust_targets, parse_lockfile,
+        parse_manifest_direct_requirements, parse_manifest_patched_crate_names,
+        parse_reviewed_targets_toml, patched_reviewed_crates,
     };
 
     fn manifest_requirements(
@@ -645,12 +647,12 @@ checksum = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
             ReviewRecordFact::new(
                 "serde-family".to_owned(),
                 "docs/dependency-reviews/2026-05-27-serde.md".to_owned(),
-                true,
+                ReviewRecordStatus::Completed,
             ),
             ReviewRecordFact::new(
                 "syn-family".to_owned(),
                 "docs/dependency-reviews/2026-05-27-syn.md".to_owned(),
-                false,
+                ReviewRecordStatus::Missing,
             ),
         ];
 
@@ -658,6 +660,54 @@ checksum = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
         assert_eq!(bound.len(), 1);
         assert_eq!(bound[0].spec().to_string(), "serde@1.0.228");
+    }
+
+    #[test]
+    fn advisory_exceptions_are_suppressed_for_unreviewed_scaffold_records() {
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+
+[rust.families.allowed_advisories]
+serde = [
+  { id = "RUSTSEC-2026-0001", review_by = "2026-09-21" },
+]
+"#,
+        )
+        .expect("reviewed targets should parse");
+        let manifest_requirements = manifest_requirements("").expect("manifest should parse");
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+"#,
+        )
+        .expect("lockfile should parse");
+
+        let report =
+            check_reviewed_rust_targets(&reviewed_targets, &manifest_requirements, &lockfile);
+        let review_record_facts = vec![ReviewRecordFact::new(
+            "serde-family".to_owned(),
+            "docs/dependency-reviews/2026-05-27-serde.md".to_owned(),
+            ReviewRecordStatus::ScaffoldPlaceholder,
+        )];
+
+        let bound = report.advisory_exceptions_bound_to_reviewed_records(&review_record_facts);
+
+        assert!(
+            bound.is_empty(),
+            "an unreviewed scaffold record must not bind a governed advisory exception"
+        );
     }
 
     #[test]

@@ -12,11 +12,11 @@ use super::{CommandError, escape_diagnostic_for_terminal};
 /// [`fail`]/`push_failed_inspect` (which already prepend it). Baking the
 /// prefix in here as well previously produced a doubled "FAIL FAIL " line
 /// at the two call sites that route the string through those wrappers.
-pub(crate) fn render_missing_release_age_exception_review_record(
+pub(crate) fn render_incomplete_release_age_exception_review_record(
     exception: &ReviewedReleaseAgeException,
 ) -> String {
     format!(
-        "allowed release-age exception review record missing for {}: {}",
+        "allowed release-age exception review record not completed for {}: {}",
         escape_render_field(&exception.spec().to_string()),
         escape_render_field(exception.review_record())
     )

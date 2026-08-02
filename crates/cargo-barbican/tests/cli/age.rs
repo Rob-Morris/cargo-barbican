@@ -7,6 +7,7 @@ fn age_reports_success_for_old_enough_versions() {
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-01T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -35,6 +36,7 @@ fn age_uses_barbican_config_minimum_days() {
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-22T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -77,6 +79,7 @@ fn age_allows_command_line_override_of_minimum_days() {
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-20T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -99,10 +102,13 @@ fn age_allows_command_line_override_of_minimum_days() {
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("OK   serde@1.0.228"));
     assert!(
-        String::from_utf8(stdout)
-            .expect("stdout should be utf8")
-            .contains("OK   serde@1.0.228")
+        rendered.contains(
+            "note: release-age minimum overridden to 3 days via --min-age-days (configured 30)"
+        ),
+        "a command-line override must announce itself against the configured value"
     );
 }
 
@@ -113,6 +119,7 @@ fn age_preserves_per_spec_failures() {
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-01T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -139,6 +146,7 @@ fn age_allows_too_fresh_release_with_reviewed_age_exception() {
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -177,6 +185,7 @@ fn age_does_not_honour_age_exception_with_missing_review_record() {
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -204,8 +213,58 @@ fn age_does_not_honour_age_exception_with_missing_review_record() {
     let rendered = String::from_utf8(stderr).expect("stderr should be utf8");
     assert_eq!(
         rendered,
-        "FAIL allowed release-age exception review record missing for serde@1.0.228: docs/dependency-reviews/2026-05-27-serde.md\n"
+        "FAIL allowed release-age exception review record not completed for serde@1.0.228: docs/dependency-reviews/2026-05-27-serde.md\n"
     );
+}
+
+#[test]
+fn age_does_not_honour_age_exception_with_unfinished_review_record() {
+    for content in [
+        String::new(),
+        format!("# Dependency Review\n\n{REVIEW_RECORD_SCAFFOLD_MARKER}\n"),
+    ] {
+        let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
+        let client = FakeCratesIoClient::default().with_release(
+            "serde@1.0.228",
+            "2020-05-26T00:00:00Z",
+            false,
+        );
+        let runner = FakeCommandRunner::default();
+        let temp_dir = fresh_temp_dir();
+        write_root_manifest(&temp_dir);
+        write_age_exception_policy(
+            &temp_dir,
+            "serde",
+            "1.0.228",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            true,
+        );
+        fs::write(
+            temp_dir.join("docs/dependency-reviews/2026-05-27-serde.md"),
+            content,
+        )
+        .expect("unfinished review record should write");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let exit_code = run_cli_with_runner_at(
+            cli,
+            &temp_dir,
+            &client,
+            &runner,
+            fixed_now(),
+            &mut stdout,
+            &mut stderr,
+        )
+        .expect("command should run");
+
+        assert_eq!(exit_code, ExitCode::from(1));
+        assert!(stdout.is_empty());
+        assert_eq!(
+            String::from_utf8(stderr).expect("stderr should be utf8"),
+            "FAIL allowed release-age exception review record not completed for serde@1.0.228: docs/dependency-reviews/2026-05-27-serde.md\n"
+        );
+    }
 }
 
 #[test]
@@ -215,6 +274,7 @@ fn age_ignores_missing_age_exception_record_when_release_is_old_enough() {
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-20T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -251,6 +311,7 @@ fn age_blocks_reviewed_age_exception_checksum_mismatch() {
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-26T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -291,6 +352,7 @@ fn age_rejects_malformed_age_exception_state() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -347,6 +409,7 @@ fn age_smoke_tests_the_ureq_client_against_a_local_http_server() {
     let client = UreqCratesIoClient::new(base_url);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -389,6 +452,7 @@ fn age_reports_http_statuses_from_the_ureq_client() {
     let client = UreqCratesIoClient::new(base_url);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -415,6 +479,7 @@ fn age_reports_client_failures_to_stderr() {
     );
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 

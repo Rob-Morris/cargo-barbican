@@ -5,9 +5,8 @@ use time::OffsetDateTime;
 
 use crate::{
     CargoDenyCheck, CargoDependencySourceKind, CargoManifestDirectRequirement, ExactCrateSpec,
-    ExactCrateSpecError, LockfileAdvisoryScanner, MetadataDependencyPath,
-    MetadataRequirementEdge, ReviewedAdvisoryException, RustSecAdvisoryId,
-    parse_exact_version_requirement,
+    ExactCrateSpecError, LockfileAdvisoryScanner, MetadataDependencyPath, MetadataRequirementEdge,
+    ReviewedAdvisoryException, RustSecAdvisoryId, parse_exact_version_requirement,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -504,7 +503,10 @@ fn requirement_patched_overlap(requirement: &str, patched_versions: &[String]) -
         let Some(patched_interval) = requirement_interval(patched) else {
             return PatchedOverlap::Indeterminate;
         };
-        if requirement_interval_value.intersect(patched_interval).is_some() {
+        if requirement_interval_value
+            .intersect(patched_interval)
+            .is_some()
+        {
             any_overlap = true;
         }
     }
@@ -634,9 +636,9 @@ pub fn advisory_remediation(
             )
             .is_some_and(|summary| summary.exact_pinned)
         } else {
-            known_member_requirements.iter().any(|requirement| {
-                parse_exact_version_requirement(crate_name, requirement).is_ok()
-            })
+            known_member_requirements
+                .iter()
+                .any(|requirement| parse_exact_version_requirement(crate_name, requirement).is_ok())
         };
     } else if edges.is_some() {
         is_direct = false;
@@ -1529,8 +1531,9 @@ mod tests {
         let manifest_requirements = direct_requirements("[dependencies]\nplist = \"1.9\"\n");
         let path = dependency_path_to_quick_xml();
 
-        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], Some(&path), None)
-            .expect("patched transitive finding should have remediation");
+        let remediation =
+            advisory_remediation(&finding, &manifest_requirements, &[], Some(&path), None)
+                .expect("patched transitive finding should have remediation");
 
         assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
         assert_eq!(remediation.target_crate(), "plist");
@@ -1830,9 +1833,7 @@ mod tests {
         assert_eq!(remediation.nearest_parent(), Some("plist"));
     }
 
-    fn quick_xml_requirement_edges(
-        plist_requirement: &str,
-    ) -> Vec<crate::MetadataRequirementEdge> {
+    fn quick_xml_requirement_edges(plist_requirement: &str) -> Vec<crate::MetadataRequirementEdge> {
         let metadata = parse_cargo_metadata(&format!(
             r#"{{
   "packages": [
@@ -1868,8 +1869,9 @@ mod tests {
         let manifest_requirements = direct_requirements("[dependencies]\nquick-xml = \"0.41\"\n");
         let path = dependency_path_to_quick_xml();
 
-        let remediation = advisory_remediation(&finding, &manifest_requirements, &[], Some(&path), None)
-            .expect("patched transitive duplicate should have remediation");
+        let remediation =
+            advisory_remediation(&finding, &manifest_requirements, &[], Some(&path), None)
+                .expect("patched transitive duplicate should have remediation");
 
         assert_eq!(remediation.kind(), AdvisoryRemediationKind::TransitiveBump);
         assert_eq!(remediation.target_crate(), "plist");

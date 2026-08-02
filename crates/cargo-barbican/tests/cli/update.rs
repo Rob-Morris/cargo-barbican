@@ -13,6 +13,7 @@ fn update_updates_selected_package_and_rechecks_the_lockfile_diff() {
             "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
         )]));
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -49,6 +50,50 @@ fn update_updates_selected_package_and_rechecks_the_lockfile_diff() {
 }
 
 #[test]
+fn update_labels_the_pre_check_and_recheck_as_distinct_phases() {
+    let cli = Cli::parse_from(["cargo-barbican", "update", "serde@1.0.228"]);
+    let client =
+        FakeCratesIoClient::default().with_release("serde@1.0.228", "2020-05-01T00:00:00Z", false);
+    let runner = FakeCommandRunner::default()
+        .with_updated_lockfile(&lockfile_with_packages(&[("serde", "1.0.228", true)]))
+        .with_cargo_metadata(&metadata_with_packages(&[(
+            "serde",
+            "1.0.228",
+            "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        )]));
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_packages(&[("serde", "1.0.227", true)]),
+    )
+    .expect("current lockfile should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    let pre_check = rendered
+        .find("Release-age check for requested versions:")
+        .expect("pre-check phase label should be present");
+    let recheck = rendered
+        .find("Release-age recheck for newly selected versions:")
+        .expect("recheck phase label should be present");
+    assert!(
+        pre_check < recheck,
+        "the pre-check label should precede the recheck label"
+    );
+    // Both phases still run their own release-age check, so the OK line
+    // appears once per phase rather than being de-duplicated away.
+    assert_eq!(rendered.matches("OK   serde@1.0.228").count(), 2);
+}
+
+#[test]
 fn update_honours_min_age_override_for_both_age_checks() {
     let cli = Cli::parse_from([
         "cargo-barbican",
@@ -67,6 +112,7 @@ fn update_honours_min_age_override_for_both_age_checks() {
             "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
         )]));
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -130,6 +176,7 @@ fn update_recheck_flags_too_fresh_transitive_selection_under_injected_clock() {
             "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
         )]));
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -177,6 +224,7 @@ fn update_dry_run_previews_lockfile_diff_without_mutating_repo() {
             "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
         )]));
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let original_lockfile = lockfile_with_packages(&[("serde", "1.0.227", true)]);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -227,6 +275,7 @@ fn update_dry_run_escapes_bidi_and_zero_width_controls_in_lockfile_diff() {
             "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
         )]));
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let original_lockfile = lockfile_with_packages(&[("serde", "1.0.227", true)]);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -267,6 +316,7 @@ fn update_dry_run_reports_when_no_lockfile_change_would_be_made() {
             "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
         )]));
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -301,13 +351,15 @@ fn update_restores_original_lockfile_when_age_recheck_errors() {
             "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
         )]));
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let original_lockfile = lockfile_with_packages(&[("serde", "1.0.227", true)]);
-    // The pre-flight release-age check (before cargo_update_precise mutates
-    // Cargo.lock) renders exactly one "OK ..." stdout line for this single,
-    // already-allowed spec. Let that one write through so the induced
-    // failure lands on the post-mutation recheck instead, which is the path
-    // this test exists to exercise.
-    let mut stdout = FailAfterWriter::new(1);
+    // Before cargo_update_precise mutates Cargo.lock, this single
+    // already-allowed spec renders three stdout lines: the pre-check phase
+    // label, its one "OK ..." line, and the recheck phase label (written after
+    // the mutation). Let those three write through so the induced failure
+    // lands on the post-mutation recheck's "OK ..." line instead, which is the
+    // path this test exists to exercise.
+    let mut stdout = FailAfterWriter::new(3);
     let mut stderr = Vec::new();
 
     fs::write(temp_dir.join("Cargo.lock"), &original_lockfile)

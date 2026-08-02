@@ -6,6 +6,7 @@ fn verify_fails_when_reviewed_targets_manifest_is_absent() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -178,6 +179,72 @@ serde = "1.0.228"
     assert!(stderr.is_empty());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("Pin check: FAIL"));
+    assert_eq!(*runner.build_calls.borrow(), 0);
+    assert_eq!(*runner.test_calls.borrow(), 0);
+}
+
+#[test]
+fn verify_stops_before_build_on_an_unreviewed_scaffold_record() {
+    let cli = Cli::parse_from(["cargo-barbican", "verify"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[(
+            "serde",
+            "1.0.228",
+            Some("registry+https://github.com/rust-lang/crates.io-index"),
+            Some(checksum),
+        )]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        format!(
+            r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = {{ version = "1.0.228", checksum_sha256 = "{checksum}" }}
+"#
+        ),
+    )
+    .expect("reviewed targets should write");
+    let record_path = temp_dir.join("docs/dependency-reviews/2026-05-27-serde.md");
+    fs::create_dir_all(record_path.parent().expect("record has a parent"))
+        .expect("record dir should create");
+    fs::write(
+        &record_path,
+        format!(
+            "# Dependency Review: serde 1.0.228\n\n<!-- {REVIEW_RECORD_SCAFFOLD_MARKER}: complete this scaffold. -->\n\n## Summary\n"
+        ),
+    )
+    .expect("scaffold stub should write");
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Pin check: FAIL"));
+    assert!(rendered.contains("is an unreviewed scaffold"));
     assert_eq!(*runner.build_calls.borrow(), 0);
     assert_eq!(*runner.test_calls.borrow(), 0);
 }

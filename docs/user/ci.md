@@ -28,13 +28,36 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/rob-morris/cargo-barbican --branch main
-cargo install --locked cargo-deny cargo-audit
+cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0
+cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
 See [integration.md](integration.md#prerequisites) for the review-then-pin
 rationale for `cargo-deny` and `cargo-audit`, and what it looks like when
 `audit` cannot find them.
+
+## Generating the workflow
+
+The fastest way to get a working gate is to let cargo-barbican emit it:
+
+```bash
+cargo barbican policy init --ci github
+```
+
+This writes `.github/workflows/barbican.yml` — a single fail-closed gate job
+that runs on pull requests and pushes to `main`, installs the tooling with
+`--locked`,
+pins its third-party actions by commit SHA, and runs `gatehouse pre-release`
+plus `age-lock` and `assess`
+against the pull-request base. If the file already exists it is never
+overwritten: the command fails closed and re-prints the intended contents so
+you can reconcile the difference by hand.
+
+The generated workflow deliberately has no scheduled job. `audit`'s verdict can
+change with no repo change (see above), so add a nightly `audit` run as shown in
+the worked example below. Everything else in the worked example mirrors the
+generated gate; treat it as the version to adapt when your repo already has
+workflow files.
 
 ## Worked example
 
@@ -57,18 +80,27 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Full history so age-lock and assess can diff against the PR base.
+          fetch-depth: 0
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/rob-morris/cargo-barbican --branch main
+          cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
-        run: cargo install --locked cargo-deny cargo-audit
+        run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 
-      - run: cargo barbican pin check
-      - run: cargo barbican audit
-      - run: cargo barbican verify
+      - run: cargo barbican gatehouse pre-release
+
+      - name: Age-lock and assess against the PR base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          cargo barbican age-lock --base-ref "$BASE_SHA"
+          cargo barbican assess --base-ref "$BASE_SHA"
 
   audit-nightly:
     # Advisory landscape can change with no repo change, so this also runs on
@@ -76,29 +108,41 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/rob-morris/cargo-barbican --branch main
+          cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
-        run: cargo install --locked cargo-deny cargo-audit
+        run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 
       - run: cargo barbican audit
 ```
 
-<!-- PRE-RELEASE: cargo-barbican is not yet publicly released and no v* git
-     tag is cut, so the install lines above pin to a branch rather than a
-     tag. Once a public release ships, restore the --tag install line to
-     match README.md. Tracked in the brain project release checklist. -->
-
 Notes on this layout:
 
-- `pin check` is run explicitly before `audit` and `verify` here for a
-  readable failure signal (a pin-check failure surfaces on its own step);
-  `verify` re-runs the same reviewed-target gate before its build/test steps
-  regardless, so this is not required for correctness.
+- `gatehouse pre-release` enforces the inventory coverage floor, then runs
+  blocking `audit` and blocking `verify`; `verify` includes the reviewed-target
+  `pin check` before its build/test steps. The scheduled job still runs
+  standalone `audit` because the advisory landscape can change without a repo
+  change.
+- The Gatehouse inventory step fails closed
+  (`Inventory: FAIL`) when a direct dependency has entered the graph without an
+  active reviewed family — the shape a raw `cargo add` of an unreviewed crate
+  takes. Optional, development, build, and target-specific declarations are
+  included because they can execute on developer or CI hosts. Declared
+  execution-surface enforcement is a documented follow-up. The floor is
+  deterministic, so it belongs in the pull-request Gatehouse job, not the
+  nightly audit-only job.
+- `age-lock` and `assess` run against the pull-request base — `fetch-depth: 0`
+  gives the checkout enough history to diff against it — so a lockfile-only
+  change that pulled unreviewed transitive crates into `Cargo.lock` is caught
+  rather than slipping past the deterministic gates. `age-lock` catches
+  too-fresh selections a raw `cargo update` introduced; `assess` classifies the
+  whole dependency diff (new sources, execution surfaces, yanked or unreviewed
+  crates). They only have a base to diff against on pull requests, so both are
+  guarded with `if: github.event_name == 'pull_request'`.
 - The pull-request job does not need `--locked` reinstalls to be cached
   identically to the scheduled job, but pinning both jobs to the same install
   lines keeps the two runs comparable.
@@ -108,19 +152,36 @@ Notes on this layout:
 
 ## Pre-commit hook
 
-For local enforcement before a commit reaches CI at all, add a pre-commit hook
-that runs the deterministic gates:
+For fast local feedback before a commit reaches CI, cargo-barbican ships an
+advisory client-side pre-commit hook at `templates/hooks/pre-commit`. It runs
+the cheap subset of the gate — `pin check` and `inventory --enforce` — so
+obvious policy breaks surface at commit time:
 
-```bash
+```sh
 #!/bin/sh
 set -eu
 cargo barbican pin check
-cargo barbican verify
+cargo barbican inventory --enforce
 ```
 
-Leave `audit` out of the pre-commit hook. It is slower (it shells out to
-`cargo-deny` and `cargo-audit`) and its verdict can change independently of
-what the commit touches, which makes a pre-commit failure confusing when
-nothing in the commit is at fault. Run `audit` in CI (and nightly) instead,
-where an advisory-driven failure is expected and actionable rather than
-surprising at commit time.
+The hook ships in the template set but is not auto-installed; `policy init`
+points at it. Get the file into the repo, then enable it one of two ways:
+
+```bash
+# Option A: point git at the directory holding the hook
+git config core.hooksPath <directory containing the hook>
+
+# Option B: copy it into the repo's git hooks and make it executable
+cp templates/hooks/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+The hook is advisory and skippable with `git commit --no-verify`, and coding
+agents skip hooks routinely — so it is a convenience, not the gate. The
+authoritative, unskippable gate is the server-side workflow above. The hook
+deliberately leaves out `verify` (a full `cargo build` and `cargo test`, too
+slow for every commit) and `audit` (slower, and its verdict can change
+independently of what the commit touches, which makes a commit-time failure
+confusing when nothing in the commit is at fault). Run those two in CI, where an
+advisory-driven failure is expected and actionable rather than surprising at
+commit time.

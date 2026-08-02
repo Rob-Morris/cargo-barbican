@@ -308,9 +308,12 @@ fn assess_policy_mode_elevated_risk_accepts_elevated_risk_findings() {
 }
 
 #[test]
-fn assess_allows_reviewed_execution_surfaces_when_review_record_exists() {
-    let (exit_code, rendered, stderr) =
-        run_allowed_surface_assess("1.2.3", true, &["build-rs", "proc-macro", "native-sys"]);
+fn assess_allows_reviewed_execution_surfaces_when_review_record_is_completed() {
+    let (exit_code, rendered, stderr) = run_allowed_surface_assess(
+        "1.2.3",
+        Some("# Dependency Review\n"),
+        &["build-rs", "proc-macro", "native-sys"],
+    );
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(stderr.is_empty());
@@ -467,7 +470,7 @@ fn assess_does_not_honour_age_exception_with_missing_review_record() {
     let stderr = String::from_utf8(stderr).expect("stderr should be utf8");
     assert_eq!(
         stderr,
-        "FAIL allowed release-age exception review record missing for serde@1.0.228: docs/dependency-reviews/2026-05-27-serde.md\n"
+        "FAIL allowed release-age exception review record not completed for serde@1.0.228: docs/dependency-reviews/2026-05-27-serde.md\n"
     );
 }
 
@@ -556,18 +559,31 @@ fn assess_blocks_reviewed_age_exception_checksum_mismatch() {
 
 #[test]
 fn assess_fails_closed_when_applicable_allowed_surface_review_record_is_missing() {
-    let (exit_code, stdout, stderr) = run_allowed_surface_assess("1.2.3", false, &["build-rs"]);
+    let (exit_code, stdout, stderr) = run_allowed_surface_assess("1.2.3", None, &["build-rs"]);
 
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stdout.is_empty());
     assert!(stderr.contains(
-        "FAIL allowed policy exception review record missing for native-sys@1.2.3: docs/dependency-reviews/2026-05-27-native.md"
+        "FAIL allowed policy exception review record not completed for native-sys@1.2.3: docs/dependency-reviews/2026-05-27-native.md"
+    ));
+}
+
+#[test]
+fn assess_rejects_allowed_surface_with_pending_review_record() {
+    let pending_record = format!("# Dependency Review\n\n{REVIEW_RECORD_SCAFFOLD_MARKER}\n");
+    let (exit_code, stdout, stderr) =
+        run_allowed_surface_assess("1.2.3", Some(&pending_record), &["build-rs"]);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains(
+        "FAIL allowed policy exception review record not completed for native-sys@1.2.3: docs/dependency-reviews/2026-05-27-native.md"
     ));
 }
 
 #[test]
 fn assess_does_not_fail_for_unrelated_missing_review_record() {
-    let (exit_code, rendered, stderr) = run_allowed_surface_assess("1.2.4", false, &["build-rs"]);
+    let (exit_code, rendered, stderr) = run_allowed_surface_assess("1.2.4", None, &["build-rs"]);
 
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stderr.is_empty());

@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::metadata::metadata_packages;
+use crate::metadata::{metadata_packages, workspace_direct_dependencies};
+use crate::review_record::ReviewRecordStatus;
 use crate::{
     CargoDependencySourceKind, CargoManifestDirectRequirement, ExactCrateSpec,
-    ExecutionSurfaceKind, Lockfile, MetadataPackageSurfaces, RustReviewedTargetsReport,
-    Sha256Digest, parse_exact_version_requirement,
+    ExecutionSurfaceKind, Lockfile, MetadataDirectDependency, MetadataPackageSurfaces,
+    RustReviewedTargetsReport, Sha256Digest, parse_exact_version_requirement,
 };
 use time::{Duration, OffsetDateTime};
 
@@ -20,6 +21,8 @@ pub struct Inventory {
     advisory_exceptions: Vec<InventoryAdvisoryException>,
     declared_surfaces: Vec<InventoryDeclaredSurface>,
     live_surfaces: Option<Vec<InventoryLiveSurface>>,
+    resolved_direct_dependencies: Option<Vec<MetadataDirectDependency>>,
+    graph_facts_error: Option<String>,
     gaps: Vec<InventoryGap>,
 }
 
@@ -93,6 +96,209 @@ impl Inventory {
                 .count(),
             gaps: self.gaps.len(),
         }
+    }
+
+    /// The `inventory --enforce` coverage floor: the pure pass/fail decision
+    /// over already-computed inventory facts. The floor fails closed when no
+    /// reviewed-target policy is configured, exact direct-dependency facts
+    /// could not be collected, any crates.io direct dependency lacks active
+    /// reviewed-family coverage, or any external-source direct dependency is
+    /// present. Enforcement of undeclared execution surfaces is a documented
+    /// follow-up: surfaces stay observationally reported here and are not
+    /// gated (see docs/functional/cli.md).
+    pub fn coverage_floor(&self) -> InventoryCoverageFloor {
+        let uncovered_specs = self
+            .gaps
+            .iter()
+            .filter_map(|gap| match gap {
+                InventoryGap::UncoveredResolvedCrate { spec } => Some(spec),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        let mut uncovered_direct_dependencies = Vec::new();
+        let mut external_non_crates_io_direct_dependencies = Vec::new();
+
+        for dependency in self.resolved_direct_dependencies.iter().flatten() {
+            if dependency.is_workspace_member() {
+                continue;
+            }
+            if dependency.is_crates_io() {
+                if uncovered_specs.contains(dependency.spec()) {
+                    uncovered_direct_dependencies.push(dependency.spec().clone());
+                }
+            } else {
+                external_non_crates_io_direct_dependencies
+                    .push(InventoryNonCratesIoSource::from(dependency));
+            }
+        }
+
+        InventoryCoverageFloor {
+            policy_configured: self.policy_configured,
+            graph_facts_collected: self.resolved_direct_dependencies.is_some(),
+            graph_facts_error: self.graph_facts_error.clone(),
+            uncovered_direct_dependencies,
+            external_non_crates_io_direct_dependencies,
+        }
+    }
+
+    /// Domain-owned readiness classification for gate and report consumers.
+    /// Categories are exclusive: direct coverage failures belong to the
+    /// coverage floor, while the remaining gaps are enforced, observational,
+    /// or unclassified when graph facts cannot establish the distinction.
+    pub fn readiness_summary(&self) -> InventoryReadinessSummary {
+        let coverage_floor = self.coverage_floor();
+        let uncovered_direct = coverage_floor
+            .uncovered_direct_dependencies()
+            .iter()
+            .collect::<BTreeSet<_>>();
+        let external_direct = coverage_floor
+            .external_non_crates_io_direct_dependencies()
+            .iter()
+            .map(|source| (source.name(), source.version(), source.source()))
+            .collect::<BTreeSet<_>>();
+        let mut unclassified_uncovered_crates_io = 0;
+        let mut unclassified_non_crates_io_sources = 0;
+        let mut uncovered_transitive_crates_io = 0;
+        let mut undeclared_execution_surfaces = 0;
+        let mut incomplete_review_records = 0;
+        let mut other_observational_findings = 0;
+
+        for gap in &self.gaps {
+            match gap {
+                InventoryGap::UncoveredResolvedCrate { .. }
+                    if !coverage_floor.graph_facts_collected() =>
+                {
+                    unclassified_uncovered_crates_io += 1;
+                }
+                InventoryGap::UncoveredResolvedCrate { spec }
+                    if !uncovered_direct.contains(spec) =>
+                {
+                    uncovered_transitive_crates_io += 1;
+                }
+                InventoryGap::UncoveredResolvedCrate { .. } => {}
+                InventoryGap::UndeclaredExecutionSurface { .. } => {
+                    undeclared_execution_surfaces += 1;
+                }
+                InventoryGap::IncompleteReviewRecord { .. } => {
+                    incomplete_review_records += 1;
+                }
+                InventoryGap::NonExactDirectPin { .. } => {
+                    other_observational_findings += 1;
+                }
+                InventoryGap::NonCratesIoSource { .. }
+                    if !coverage_floor.graph_facts_collected() =>
+                {
+                    unclassified_non_crates_io_sources += 1;
+                }
+                InventoryGap::NonCratesIoSource {
+                    name,
+                    version,
+                    source,
+                } if !external_direct.contains(&(
+                    name.as_str(),
+                    version.as_str(),
+                    source.as_deref(),
+                )) =>
+                {
+                    other_observational_findings += 1;
+                }
+                InventoryGap::NonCratesIoSource { .. } => {}
+            }
+        }
+
+        InventoryReadinessSummary {
+            coverage_floor,
+            unclassified_uncovered_crates_io,
+            unclassified_non_crates_io_sources,
+            uncovered_transitive_crates_io,
+            undeclared_execution_surfaces,
+            incomplete_review_records,
+            other_observational_findings,
+        }
+    }
+}
+
+/// The decision produced by [`Inventory::coverage_floor`]. `passed` is the
+/// gate; the offending crates let the binary name each one and teach the fix.
+/// It fails closed on an uncovered crates.io direct dependency and on any
+/// external (git / alternate-registry / external-path) direct dependency,
+/// which a crates.io reviewed family cannot cover.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryCoverageFloor {
+    policy_configured: bool,
+    graph_facts_collected: bool,
+    graph_facts_error: Option<String>,
+    uncovered_direct_dependencies: Vec<ExactCrateSpec>,
+    external_non_crates_io_direct_dependencies: Vec<InventoryNonCratesIoSource>,
+}
+
+impl InventoryCoverageFloor {
+    pub fn passed(&self) -> bool {
+        self.policy_configured
+            && self.graph_facts_collected
+            && self.uncovered_direct_dependencies.is_empty()
+            && self.external_non_crates_io_direct_dependencies.is_empty()
+    }
+
+    pub fn policy_configured(&self) -> bool {
+        self.policy_configured
+    }
+
+    pub fn graph_facts_collected(&self) -> bool {
+        self.graph_facts_collected
+    }
+
+    pub fn graph_facts_error(&self) -> Option<&str> {
+        self.graph_facts_error.as_deref()
+    }
+
+    pub fn uncovered_direct_dependencies(&self) -> &[ExactCrateSpec] {
+        &self.uncovered_direct_dependencies
+    }
+
+    pub fn external_non_crates_io_direct_dependencies(&self) -> &[InventoryNonCratesIoSource] {
+        &self.external_non_crates_io_direct_dependencies
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryReadinessSummary {
+    coverage_floor: InventoryCoverageFloor,
+    unclassified_uncovered_crates_io: usize,
+    unclassified_non_crates_io_sources: usize,
+    uncovered_transitive_crates_io: usize,
+    undeclared_execution_surfaces: usize,
+    incomplete_review_records: usize,
+    other_observational_findings: usize,
+}
+
+impl InventoryReadinessSummary {
+    pub fn coverage_floor(&self) -> &InventoryCoverageFloor {
+        &self.coverage_floor
+    }
+
+    pub fn unclassified_uncovered_crates_io(&self) -> usize {
+        self.unclassified_uncovered_crates_io
+    }
+
+    pub fn unclassified_non_crates_io_sources(&self) -> usize {
+        self.unclassified_non_crates_io_sources
+    }
+
+    pub fn uncovered_transitive_crates_io(&self) -> usize {
+        self.uncovered_transitive_crates_io
+    }
+
+    pub fn undeclared_execution_surfaces(&self) -> usize {
+        self.undeclared_execution_surfaces
+    }
+
+    pub fn incomplete_review_records(&self) -> usize {
+        self.incomplete_review_records
+    }
+
+    pub fn other_observational_findings(&self) -> usize {
+        self.other_observational_findings
     }
 }
 
@@ -178,6 +384,14 @@ pub struct InventoryNonCratesIoSource {
 }
 
 impl InventoryNonCratesIoSource {
+    fn from_spec_and_source(spec: &ExactCrateSpec, source: Option<&str>) -> Self {
+        Self {
+            name: spec.crate_name().to_owned(),
+            version: spec.version().to_owned(),
+            source: source.map(str::to_owned),
+        }
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -191,11 +405,23 @@ impl InventoryNonCratesIoSource {
     }
 }
 
+impl From<&MetadataDirectDependency> for InventoryNonCratesIoSource {
+    fn from(dependency: &MetadataDirectDependency) -> Self {
+        Self::from_spec_and_source(dependency.spec(), dependency.source())
+    }
+}
+
+impl From<&crate::LockedPackage> for InventoryNonCratesIoSource {
+    fn from(package: &crate::LockedPackage) -> Self {
+        Self::from_spec_and_source(package.exact_spec(), package.source.as_deref())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryReviewedFamily {
     name: String,
     review_record: String,
-    review_record_exists: bool,
+    review_record_completed: bool,
     direct_count: usize,
     resolved_count: usize,
 }
@@ -209,8 +435,8 @@ impl InventoryReviewedFamily {
         &self.review_record
     }
 
-    pub fn review_record_exists(&self) -> bool {
-        self.review_record_exists
+    pub fn review_record_completed(&self) -> bool {
+        self.review_record_completed
     }
 
     pub fn direct_count(&self) -> usize {
@@ -239,7 +465,7 @@ pub struct InventoryAdvisoryException {
     review_by: time::Date,
     status: InventoryAdvisoryExceptionStatus,
     resolved_target_matches: bool,
-    review_record_exists: bool,
+    review_record_completed: bool,
 }
 
 impl InventoryAdvisoryException {
@@ -271,8 +497,8 @@ impl InventoryAdvisoryException {
         self.resolved_target_matches
     }
 
-    pub fn review_record_exists(&self) -> bool {
-        self.review_record_exists
+    pub fn review_record_completed(&self) -> bool {
+        self.review_record_completed
     }
 }
 
@@ -320,7 +546,7 @@ impl InventoryLiveSurface {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InventoryGap {
-    MissingReviewRecord {
+    IncompleteReviewRecord {
         family: String,
         review_record: String,
     },
@@ -349,7 +575,7 @@ pub enum InventoryGap {
 impl InventoryGap {
     pub fn is_policy_relative(&self) -> bool {
         match self {
-            Self::MissingReviewRecord { .. } | Self::UncoveredResolvedCrate { .. } => true,
+            Self::IncompleteReviewRecord { .. } | Self::UncoveredResolvedCrate { .. } => true,
             Self::UndeclaredExecutionSurface {
                 policy_configured, ..
             } => *policy_configured,
@@ -372,15 +598,15 @@ impl InventoryNonCratesIoSource {
 pub struct ReviewRecordFact {
     family_name: String,
     review_record: String,
-    exists: bool,
+    status: ReviewRecordStatus,
 }
 
 impl ReviewRecordFact {
-    pub fn new(family_name: String, review_record: String, exists: bool) -> Self {
+    pub fn new(family_name: String, review_record: String, status: ReviewRecordStatus) -> Self {
         Self {
             family_name,
             review_record,
-            exists,
+            status,
         }
     }
 
@@ -392,19 +618,47 @@ impl ReviewRecordFact {
         &self.review_record
     }
 
-    pub fn exists(&self) -> bool {
-        self.exists
+    pub fn status(&self) -> ReviewRecordStatus {
+        self.status
+    }
+
+    /// True only for a completed record. A missing, empty, or scaffold-stub
+    /// record fails closed, so an unfinished scaffold cannot satisfy the gate.
+    pub fn is_satisfied(&self) -> bool {
+        self.status.is_satisfied()
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphSurfaces {
-    surfaces: BTreeMap<ExactCrateSpec, MetadataPackageSurfaces>,
+pub struct InventoryGraphFacts {
+    surfaces: Result<BTreeMap<ExactCrateSpec, MetadataPackageSurfaces>, String>,
+    direct_dependencies: Result<Vec<MetadataDirectDependency>, String>,
 }
 
-impl GraphSurfaces {
-    pub fn surfaces(&self) -> impl Iterator<Item = (&ExactCrateSpec, &MetadataPackageSurfaces)> {
-        self.surfaces.iter()
+impl InventoryGraphFacts {
+    pub fn unavailable(reason: String) -> Self {
+        Self {
+            surfaces: Err(reason.clone()),
+            direct_dependencies: Err(reason),
+        }
+    }
+
+    pub fn surfaces(
+        &self,
+    ) -> Option<impl Iterator<Item = (&ExactCrateSpec, &MetadataPackageSurfaces)>> {
+        self.surfaces.as_ref().ok().map(BTreeMap::iter)
+    }
+
+    pub fn surface_error(&self) -> Option<&str> {
+        self.surfaces.as_ref().err().map(String::as_str)
+    }
+
+    pub fn direct_dependencies(&self) -> Option<&[MetadataDirectDependency]> {
+        self.direct_dependencies.as_deref().ok()
+    }
+
+    pub fn direct_dependency_error(&self) -> Option<&str> {
+        self.direct_dependencies.as_ref().err().map(String::as_str)
     }
 }
 
@@ -445,7 +699,7 @@ pub fn build_inventory(
     reviewed_report: Option<&RustReviewedTargetsReport>,
     review_record_facts: &[ReviewRecordFact],
     now: OffsetDateTime,
-    surfaces: Option<&GraphSurfaces>,
+    graph_facts: Option<&InventoryGraphFacts>,
 ) -> Inventory {
     let workspace_requirements_by_name = direct_requirements
         .workspace
@@ -518,9 +772,9 @@ pub fn build_inventory(
     if let Some(reviewed_report) = reviewed_report {
         for family in reviewed_report.families() {
             let record_fact = review_facts_by_family.get(family.name()).copied();
-            let review_record_exists = record_fact.is_some_and(ReviewRecordFact::exists);
-            if !review_record_exists {
-                gaps.push(InventoryGap::MissingReviewRecord {
+            let review_record_completed = record_fact.is_some_and(ReviewRecordFact::is_satisfied);
+            if !review_record_completed {
+                gaps.push(InventoryGap::IncompleteReviewRecord {
                     family: family.name().to_owned(),
                     review_record: family.review_record().to_owned(),
                 });
@@ -532,7 +786,7 @@ pub fn build_inventory(
             reviewed_families.push(InventoryReviewedFamily {
                 name: family.name().to_owned(),
                 review_record: family.review_record().to_owned(),
-                review_record_exists,
+                review_record_completed,
                 direct_count: family.direct_checks().len(),
                 resolved_count: family.resolved_checks().len(),
             });
@@ -552,7 +806,7 @@ pub fn build_inventory(
                             now,
                         ),
                         resolved_target_matches: binding.resolved_target_matches(),
-                        review_record_exists,
+                        review_record_completed,
                     }
                 },
             ));
@@ -596,7 +850,7 @@ pub fn build_inventory(
                 continue;
             }
 
-            let entry = non_crates_io_source_from_package(package);
+            let entry = InventoryNonCratesIoSource::from(package);
             gaps.push(entry.as_gap());
             non_crates_io_sources.push(entry);
         }
@@ -613,9 +867,10 @@ pub fn build_inventory(
             .then_with(|| left.surface.cmp(&right.surface))
             .then_with(|| left.family.cmp(&right.family))
     });
-    let live_surfaces = surfaces.map(|surfaces| {
+    let live_surfaces = graph_facts.and_then(|graph_facts| {
+        let surfaces = graph_facts.surfaces()?;
         let mut live_surfaces = Vec::new();
-        for (spec, package_surfaces) in surfaces.surfaces() {
+        for (spec, package_surfaces) in surfaces {
             for surface in package_surfaces.surface_kinds(spec) {
                 let declared = declared_surface_keys.contains(&(spec.clone(), surface));
                 if !declared {
@@ -637,7 +892,7 @@ pub fn build_inventory(
                 .cmp(&right.spec)
                 .then_with(|| left.surface.cmp(&right.surface))
         });
-        live_surfaces
+        Some(live_surfaces)
     });
 
     Inventory {
@@ -649,6 +904,12 @@ pub fn build_inventory(
         advisory_exceptions,
         declared_surfaces,
         live_surfaces,
+        resolved_direct_dependencies: graph_facts
+            .and_then(InventoryGraphFacts::direct_dependencies)
+            .map(<[_]>::to_vec),
+        graph_facts_error: graph_facts
+            .and_then(InventoryGraphFacts::direct_dependency_error)
+            .map(str::to_owned),
         gaps,
     }
 }
@@ -672,16 +933,22 @@ fn advisory_exception_status(
     }
 }
 
-pub fn build_graph_surfaces(
+pub fn build_inventory_graph_facts(
     metadata: &crate::CargoMetadata,
-) -> Result<GraphSurfaces, crate::ExactCrateSpecError> {
+    lockfile: &Lockfile,
+) -> Result<InventoryGraphFacts, crate::CargoMetadataError> {
     let mut surfaces = BTreeMap::new();
     for package in metadata_packages(metadata) {
         if package.is_workspace_member {
             continue;
         }
 
-        let spec = ExactCrateSpec::from_parts(package.name, package.version)?;
+        let spec = ExactCrateSpec::from_parts(package.name, package.version).map_err(|source| {
+            crate::CargoMetadataError::InvalidPackageSpec {
+                package_id: format!("{}@{}", package.name, package.version),
+                source,
+            }
+        })?;
         surfaces
             .entry(spec)
             .and_modify(|existing: &mut MetadataPackageSurfaces| {
@@ -690,15 +957,11 @@ pub fn build_graph_surfaces(
             .or_insert(package.surfaces);
     }
 
-    Ok(GraphSurfaces { surfaces })
-}
-
-fn non_crates_io_source_from_package(package: &crate::LockedPackage) -> InventoryNonCratesIoSource {
-    InventoryNonCratesIoSource {
-        name: package.name.clone(),
-        version: package.version.clone(),
-        source: package.source.clone(),
-    }
+    Ok(InventoryGraphFacts {
+        surfaces: Ok(surfaces),
+        direct_dependencies: workspace_direct_dependencies(metadata, lockfile)
+            .map_err(|error| error.to_string()),
+    })
 }
 
 #[cfg(test)]
@@ -707,9 +970,9 @@ mod tests {
 
     use crate::{
         InventoryAdvisoryExceptionStatus, InventoryDirectRequirements, InventoryGap,
-        ReviewRecordFact, WorkspacePackageIdentity, build_graph_surfaces, build_inventory,
-        check_reviewed_rust_targets, parse_cargo_metadata, parse_lockfile,
-        parse_manifest_direct_requirements, parse_reviewed_targets_toml,
+        ReviewRecordFact, ReviewRecordStatus, WorkspacePackageIdentity, build_inventory,
+        build_inventory_graph_facts, check_reviewed_rust_targets, parse_cargo_metadata,
+        parse_lockfile, parse_manifest_direct_requirements, parse_reviewed_targets_toml,
     };
     use time::OffsetDateTime;
 
@@ -770,7 +1033,6 @@ covered = { version = "1.0.0", checksum_sha256 = "0123456789abcdef0123456789abcd
         .expect("reviewed targets should parse");
         let reviewed_report =
             check_reviewed_rust_targets(&reviewed_targets, &requirements, &lockfile);
-
         let inventory = build_inventory(
             &lockfile,
             InventoryDirectRequirements::new(&requirements, &[]),
@@ -779,7 +1041,7 @@ covered = { version = "1.0.0", checksum_sha256 = "0123456789abcdef0123456789abcd
             &[ReviewRecordFact::new(
                 "covered-family".to_owned(),
                 "docs/dependency-reviews/covered.md".to_owned(),
-                false,
+                ReviewRecordStatus::Missing,
             )],
             inventory_now(),
             None,
@@ -791,8 +1053,15 @@ covered = { version = "1.0.0", checksum_sha256 = "0123456789abcdef0123456789abcd
         assert_eq!(inventory.rollup().observational_findings, 2);
         assert_eq!(inventory.rollup().policy_coverage_gaps, 2);
         assert_eq!(inventory.rollup().gaps, 4);
+        let readiness = inventory.readiness_summary();
+        assert_eq!(readiness.unclassified_uncovered_crates_io(), 1);
+        assert_eq!(readiness.unclassified_non_crates_io_sources(), 1);
+        assert_eq!(readiness.uncovered_transitive_crates_io(), 0);
+        assert_eq!(readiness.undeclared_execution_surfaces(), 0);
+        assert_eq!(readiness.incomplete_review_records(), 1);
+        assert_eq!(readiness.other_observational_findings(), 1);
         assert!(inventory.gaps().iter().any(|gap| {
-            matches!(gap, InventoryGap::MissingReviewRecord { family, .. } if family == "covered-family")
+            matches!(gap, InventoryGap::IncompleteReviewRecord { family, .. } if family == "covered-family")
         }));
         assert!(inventory.gaps().iter().any(|gap| {
             matches!(gap, InventoryGap::UncoveredResolvedCrate { spec } if spec.to_string() == "uncovered@2.0.0")
@@ -813,6 +1082,253 @@ covered = { version = "1.0.0", checksum_sha256 = "0123456789abcdef0123456789abcd
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn coverage_floor_passes_when_every_direct_dependency_is_covered() {
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = ["covered"]
+
+[[package]]
+name = "covered"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+[[package]]
+name = "transitive"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
+"#,
+        )
+        .expect("lockfile should parse");
+        let requirements = parse_manifest_direct_requirements(
+            "Cargo.toml",
+            r#"
+[dependencies]
+covered = "=1.0.0"
+"#,
+        )
+        .expect("manifest should parse")
+        .into_iter()
+        .collect::<Vec<_>>();
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "covered-family"
+review_record = "docs/dependency-reviews/covered.md"
+
+[rust.families.direct]
+covered = "=1.0.0"
+
+[rust.families.resolved]
+covered = { version = "1.0.0", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+        )
+        .expect("reviewed targets should parse");
+        let reviewed_report =
+            check_reviewed_rust_targets(&reviewed_targets, &requirements, &lockfile);
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name":"root","id":"path+file:///repo#root@0.1.0","version":"0.1.0","source":null,"targets":[],"dependencies":[{"name":"covered","req":"=1.0.0","kind":null,"optional":false,"source":"registry+https://github.com/rust-lang/crates.io-index"}]},
+    {"name":"covered","id":"registry+https://github.com/rust-lang/crates.io-index#covered@1.0.0","version":"1.0.0","source":"registry+https://github.com/rust-lang/crates.io-index","targets":[]},
+    {"name":"transitive","id":"registry+https://github.com/rust-lang/crates.io-index#transitive@2.0.0","version":"2.0.0","source":"registry+https://github.com/rust-lang/crates.io-index","targets":[]}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {"nodes":[
+    {"id":"path+file:///repo#root@0.1.0","deps":[
+      {"name":"covered","pkg":"registry+https://github.com/rust-lang/crates.io-index#covered@1.0.0"}
+    ]},
+    {"id":"registry+https://github.com/rust-lang/crates.io-index#covered@1.0.0","deps":[{"name":"transitive","pkg":"registry+https://github.com/rust-lang/crates.io-index#transitive@2.0.0"}]},
+    {"id":"registry+https://github.com/rust-lang/crates.io-index#transitive@2.0.0","deps":[]}
+  ]}
+}"#,
+        )
+        .expect("metadata should parse");
+        let graph_facts =
+            build_inventory_graph_facts(&metadata, &lockfile).expect("graph facts should build");
+
+        let inventory = build_inventory(
+            &lockfile,
+            InventoryDirectRequirements::new(&requirements, &[]),
+            &BTreeSet::from([WorkspacePackageIdentity::new(
+                "root".to_owned(),
+                "0.1.0".to_owned(),
+            )]),
+            Some(&reviewed_report),
+            &[ReviewRecordFact::new(
+                "covered-family".to_owned(),
+                "docs/dependency-reviews/covered.md".to_owned(),
+                ReviewRecordStatus::Completed,
+            )],
+            inventory_now(),
+            Some(&graph_facts),
+        );
+
+        let floor = inventory.coverage_floor();
+        assert!(floor.passed());
+        assert!(floor.uncovered_direct_dependencies().is_empty());
+        let readiness = inventory.readiness_summary();
+        assert_eq!(readiness.unclassified_uncovered_crates_io(), 0);
+        assert_eq!(readiness.unclassified_non_crates_io_sources(), 0);
+        assert_eq!(readiness.uncovered_transitive_crates_io(), 1);
+        assert_eq!(readiness.incomplete_review_records(), 0);
+        assert_eq!(readiness.other_observational_findings(), 0);
+        // The uncovered transitive crate is a resolved-graph gap but not a
+        // direct dependency, so the floor leaves it observational.
+        assert!(inventory.gaps().iter().any(|gap| {
+            matches!(gap, InventoryGap::UncoveredResolvedCrate { spec } if spec.to_string() == "transitive@2.0.0")
+        }));
+    }
+
+    #[test]
+    fn coverage_floor_fails_naming_each_uncovered_direct_dependency() {
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = ["covered", "sneaky"]
+
+[[package]]
+name = "covered"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+[[package]]
+name = "sneaky"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2222222222222222222222222222222222222222222222222222222222222222"
+"#,
+        )
+        .expect("lockfile should parse");
+        let requirements = parse_manifest_direct_requirements(
+            "Cargo.toml",
+            r#"
+[dependencies]
+covered = "=1.0.0"
+sneaky = "=3.0.0"
+"#,
+        )
+        .expect("manifest should parse")
+        .into_iter()
+        .collect::<Vec<_>>();
+        let reviewed_targets = parse_reviewed_targets_toml(
+            r#"
+[rust]
+
+[[rust.families]]
+name = "covered-family"
+review_record = "docs/dependency-reviews/covered.md"
+
+[rust.families.direct]
+covered = "=1.0.0"
+
+[rust.families.resolved]
+covered = { version = "1.0.0", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+        )
+        .expect("reviewed targets should parse");
+        let reviewed_report =
+            check_reviewed_rust_targets(&reviewed_targets, &requirements, &lockfile);
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name":"root","id":"path+file:///repo#root@0.1.0","version":"0.1.0","source":null,"targets":[],"dependencies":[{"name":"covered","req":"=1.0.0","kind":null,"optional":false,"source":"registry+https://github.com/rust-lang/crates.io-index"},{"name":"sneaky","req":"=3.0.0","kind":null,"optional":false,"source":"registry+https://github.com/rust-lang/crates.io-index"}]},
+    {"name":"covered","id":"registry+https://github.com/rust-lang/crates.io-index#covered@1.0.0","version":"1.0.0","source":"registry+https://github.com/rust-lang/crates.io-index","targets":[]},
+    {"name":"sneaky","id":"registry+https://github.com/rust-lang/crates.io-index#sneaky@3.0.0","version":"3.0.0","source":"registry+https://github.com/rust-lang/crates.io-index","targets":[]}
+  ],
+  "workspace_members": ["path+file:///repo#root@0.1.0"],
+  "resolve": {"nodes":[
+    {"id":"path+file:///repo#root@0.1.0","deps":[
+      {"name":"covered","pkg":"registry+https://github.com/rust-lang/crates.io-index#covered@1.0.0"},
+      {"name":"sneaky","pkg":"registry+https://github.com/rust-lang/crates.io-index#sneaky@3.0.0"}
+    ]},
+    {"id":"registry+https://github.com/rust-lang/crates.io-index#covered@1.0.0","deps":[]},
+    {"id":"registry+https://github.com/rust-lang/crates.io-index#sneaky@3.0.0","deps":[]}
+  ]}
+}"#,
+        )
+        .expect("metadata should parse");
+        let graph_facts =
+            build_inventory_graph_facts(&metadata, &lockfile).expect("graph facts should build");
+
+        let inventory = build_inventory(
+            &lockfile,
+            InventoryDirectRequirements::new(&requirements, &[]),
+            &BTreeSet::new(),
+            Some(&reviewed_report),
+            &[ReviewRecordFact::new(
+                "covered-family".to_owned(),
+                "docs/dependency-reviews/covered.md".to_owned(),
+                ReviewRecordStatus::Completed,
+            )],
+            inventory_now(),
+            Some(&graph_facts),
+        );
+
+        let floor = inventory.coverage_floor();
+        assert!(!floor.passed());
+        let uncovered = floor
+            .uncovered_direct_dependencies()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(uncovered, vec!["sneaky@3.0.0".to_owned()]);
+        let readiness = inventory.readiness_summary();
+        assert_eq!(readiness.uncovered_transitive_crates_io(), 0);
+    }
+
+    #[test]
+    fn coverage_floor_fails_closed_when_no_policy_is_configured() {
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "anything"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+"#,
+        )
+        .expect("lockfile should parse");
+        let requirements = parse_manifest_direct_requirements(
+            "Cargo.toml",
+            r#"
+[dependencies]
+anything = "=1.0.0"
+"#,
+        )
+        .expect("manifest should parse")
+        .into_iter()
+        .collect::<Vec<_>>();
+
+        let inventory = build_inventory(
+            &lockfile,
+            InventoryDirectRequirements::new(&requirements, &[]),
+            &BTreeSet::new(),
+            None,
+            &[],
+            inventory_now(),
+            None,
+        );
+
+        let floor = inventory.coverage_floor();
+        assert!(!floor.passed());
+        assert!(!floor.policy_configured());
+        // No policy means no resolved-coverage gaps are computed, so the
+        // floor must fail closed on the missing policy rather than on an
+        // empty uncovered set.
+        assert!(floor.uncovered_direct_dependencies().is_empty());
     }
 
     #[test]
@@ -1061,9 +1577,23 @@ source = "git+https://example.invalid/git-crate"
         )
         .expect("metadata should parse");
 
-        let surfaces = build_graph_surfaces(&metadata).expect("surfaces should build");
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "foo"
+version = "0.1.0"
+
+[[package]]
+name = "workspace-build"
+version = "0.1.0"
+"#,
+        )
+        .expect("workspace lockfile should parse");
+        let surfaces =
+            build_inventory_graph_facts(&metadata, &lockfile).expect("graph facts should build");
         let observed = surfaces
             .surfaces()
+            .expect("surface facts should be available")
             .map(|(spec, surfaces)| {
                 (
                     spec.to_string(),
@@ -1224,7 +1754,8 @@ multi = ["build-rs"]
 }"#,
         )
         .expect("metadata should parse");
-        let graph_surfaces = build_graph_surfaces(&metadata).expect("surfaces should build");
+        let graph_surfaces =
+            build_inventory_graph_facts(&metadata, &lockfile).expect("graph facts should build");
         let reviewed_report = check_reviewed_rust_targets(&reviewed_targets, &[], &lockfile);
 
         let inventory = build_inventory(
@@ -1236,17 +1767,17 @@ multi = ["build-rs"]
                 ReviewRecordFact::new(
                     "covered-family".to_owned(),
                     "docs/dependency-reviews/covered.md".to_owned(),
-                    true,
+                    ReviewRecordStatus::Completed,
                 ),
                 ReviewRecordFact::new(
                     "versioned-family".to_owned(),
                     "docs/dependency-reviews/versioned.md".to_owned(),
-                    true,
+                    ReviewRecordStatus::Completed,
                 ),
                 ReviewRecordFact::new(
                     "multi-family".to_owned(),
                     "docs/dependency-reviews/multi.md".to_owned(),
-                    true,
+                    ReviewRecordStatus::Completed,
                 ),
             ],
             inventory_now(),
@@ -1324,6 +1855,12 @@ multi = ["build-rs"]
                     && *surface == crate::ExecutionSurfaceKind::NativeSys
                     && *policy_configured)
         }));
+        assert_eq!(
+            inventory
+                .readiness_summary()
+                .undeclared_execution_surfaces(),
+            5
+        );
     }
 
     #[test]
@@ -1425,12 +1962,12 @@ missing-record = [{ id = "RUSTSEC-2027-0006", review_by = "2027-11-01" }]
                 ReviewRecordFact::new(
                     "existing-family".to_owned(),
                     "docs/dependency-reviews/existing.md".to_owned(),
-                    true,
+                    ReviewRecordStatus::Completed,
                 ),
                 ReviewRecordFact::new(
                     "missing-family".to_owned(),
                     "docs/dependency-reviews/missing.md".to_owned(),
-                    false,
+                    ReviewRecordStatus::Missing,
                 ),
             ],
             inventory_now(),
@@ -1507,7 +2044,7 @@ missing-record = [{ id = "RUSTSEC-2027-0006", review_by = "2027-11-01" }]
         advisory_id: &str,
         status: InventoryAdvisoryExceptionStatus,
         resolved_target_matches: bool,
-        review_record_exists: bool,
+        review_record_completed: bool,
     ) {
         let exception = inventory
             .advisory_exceptions()
@@ -1516,11 +2053,11 @@ missing-record = [{ id = "RUSTSEC-2027-0006", review_by = "2027-11-01" }]
             .expect("advisory exception should be reported");
         assert_eq!(exception.status(), status);
         assert_eq!(exception.resolved_target_matches(), resolved_target_matches);
-        assert_eq!(exception.review_record_exists(), review_record_exists);
+        assert_eq!(exception.review_record_completed(), review_record_completed);
     }
 
     #[test]
-    fn build_graph_surfaces_rejects_invalid_metadata_specs() {
+    fn build_inventory_graph_facts_rejects_invalid_metadata_specs() {
         let metadata = parse_cargo_metadata(
             r#"{
   "packages": [
@@ -1537,6 +2074,51 @@ missing-record = [{ id = "RUSTSEC-2027-0006", review_by = "2027-11-01" }]
         )
         .expect("metadata should parse");
 
-        assert!(build_graph_surfaces(&metadata).is_err());
+        let lockfile = parse_lockfile("").expect("empty lockfile should parse");
+        assert!(build_inventory_graph_facts(&metadata, &lockfile).is_err());
+    }
+
+    #[test]
+    fn graph_facts_preserve_surfaces_when_direct_resolution_fails() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name":"root","id":"path+file:///repo#root@0.1.0","version":"0.1.0","source":null,"manifest_path":"/repo/Cargo.toml","targets":[],"dependencies":[
+      {"name":"builder","req":"^2","kind":null,"optional":false,"source":"registry+https://github.com/rust-lang/crates.io-index"}
+    ]},
+    {"name":"builder","id":"registry+https://github.com/rust-lang/crates.io-index#builder@1.0.0","version":"1.0.0","source":"registry+https://github.com/rust-lang/crates.io-index","targets":[{"kind":["custom-build"]}]}
+  ],
+  "workspace_members":["path+file:///repo#root@0.1.0"],
+  "resolve":{"nodes":[]}
+}"#,
+        )
+        .expect("metadata should parse");
+        let lockfile = parse_lockfile(
+            r#"
+version = 4
+
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = ["builder"]
+
+[[package]]
+name = "builder"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+"#,
+        )
+        .expect("lockfile should parse");
+
+        let facts = build_inventory_graph_facts(&metadata, &lockfile)
+            .expect("surface facts should remain available");
+
+        assert_eq!(facts.surfaces().expect("surfaces should exist").count(), 1);
+        assert!(facts.direct_dependencies().is_none());
+        assert!(
+            facts
+                .direct_dependency_error()
+                .is_some_and(|error| error.contains("builder"))
+        );
     }
 }

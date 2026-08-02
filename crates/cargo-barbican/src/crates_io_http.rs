@@ -18,14 +18,16 @@ pub struct UreqCratesIoClient {
 
 impl UreqCratesIoClient {
     pub fn new(base_url: String) -> Self {
+        let base_url = base_url.trim_end_matches('/').to_owned();
         let config = Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(20)))
             .http_status_as_error(false)
+            .https_only(base_url.to_ascii_lowercase().starts_with("https://"))
             .build();
 
         Self {
             agent: config.into(),
-            base_url: base_url.trim_end_matches('/').to_owned(),
+            base_url,
         }
     }
 
@@ -127,5 +129,32 @@ impl CratesIoClient for UreqCratesIoClient {
             .map_err(|error| CratesIoClientError::Transport {
                 reason: error.to_string(),
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DEFAULT_CRATES_IO_BASE_URL, UreqCratesIoClient};
+
+    #[test]
+    fn https_base_enforces_https_only_transport() {
+        for base_url in [DEFAULT_CRATES_IO_BASE_URL, "HTTPS://example.invalid"] {
+            let client = UreqCratesIoClient::new(base_url.to_owned());
+
+            assert!(
+                client.agent.config().https_only(),
+                "HTTPS base URLs must reject plain-HTTP redirect targets"
+            );
+        }
+    }
+
+    #[test]
+    fn loopback_http_base_preserves_local_test_transport() {
+        let client = UreqCratesIoClient::new("http://127.0.0.1:8080".to_owned());
+
+        assert!(
+            !client.agent.config().https_only(),
+            "the validated loopback HTTP test seam must remain usable"
+        );
     }
 }

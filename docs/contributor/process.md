@@ -13,8 +13,10 @@ This repo ships opt-in distributed Git hooks:
   - [`scripts/verify.sh`](../../scripts/verify.sh)
   - [`scripts/check_pre_commit_canary.sh`](../../scripts/check_pre_commit_canary.sh)
   - [`scripts/check_commit_msg.sh`](../../scripts/check_commit_msg.sh)
+  - [`scripts/check_release_tag.sh`](../../scripts/check_release_tag.sh)
 - behaviour tests for the shell checks:
   - [`scripts/tests/check_commit_msg_test.sh`](../../scripts/tests/check_commit_msg_test.sh)
+  - [`scripts/tests/check_release_tag_test.sh`](../../scripts/tests/check_release_tag_test.sh)
   - [`scripts/tests/verify_branch_guard_test.sh`](../../scripts/tests/verify_branch_guard_test.sh)
 
 Enable them locally with:
@@ -73,6 +75,19 @@ Repo branch policy is simple:
 - `main` is stable and keeps the stricter rules above
 - `dev` is the default working branch for ongoing implementation
 
+For an immutable-tag release, commit the complete version bundle before
+creating the tag. Then prove that the manifest-derived tag resolves to the
+intended release commit:
+
+```bash
+git tag vX.Y.Z <release-commit>
+sh scripts/check_release_tag.sh <release-commit>
+```
+
+Only after that check passes should the commit and tag be pushed. Finish with
+a clean install from the published tag; that remote install is the deployment
+proof that the release identity advertised in user documentation is usable.
+
 ## Verification Expectations
 
 The repo-level verification entry point is:
@@ -84,8 +99,7 @@ sh scripts/verify.sh
 The default path dogfoods cargo-barbican by running:
 
 ```bash
-cargo run --locked --bin cargo-barbican -- audit
-cargo run --locked --bin cargo-barbican -- verify
+cargo run --locked --bin cargo-barbican -- gatehouse pre-release
 ```
 
 Outside `--skip`, it first runs the policy-script behaviour tests under

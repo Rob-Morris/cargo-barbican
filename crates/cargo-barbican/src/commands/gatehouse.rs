@@ -10,14 +10,15 @@ use barbican::{
     inspect_published_crate_at,
 };
 
-use crate::cli::{GatehouseCandidateArgs, GatehouseCommand};
+use crate::cli::{AuditOutputFormat, GatehouseCandidateArgs, GatehouseCommand};
 use crate::command_runner::{CommandRunner, RunnerError};
 
-use super::inspect::render_inspect_report;
+use super::inspect::{InspectRenderContext, render_inspect_report};
 use super::scratch_dir::ScratchDir;
 use super::{
-    CommandError, ReviewedReleaseAgeExceptions, escape_diagnostic_for_terminal, fail,
-    load_release_age_context, render_missing_release_age_exception_review_record,
+    CommandError, ReviewedReleaseAgeExceptions, audit, escape_diagnostic_for_terminal, fail,
+    inventory, load_release_age_context, render_incomplete_release_age_exception_review_record,
+    verify,
 };
 
 pub(super) fn run_gatehouse<C, R>(
@@ -34,10 +35,58 @@ where
     R: CommandRunner + ?Sized,
 {
     match command {
+        GatehouseCommand::PreRelease => run_pre_release(current_dir, runner, now, stdout, stderr),
         GatehouseCommand::Candidate(args) => {
             run_candidate(args, current_dir, client, runner, now, stdout, stderr)
         }
     }
+}
+
+fn run_pre_release<R>(
+    current_dir: &Path,
+    runner: &R,
+    now: OffsetDateTime,
+    stdout: &mut dyn IoWrite,
+    stderr: &mut dyn IoWrite,
+) -> Result<ExitCode, CommandError>
+where
+    R: CommandRunner + ?Sized,
+{
+    writeln!(stdout, "Gatehouse pre-release:").map_err(CommandError::Io)?;
+    writeln!(stdout, "Step 1/3 — inventory coverage floor (blocking)").map_err(CommandError::Io)?;
+    let inventory_exit = inventory::run_inventory(current_dir, runner, now, true, stdout)?;
+    if inventory_exit != ExitCode::SUCCESS {
+        writeln!(stdout, "Gatehouse pre-release: FAIL (inventory)").map_err(CommandError::Io)?;
+        return Ok(inventory_exit);
+    }
+
+    writeln!(stdout).map_err(CommandError::Io)?;
+    writeln!(stdout, "Step 2/3 — audit (blocking)").map_err(CommandError::Io)?;
+    let audit_exit = audit::run_audit(
+        AuditOutputFormat::Text,
+        current_dir,
+        None,
+        runner,
+        now,
+        stdout,
+        stderr,
+    )?;
+    if audit_exit != ExitCode::SUCCESS {
+        writeln!(stdout, "Gatehouse pre-release: FAIL (audit)").map_err(CommandError::Io)?;
+        return Ok(audit_exit);
+    }
+
+    writeln!(stdout).map_err(CommandError::Io)?;
+    writeln!(stdout, "Step 3/3 — verify (blocking; includes pin check)")
+        .map_err(CommandError::Io)?;
+    let verify_exit = verify::run_verify_after_audit(current_dir, runner, stdout, stderr)?;
+    if verify_exit != ExitCode::SUCCESS {
+        writeln!(stdout, "Gatehouse pre-release: FAIL (verify)").map_err(CommandError::Io)?;
+        return Ok(verify_exit);
+    }
+
+    writeln!(stdout, "Gatehouse pre-release: PASS").map_err(CommandError::Io)?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_candidate<C, R>(
@@ -154,11 +203,11 @@ where
         minimum_days,
         age_exception,
     );
-    if let ReleaseAgeGateVerdict::MissingReviewRecord(exception) = classify_release_age_gate(
+    if let ReleaseAgeGateVerdict::IncompleteReviewRecord(exception) = classify_release_age_gate(
         release_age.outcome(),
-        reviewed_release_age_exceptions.missing_for_spec(spec),
+        reviewed_release_age_exceptions.unsatisfied_for_spec(spec),
     ) {
-        return Err(render_missing_release_age_exception_review_record(
+        return Err(render_incomplete_release_age_exception_review_record(
             exception,
         ));
     }
@@ -179,7 +228,10 @@ where
         RustAssessmentClassification::RoutineSafe
     );
 
-    Ok((render_inspect_report(&report), failed))
+    Ok((
+        render_inspect_report(&report, InspectRenderContext::GatehouseCandidate),
+        failed,
+    ))
 }
 
 struct CandidateDossier {

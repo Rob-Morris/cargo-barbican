@@ -6,6 +6,7 @@ use time::Date;
 
 use crate::lockfile::{LockedPackage, Lockfile};
 use crate::manifest::CargoManifestDirectRequirement;
+use crate::review_record::REVIEW_RECORD_SCAFFOLD_MARKER;
 use crate::reviewed_targets::{
     RawReviewedAdvisory, RawReviewedResolvedTarget, RawReviewedRustFamily, RawReviewedTargets,
     RawRustReviewedTargets, ReviewedTargets, RustSecAdvisoryId, format_iso_date,
@@ -202,10 +203,16 @@ pub fn compose_pin_review_record(
         )
     };
 
+    let scaffold_marker = format!(
+        "<!-- {REVIEW_RECORD_SCAFFOLD_MARKER}: this scaffold is not a completed review. Complete the sections below, then delete this line. `cargo barbican pin check` fails this family while the marker remains. -->"
+    );
+
     let mut record = String::new();
     let _ = write!(
         &mut record,
         "# Dependency Review: {crate_name} {version}
+
+{scaffold_marker}
 
 ## Summary
 
@@ -550,10 +557,14 @@ pub fn plan_pin_exception(
         select_locked_package(&matching_packages, target).map_err(PinExceptionRejection::Target)?;
 
     for advisory in advisories {
-        if let Some(existing) = reviewed_targets.advisory_exceptions().iter().find(|exception| {
-            exception.spec().crate_name() == package.name
-                && exception.advisory_id() == advisory.advisory_id()
-        }) {
+        if let Some(existing) = reviewed_targets
+            .advisory_exceptions()
+            .iter()
+            .find(|exception| {
+                exception.spec().crate_name() == package.name
+                    && exception.advisory_id() == advisory.advisory_id()
+            })
+        {
             return Err(PinExceptionRejection::AlreadyAllowed {
                 advisory_id: advisory.advisory_id().clone(),
                 family: existing.family().to_owned(),
@@ -755,7 +766,8 @@ mod tests {
 
     use crate::sha256::Sha256Digest;
     use crate::{
-        ExactCrateSpec, ExactCrateSpecError, format_iso_date, parse_lockfile,
+        ExactCrateSpec, ExactCrateSpecError, REVIEW_RECORD_SCAFFOLD_MARKER, ReviewRecordStatus,
+        classify_review_record, format_iso_date, parse_lockfile,
         parse_manifest_direct_requirements, parse_reviewed_targets_toml,
     };
 
@@ -817,10 +829,8 @@ mod tests {
 
     #[test]
     fn plan_pin_exception_requires_a_lockfile_checksum() {
-        let lockfile = parse_lockfile(
-            "[[package]]\nname = \"local-crate\"\nversion = \"0.1.0\"\n",
-        )
-        .expect("lockfile should parse");
+        let lockfile = parse_lockfile("[[package]]\nname = \"local-crate\"\nversion = \"0.1.0\"\n")
+            .expect("lockfile should parse");
         let reviewed_targets = empty_reviewed_targets();
         let target = parse_pin_add_target("local-crate").expect("target should parse");
 
@@ -1231,6 +1241,41 @@ serde = {{ version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abc
         assert!(record.contains(
             "- Resolved reviewed set: `serde` `1.0.228` (checksum_sha256 `0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`)"
         ));
+    }
+
+    #[test]
+    fn review_record_stub_carries_the_scaffold_marker_until_completed() {
+        let spec = ExactCrateSpec::from_parts("serde", "1.0.228").expect("spec should parse");
+        let record = compose_pin_review_record(
+            &spec,
+            None,
+            true,
+            "serde-2026-07-02",
+            Some("=1.0.228"),
+            &[],
+            test_date(),
+        );
+
+        assert!(
+            record.contains(REVIEW_RECORD_SCAFFOLD_MARKER),
+            "scaffolded record should carry the review-pending marker"
+        );
+        assert_eq!(
+            classify_review_record(Some(&record)),
+            ReviewRecordStatus::ScaffoldPlaceholder,
+            "an untouched scaffold must not satisfy the reviewed-target gate"
+        );
+
+        let completed = record
+            .lines()
+            .filter(|line| !line.contains(REVIEW_RECORD_SCAFFOLD_MARKER))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            classify_review_record(Some(&completed)),
+            ReviewRecordStatus::Completed,
+            "removing the marker line should make the record satisfy the gate"
+        );
     }
 
     #[test]

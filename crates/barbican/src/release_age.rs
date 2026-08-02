@@ -23,27 +23,27 @@ pub enum ReleaseAgeOutcome {
 }
 
 /// The one release-age gate precedence rule: a too-fresh release whose
-/// reviewed age exception has no backing review record fails closed as a
-/// missing-review-record verdict, which takes precedence over reporting it as
-/// a plain too-fresh outcome. Shells route their rendering off this verdict
+/// reviewed age exception has no completed review record fails closed as an
+/// incomplete-review-record verdict, which takes precedence over reporting it
+/// as a plain too-fresh outcome. Shells route their rendering off this verdict
 /// rather than re-deriving the precedence themselves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReleaseAgeGateVerdict<'a> {
     Routine,
     AllowedByException,
-    MissingReviewRecord(&'a ReviewedReleaseAgeException),
+    IncompleteReviewRecord(&'a ReviewedReleaseAgeException),
     Blocked,
 }
 
 pub fn classify_release_age_gate<'a>(
     outcome: &ReleaseAgeOutcome,
-    missing_exception: Option<&'a ReviewedReleaseAgeException>,
+    incomplete_exception: Option<&'a ReviewedReleaseAgeException>,
 ) -> ReleaseAgeGateVerdict<'a> {
     match outcome {
         ReleaseAgeOutcome::Allowed => ReleaseAgeGateVerdict::Routine,
         ReleaseAgeOutcome::AllowedByException { .. } => ReleaseAgeGateVerdict::AllowedByException,
-        ReleaseAgeOutcome::TooFresh => match missing_exception {
-            Some(exception) => ReleaseAgeGateVerdict::MissingReviewRecord(exception),
+        ReleaseAgeOutcome::TooFresh => match incomplete_exception {
+            Some(exception) => ReleaseAgeGateVerdict::IncompleteReviewRecord(exception),
             None => ReleaseAgeGateVerdict::Blocked,
         },
         ReleaseAgeOutcome::Yanked | ReleaseAgeOutcome::ExceptionArtefactMismatch { .. } => {
@@ -423,20 +423,20 @@ serde = "{version}"
     }
 
     #[test]
-    fn missing_review_record_takes_precedence_over_a_plain_too_fresh_verdict() {
-        let missing = exception(
+    fn incomplete_review_record_takes_precedence_over_a_plain_too_fresh_verdict() {
+        let incomplete = exception(
             "1.0.228",
             "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
         );
 
         assert_eq!(
-            classify_release_age_gate(&ReleaseAgeOutcome::TooFresh, Some(&missing)),
-            ReleaseAgeGateVerdict::MissingReviewRecord(&missing)
+            classify_release_age_gate(&ReleaseAgeOutcome::TooFresh, Some(&incomplete)),
+            ReleaseAgeGateVerdict::IncompleteReviewRecord(&incomplete)
         );
     }
 
     #[test]
-    fn too_fresh_without_a_missing_exception_is_blocked() {
+    fn too_fresh_without_an_incomplete_exception_is_blocked() {
         assert_eq!(
             classify_release_age_gate(&ReleaseAgeOutcome::TooFresh, None),
             ReleaseAgeGateVerdict::Blocked
@@ -444,18 +444,18 @@ serde = "{version}"
     }
 
     #[test]
-    fn a_missing_exception_for_an_unrelated_spec_does_not_leak_into_other_outcomes() {
-        let missing = exception(
+    fn an_incomplete_exception_for_an_unrelated_spec_does_not_leak_into_other_outcomes() {
+        let incomplete = exception(
             "1.0.228",
             "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
         );
 
         assert_eq!(
-            classify_release_age_gate(&ReleaseAgeOutcome::Allowed, Some(&missing)),
+            classify_release_age_gate(&ReleaseAgeOutcome::Allowed, Some(&incomplete)),
             ReleaseAgeGateVerdict::Routine
         );
         assert_eq!(
-            classify_release_age_gate(&ReleaseAgeOutcome::Yanked, Some(&missing)),
+            classify_release_age_gate(&ReleaseAgeOutcome::Yanked, Some(&incomplete)),
             ReleaseAgeGateVerdict::Blocked
         );
         assert_eq!(
@@ -464,7 +464,7 @@ serde = "{version}"
                     family: "serde-family".to_owned(),
                     review_record: "docs/dependency-reviews/2026-05-27-serde.md".to_owned(),
                 },
-                Some(&missing)
+                Some(&incomplete)
             ),
             ReleaseAgeGateVerdict::AllowedByException
         );

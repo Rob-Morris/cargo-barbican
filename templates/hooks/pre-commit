@@ -1,0 +1,24 @@
+#!/bin/sh
+# Synced from cargo-barbican v0.24.0
+#
+# Advisory client-side pre-commit hook for cargo-barbican.
+#
+# It runs the cheap subset of the enforcement gate so obvious policy breaks are
+# caught before they reach CI:
+#   - cargo barbican pin check       reviewed-target enforcement
+#   - cargo barbican inventory --enforce   the coverage floor
+#
+# It deliberately does NOT run `cargo barbican verify` (a full build and test),
+# which is too slow to run on every commit.
+#
+# This hook is advisory and skippable with `git commit --no-verify`. It is a
+# convenience, not the gate: the authoritative gate is the server-side
+# .github/workflows/barbican.yml workflow, which cannot be skipped.
+#
+# Install with either:
+#   git config core.hooksPath <directory containing this hook>
+#   # or copy this file to .git/hooks/pre-commit and: chmod +x .git/hooks/pre-commit
+set -eu
+
+cargo barbican pin check
+cargo barbican inventory --enforce

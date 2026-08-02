@@ -76,11 +76,33 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  file=$1
+  unexpected=$2
+  label=$3
+
+  content=$(read_file "$file")
+  if printf '%s\n' "$content" | grep -qF -- "$unexpected"; then
+    fail "$file still contains $label: $unexpected"
+  fi
+}
+
 assert_contains README.md "badge/version-$crate_version-blue" "current version badge"
-assert_contains README.md "--branch main" "current pre-release install branch"
-assert_contains README.md "restore the --tag install line" "pre-release tag restoration note"
+assert_contains README.md "--tag v$crate_version" "immutable release install tag"
 assert_contains README.md "badge/Rust-$rust_version-" "current Rust badge"
-assert_contains docs/user/integration.md "--branch main" "current pre-release install branch"
+assert_contains README.md "cargo-deny@0.19.6 cargo-audit@0.22.1" "reviewed delegate versions"
+assert_contains docs/user/integration.md "--tag v$crate_version" "immutable release install tag"
+assert_contains docs/user/integration.md "cargo-deny@0.19.6 cargo-audit@0.22.1" "reviewed delegate versions"
+assert_contains docs/user/ci.md "--tag v$crate_version" "immutable release install tag"
+assert_contains docs/user/ci.md "cargo-deny@0.19.6 cargo-audit@0.22.1" "reviewed delegate versions"
+assert_contains docs/user/ci.md "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10" "pinned checkout action"
+assert_contains crates/cargo-barbican/src/commands/policy.rs "--tag v$crate_version" "generated immutable release install tag"
+assert_contains crates/cargo-barbican/src/commands/policy.rs "cargo-deny@0.19.6" "generated reviewed cargo-deny version"
+assert_contains crates/cargo-barbican/src/commands/policy.rs "cargo-audit@0.22.1" "generated reviewed cargo-audit version"
+assert_not_contains README.md "--branch main" "mutable release install branch"
+assert_not_contains docs/user/integration.md "--branch main" "mutable release install branch"
+assert_not_contains docs/user/ci.md "--branch main" "mutable release install branch"
+assert_not_contains docs/user/ci.md "actions/checkout@v" "mutable checkout action tag"
 assert_contains docs/user/integration.md "$sync_header" "template sync-header example"
 assert_contains templates/README.md "$sync_header" "template sync-header convention"
 

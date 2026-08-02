@@ -14,11 +14,11 @@ use crate::cli::{AssessPolicyMode, REVIEWED_TARGETS_CONFIG_FILE};
 use crate::command_runner::CommandRunner;
 
 use super::{
-    CommandError, DEFAULT_BASE_REF, collect_reviewed_release_age_exceptions, fail, join_display,
-    load_base_manifest_dependencies, load_config, load_current_lockfile, load_git_base_lockfile,
-    load_lockfile_from_path, load_manifest_dependencies_from_root, load_reviewed_targets,
-    render_allowed_policy_exceptions, render_missing_release_age_exception_review_record,
-    review_record_exists,
+    CommandError, DEFAULT_BASE_REF, ReviewRecordStatusCache,
+    collect_reviewed_release_age_exceptions, fail, join_display, load_base_manifest_dependencies,
+    load_config, load_current_lockfile, load_git_base_lockfile, load_lockfile_from_path,
+    load_manifest_dependencies_from_root, load_reviewed_targets, render_allowed_policy_exceptions,
+    render_incomplete_release_age_exception_review_record,
 };
 
 pub(super) fn run_assess<C, R>(
@@ -46,10 +46,11 @@ where
         .as_ref()
         .map(|reviewed_targets| reviewed_targets.execution_surface_allowances())
         .unwrap_or_default();
+    let mut review_record_statuses = ReviewRecordStatusCache::new(current_dir);
     let reviewed_release_age_exceptions = reviewed_targets
         .as_ref()
         .map(|reviewed_targets| {
-            collect_reviewed_release_age_exceptions(reviewed_targets, current_dir)
+            collect_reviewed_release_age_exceptions(reviewed_targets, &mut review_record_statuses)
         })
         .unwrap_or_default();
     let base_root = base_dir.map(|base_dir| current_dir.join(base_dir));
@@ -114,15 +115,21 @@ where
         now,
     );
 
-    if let Some(allowed_surface) = report
-        .allowed_execution_surfaces()
-        .iter()
-        .find(|allowed_surface| !review_record_exists(current_dir, allowed_surface.review_record()))
-    {
+    let mut incomplete_allowed_surface = None;
+    for allowed_surface in report.allowed_execution_surfaces() {
+        if !review_record_statuses
+            .status(allowed_surface.review_record())
+            .is_satisfied()
+        {
+            incomplete_allowed_surface = Some(allowed_surface);
+            break;
+        }
+    }
+    if let Some(allowed_surface) = incomplete_allowed_surface {
         return fail(
             stderr,
             format!(
-                "allowed policy exception review record missing for {}: {}",
+                "allowed policy exception review record not completed for {}: {}",
                 allowed_surface.spec(),
                 allowed_surface.review_record()
             ),
@@ -134,15 +141,15 @@ where
     if let Some(exception) = report.age_violations().iter().find_map(|violation| {
         match classify_release_age_gate(
             &ReleaseAgeOutcome::TooFresh,
-            reviewed_release_age_exceptions.missing_for_spec(violation.spec()),
+            reviewed_release_age_exceptions.unsatisfied_for_spec(violation.spec()),
         ) {
-            ReleaseAgeGateVerdict::MissingReviewRecord(exception) => Some(exception),
+            ReleaseAgeGateVerdict::IncompleteReviewRecord(exception) => Some(exception),
             _ => None,
         }
     }) {
         return fail(
             stderr,
-            render_missing_release_age_exception_review_record(exception),
+            render_incomplete_release_age_exception_review_record(exception),
         );
     }
 

@@ -8,7 +8,7 @@ use crate::command_runner::CommandRunner;
 
 use super::diff_render::render_unified_file_diff;
 use super::{
-    CommandError, REVIEW_RECORDS_DIR, collect_relative_files_matching, fail,
+    CommandError, REVIEW_RECORDS_DIR, collect_relative_files_matching, escape_render_field, fail,
     insert_review_root_paths, read_optional_text_no_symlink, review_paths,
     workspace_manifest_paths,
 };
@@ -23,34 +23,71 @@ pub(super) fn run_review<R>(
 where
     R: CommandRunner + ?Sized,
 {
-    let diff = if let Some(base_dir) = base_dir {
+    let (diff, untracked_note) = if let Some(base_dir) = base_dir {
         let base_root = match resolve_base_root(current_dir, base_dir) {
             Ok(base_root) => base_root,
             Err(error) => return fail(stderr, error),
         };
-        render_non_git_review_diff(&base_root, current_dir)?
+        (render_non_git_review_diff(&base_root, current_dir)?, None)
     } else {
         let paths = review_paths(current_dir)?;
-        match runner.git_diff(current_dir, &paths) {
+        let diff = match runner.git_diff(current_dir, &paths) {
             Ok(diff) => diff,
             Err(error) => return fail(stderr, format!("git diff: {error}")),
-        }
+        };
+        let untracked = match runner.git_untracked(current_dir, &paths) {
+            Ok(untracked) => untracked,
+            Err(error) => return fail(stderr, format!("git ls-files: {error}")),
+        };
+        (diff, render_untracked_policy_note(&untracked))
     };
 
-    if diff.trim().is_empty() {
+    let no_tracked_changes = diff.trim().is_empty();
+    if no_tracked_changes {
         writeln!(stdout, "No Rust dependency policy changes detected.")
             .map_err(CommandError::Io)?;
-        return Ok(ExitCode::SUCCESS);
+    } else {
+        writeln!(
+            stdout,
+            "Review checklist:\n  - Confirm the changed crates and versions are the ones you intended.\n  - Confirm the routine workflow only changed the root Cargo.lock.\n  - Check for unexpected registry, git, path, patch, or source-replacement changes.\n  - Check for new build-dependencies, proc-macro crates, or native -sys / FFI crates.\n  - Check that any reviewed family change updates both reviewed-targets.toml and the matching checked-in review record.\n"
+        )
+        .map_err(CommandError::Io)?;
     }
 
-    writeln!(
-        stdout,
-        "Review checklist:\n  - Confirm the changed crates and versions are the ones you intended.\n  - Confirm the routine workflow only changed the root Cargo.lock.\n  - Check for unexpected registry, git, path, patch, or source-replacement changes.\n  - Check for new build-dependencies, proc-macro crates, or native -sys / FFI crates.\n  - Check that any reviewed family change updates both reviewed-targets.toml and the matching checked-in review record.\n"
-    )
-    .map_err(CommandError::Io)?;
-    write!(stdout, "{diff}").map_err(CommandError::Io)?;
+    if let Some(note) = &untracked_note {
+        write!(stdout, "{note}").map_err(CommandError::Io)?;
+    }
+
+    if !no_tracked_changes {
+        write!(stdout, "{diff}").map_err(CommandError::Io)?;
+    }
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// Untracked policy-relevant files are invisible to the tracked-change diff
+/// `review` renders, yet during adoption a freshly scaffolded `barbican.toml`,
+/// `reviewed-targets.toml`, or new review record is exactly what wants
+/// reviewing. This is a visibility note only: it does not change what `review`
+/// counts as a tracked change. `git ls-files ... -z` emits NUL-separated
+/// paths, so entries split on `\0` and the trailing NUL yields the empty tail
+/// that is filtered out. Paths are terminal-escaped like every other
+/// untrusted field, since an attacker-authored filename reaches the terminal
+/// here.
+fn render_untracked_policy_note(untracked: &str) -> Option<String> {
+    let mut files = untracked.split('\0').filter(|entry| !entry.is_empty());
+    let first = files.next()?;
+
+    let mut note = String::from(
+        "Untracked policy-relevant files (git is not tracking these yet, so they are absent from the diff; review before committing):\n",
+    );
+    for file in std::iter::once(first).chain(files) {
+        note.push_str("  - ");
+        note.push_str(&escape_render_field(file));
+        note.push('\n');
+    }
+
+    Some(note)
 }
 
 fn resolve_base_root(current_dir: &Path, base_dir: &Path) -> Result<PathBuf, String> {

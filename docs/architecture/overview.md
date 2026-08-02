@@ -8,10 +8,10 @@ foreclosed.
 
 ## Why this exists
 
-[undertask](https://github.com/rob-morris/undertask) implements supply-chain
-hardening as Python scripts plus a shell wrapper. The hardening model is sound:
-release-age gating, `--locked` verification, targeted updates, advisory checks,
-and checked-in review records for dependency changes.
+cargo-barbican grew out of undertask, a private predecessor project that
+implements supply-chain hardening as Python scripts plus a shell wrapper. That
+hardening model is sound: release-age gating, `--locked` verification, targeted
+updates, advisory checks, and checked-in review records for dependency changes.
 
 The problem is duplication. As soon as multiple Rust repos need the same
 hardening, copy-pasted scripts drift. cargo-barbican exists to replace that
@@ -48,13 +48,16 @@ support is explicitly delivered.
 ## Current implemented surface
 
 The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
-`update`, `assess`, `inspect`, `gatehouse candidate`, `policy init`,
+`update`, `assess`, `inspect`, `gatehouse candidate`, `gatehouse pre-release`, `policy init`,
 `inventory`, `pin add`, `pin exception`, `pin check`, `review`, `audit`, and
 `verify` are implemented.
 
 The current intake layer is:
 
 - `assess` remains the post-add diff classifier
+- `gatehouse pre-release` is the blessed fail-fast composition of
+  the blocking direct-dependency inventory floor, blocking audit, and blocking
+  verify; the base primitives retain their own semantics
 - `pick` is the implemented read-only exact-version discovery surface for
   crates.io semver ranges
 - `inspect` is the implemented first Rust-only, crates.io-only deep-review surface

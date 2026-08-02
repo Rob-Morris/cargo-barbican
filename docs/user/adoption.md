@@ -6,6 +6,14 @@ dependency policy gate.
 `cargo barbican policy init` creates policy scaffolding. It does not review,
 approve, or certify the dependencies already in the repository.
 
+The insiders release supports macOS and Linux and installs from an immutable
+git tag. It does not claim universal transitive human review: bring direct and
+elevated-risk dependencies under policy first, while the inventory keeps the
+remaining transitive and execution-surface backlog visible. Windows,
+crates.io publication, positive reviewed policy for external git/path/alternate
+registry dependencies, and hostile-checkout race-free containment remain out
+of scope for this release.
+
 ## 1. Create The Policy Scaffold
 
 From the consumer repository root:
@@ -36,6 +44,11 @@ relying on scaffold path-containment guarantees.
 
 Review `barbican.toml` before enforcing the policy. It is explicit repo policy,
 not hidden runtime default state.
+
+`cargo barbican policy init --ci github` additionally emits a ready-to-run
+`.github/workflows/barbican.yml` enforcement workflow (it fails closed rather
+than overwriting an existing one). See [ci.md](ci.md) for the CI gate and the
+client-side pre-commit hook.
 
 ## 2. Review Current Dependencies
 
@@ -84,11 +97,16 @@ The crate must already be present in the same family `resolved` map with a
 `checksum_sha256`; cargo-barbican verifies that checksum before honouring the
 exception.
 
-For advisory findings that are intentionally accepted, record the exception in
-the same reviewed family under `allowed_advisories` with the `RUSTSEC-*` id and
-a `review_by` deadline. The crate must already be present in that family's
-`resolved` map with `checksum_sha256`; `audit` reconciles findings against the
-bound target, review record, and deadline before accepting the risk.
+For advisory findings that are intentionally accepted — for example when
+`audit` fails and there is no adoptable patched release yet — use the governed
+`cargo barbican pin exception <crate>[@version] <RUSTSEC-id>...` path rather
+than hand-authoring the entry or reaching for a native `deny.toml` ignore. It
+scaffolds a checksum-bound `allowed_advisories` entry (with a `review_by`
+re-review deadline, 30 days by default) plus a review-record stub, creating the
+reviewed family when the crate is not yet covered. `audit` reconciles each
+finding against the bound resolved target, checksum, review record, and
+deadline before accepting the risk, and fails it again once `review_by` passes.
+See [operations.md](operations.md) for the full failing-audit workflow.
 
 Review `[delegates]` in `barbican.toml` before enforcing audit. It selects the
 lockfile scanner (`cargo-deny`, `cargo-audit`, or `both`), configures the
@@ -114,14 +132,24 @@ touching `Cargo.lock`.
 
 ## 4. Run The Enforcement Gate
 
-When reviewed-target policy is ready, run both `audit` and `verify`:
+`audit` delegates to `cargo-deny` (and `cargo-audit` when configured), so
+install both before running it, following the same review-then-pin approach the
+tool asks of its own dependents:
 
 ```bash
-cargo barbican audit
-cargo barbican verify
+cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
-They stay two separate commands on purpose. `verify`'s verdict is a pure
+A missing delegate fails `audit` closed with an actionable install line; see
+[integration.md](integration.md#prerequisites) for the detail. When
+reviewed-target policy is ready, run the direct coverage floor and the
+pre-release workflow:
+
+```bash
+cargo barbican gatehouse pre-release
+```
+
+`audit` and `verify` stay separate primitives on purpose. `verify`'s verdict is a pure
 function of the repo — the same manifests, lockfile, and reviewed-target
 policy always produce the same result. `audit`'s verdict also depends on the
 advisory landscape at the moment it runs, so a new RustSec advisory can flip
@@ -129,9 +157,19 @@ it from PASS to FAIL with no repo change at all. `verify` fails closed when
 `reviewed-targets.toml` is absent, not a regular file, or configures no active
 reviewed family — the gate requires at least one. It runs the reviewed-target
 gate before locked build/test verification and confirms each passing step,
-ending with `Verify: PASS`; immediately before that line it also prints a note
-pointing at `audit` as the separate advisory gate. See
+ending with `Verify: PASS`. When run standalone, `verify` prints a note
+pointing at `audit` as the separate advisory gate; Gatehouse suppresses that
+note after its audit step has passed. See
 [ci.md](ci.md) for how to schedule both in CI.
+
+The first Gatehouse step applies the same coverage floor as
+`cargo barbican inventory --enforce`. It fails closed (`Inventory: FAIL`) when
+a direct dependency has entered the graph without an active reviewed family —
+the shape a raw `cargo add` of an unreviewed crate takes — so an uncovered
+direct dependency cannot slip through CI. It enforces direct-dependency
+coverage; declared execution-surface enforcement is a documented follow-up.
+The pre-commit template runs the cheaper standalone floor alongside `pin check`
+for earlier feedback.
 
 ## Manual Template Adoption
 

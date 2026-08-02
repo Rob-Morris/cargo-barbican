@@ -5,9 +5,9 @@ use std::process::ExitCode;
 
 use barbican::{
     OffsetDateTime, PinAddPlan, PinAddRejection, PinExceptionAdvisory, PinExceptionRejection,
-    RustSecAdvisoryId, format_iso_date, parse_iso_date, parse_pin_add_target,
-    parse_reviewed_targets_toml, pin_exception_default_review_by, pin_family_name,
-    pin_review_record_path, plan_pin_add, plan_pin_exception,
+    REVIEW_RECORD_SCAFFOLD_MARKER, RustSecAdvisoryId, format_iso_date, parse_iso_date,
+    parse_pin_add_target, parse_reviewed_targets_toml, pin_exception_default_review_by,
+    pin_family_name, pin_review_record_path, plan_pin_add, plan_pin_exception,
 };
 
 use crate::cli::{PinCommand, REVIEWED_TARGETS_CONFIG_FILE};
@@ -126,7 +126,7 @@ fn run_pin_add(
     }
     writeln!(
         stdout,
-        "\nNext steps:\n- Complete the review record at {}; the scaffold is not a completed review.\n- Run `cargo barbican pin check`, then `cargo barbican audit`, then `cargo barbican verify`.",
+        "\nNext steps:\n- Complete the review record at {}, then delete its {REVIEW_RECORD_SCAFFOLD_MARKER} marker line; the scaffold is not a completed review, and `cargo barbican pin check` fails this family until the marker is gone.\n- Then run `cargo barbican gatehouse pre-release`.",
         plan.review_record()
     )
     .map_err(CommandError::Io)?;
@@ -277,9 +277,13 @@ fn run_pin_exception(
         Err(rejection) => return render_pin_exception_rejection(&rejection, stderr),
     };
 
-    if let Some(exit) =
-        write_family_scaffold(current_dir, config_path, plan.base(), "pin exception", stderr)?
-    {
+    if let Some(exit) = write_family_scaffold(
+        current_dir,
+        config_path,
+        plan.base(),
+        "pin exception",
+        stderr,
+    )? {
         return Ok(exit);
     }
 
@@ -307,7 +311,7 @@ fn run_pin_exception(
     .map_err(CommandError::Io)?;
     writeln!(
         stdout,
-        "\nNext steps:\n- Complete the review record at {}; the scaffold is not a completed review.\n- Prefer remediation: bump the graph to a patched release and remove the exception when one is adoptable.\n- Run `cargo barbican pin check`, then `cargo barbican audit`, then `cargo barbican verify`.",
+        "\nNext steps:\n- Complete the review record at {}, then delete its {REVIEW_RECORD_SCAFFOLD_MARKER} marker line; the scaffold is not a completed review, and `cargo barbican pin check` and `cargo barbican audit` reject this family until the marker is gone.\n- Prefer remediation: bump the graph to a patched release and remove the exception when one is adoptable.\n- Then run `cargo barbican gatehouse pre-release`.",
         plan.base().review_record()
     )
     .map_err(CommandError::Io)?;

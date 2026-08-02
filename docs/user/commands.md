@@ -23,9 +23,10 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican resolve` | Base action | Generate `Cargo.lock` for current manifests under release-age policy. |
 | `cargo barbican update` | Base action | Update existing locked dependencies to exact versions. |
 | `cargo barbican assess` | Base assessment | Classify a dependency diff. |
-| `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption. |
-| `cargo barbican inventory` | Base audit | Report dependency inventory and reviewed-policy coverage. |
+| `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption; `--ci github` also emits the CI workflow. |
+| `cargo barbican inventory` | Base audit / gate | Report dependency inventory and reviewed-policy coverage; `--enforce` gates direct-dependency coverage. |
 | `cargo barbican pin add` | Policy management | Scaffold a reviewed family and review-record stub from `Cargo.lock`. |
+| `cargo barbican pin exception` | Policy management | Scaffold a governed, checksum-bound acceptance of a RustSec advisory finding. |
 | `cargo barbican pin check` | Base policy gate | Enforce reviewed-target policy. |
 | `cargo barbican review` | Base review aid | Print a policy-focused review diff. |
 | `cargo barbican audit` | Base delegated gate | Run delegated advisory and source-policy checks. |
@@ -43,13 +44,17 @@ For exact parser rules and behaviour contracts, see
   crates.io form, a `checksum_sha256`) recorded in a family's `resolved` map.
   `pin check` and `verify` reconcile the current `Cargo.lock` against these
   exact targets.
-- **Gate** — a command whose job is to fail closed: `pin check`, `audit`, and
-  `verify`. A gate passes with a stable terminal token (`Pin check: PASS`,
-  `Audit: PASS`, `Verify: PASS`), blocks and explains why, or — for standalone
-  `pin check` only — skips successfully when no reviewed-target policy is
-  configured yet. Evidence and workflow commands (`age`, `inspect`, `assess`,
-  `review`, `inventory`, `gatehouse candidate`) are not gates in this sense,
-  even where they also exit non-zero on failure.
+- **Gate** — a command whose job is to fail closed: `pin check`, `audit`,
+  `verify`, `inventory --enforce`, and `gatehouse pre-release`. A base gate passes with a stable terminal
+  token (`Pin check: PASS`, `Audit: PASS`, `Verify: PASS`, or — under
+  `--enforce` — `Inventory: PASS`), blocks and explains why, or — for
+  standalone `pin check` only — skips successfully when no reviewed-target
+  policy is configured yet. Evidence and workflow commands (`age`, `inspect`,
+  `assess`, `review`, plain `inventory`, `gatehouse candidate`) are not gates
+  in this sense, even where they also exit non-zero on failure.
+- **Gatehouse** — the workflow namespace. `gatehouse candidate` assembles a
+  pre-add dossier for an exact crates.io release; `gatehouse pre-release`
+  composes the standard whole-repo inventory, audit, and verify sequence.
 - **Surface** — an execution surface a dependency's code runs through:
   `build-rs` (build scripts), `proc-macro`, or `native-sys` (native linking
   and FFI). Declared per crate under a family's `allowed_surfaces`.
@@ -121,6 +126,13 @@ cargo barbican assess
 cargo barbican review
 cargo barbican audit
 cargo barbican verify
+```
+
+Or run the blessed composition of the blocking inventory coverage floor,
+audit, and verify gates:
+
+```bash
+cargo barbican gatehouse pre-release
 ```
 
 Use `gatehouse candidate` when you want the convenience dossier instead of
@@ -258,7 +270,7 @@ serde = "1.0.228"
 
 The crate must already be present in the same family `resolved` map with
 `checksum_sha256`. Release-age-aware commands honour the exception only when
-the family review record exists and the fetched crates.io checksum matches the
+the family review record is completed and the fetched crates.io checksum matches the
 reviewed checksum. `age`, `age-lock`, `resolve`, `update`, and `assess` use
 crates.io's published checksum metadata; `inspect` and `gatehouse candidate`
 also verify downloaded tarball bytes.
@@ -281,7 +293,7 @@ cargo barbican inventory
 ```
 
 It distinguishes a repo with no reviewed-target policy yet from a configured
-policy with uncovered dependencies or missing review records.
+policy with uncovered dependencies or incomplete review records.
 
 ### Comparing Against Non-Git Baselines
 
@@ -362,13 +374,14 @@ Prints the shipped cargo-barbican version.
 | `age-lock` | No | Reads current and baseline lockfiles. |
 | `pick` | No | Fetches crates.io version metadata and prints an exact candidate. |
 | `inspect` | No | Fetches and inspects published crates.io artefacts. |
-| `gatehouse` | No | Workflow namespace. Supported workflows may create temporary sandboxes outside the repo. |
+| `gatehouse` | Depends on workflow | `candidate` creates a temporary sandbox outside the repo; `pre-release` runs Cargo build/test output under `target/`. |
 | `resolve` | Yes | Runs `cargo generate-lockfile`; restores `Cargo.lock` if release-age policy fails. |
 | `update` | Yes | Updates `Cargo.lock` through Cargo. |
 | `update --dry-run` | No | Uses a temporary workspace and prints a preview. |
 | `assess` | No | Reads manifests, lockfiles, policy files, and inspection evidence. |
 | `inventory` | No | Reads manifests, lockfile, and reviewed-target policy to report findings and coverage gaps. |
 | `pin add` | Yes | Appends a reviewed family to `reviewed-targets.toml` and creates a review-record stub; never overwrites existing entries or files. |
+| `pin exception` | Yes | Appends an `allowed_advisories` family and a review-record stub when the crate is uncovered; prints a manual fragment instead when it is already covered. Never overwrites existing entries or files. |
 | `pin check` | No | Local-only reviewed-target enforcement. |
 | `review` | No | Prints review-focused diffs. |
 | `audit` | No intended repo mutation | Delegated tools may update their own caches. |
@@ -379,6 +392,21 @@ Prints the shipped cargo-barbican version.
 `gatehouse` contains workflow affordances built from the lower-level evidence,
 assessment, review, and delegated-tool commands. Treat each workflow as a
 packaged sequence, not as a new policy source.
+
+### `pre-release`
+
+Runs the standard whole-repo pre-release supply-chain gate:
+
+```bash
+cargo barbican gatehouse pre-release
+```
+
+It runs blocking `inventory --enforce`, then blocking `audit`, then blocking
+`verify`. Uncovered transitive packages and undeclared execution surfaces stay
+visible as observational backlog, while a direct coverage-floor failure stops
+before audit. `verify` already includes the default `pin check`, so Gatehouse
+does not run it twice. The workflow fails fast, names the failed primitive,
+and ends with `Gatehouse pre-release: PASS` only when all three gates pass.
 
 ### `candidate`
 
@@ -566,6 +594,7 @@ separate policy semantics.
 
 Currently supported workflows:
 
+- `pre-release` - whole-repo inventory, audit, and verify workflow
 - `candidate` - pre-add intake dossier for one exact crates.io candidate
 
 ### `cargo barbican resolve`
@@ -677,7 +706,7 @@ It is not a permanent policy exception.
 Creates the explicit policy scaffold for adopting cargo-barbican.
 
 ```bash
-cargo barbican policy init
+cargo barbican policy init [--ci <system>]
 ```
 
 The command creates missing files:
@@ -700,13 +729,35 @@ On success it points to the manual adoption guide. Init is intentionally not a
 review command: it does not add reviewed families, write review records, or
 certify existing dependencies.
 
+`--ci <system>` additionally writes a ready-to-run CI enforcement workflow. The
+only supported value is `github`:
+
+```bash
+cargo barbican policy init --ci github
+```
+
+This writes `.github/workflows/barbican.yml`: a single fail-closed gate job (on
+pull requests and pushes to `main`) that installs the tooling with `--locked`,
+pins its third-party actions by commit SHA, and runs `gatehouse pre-release`
+plus `age-lock` and `assess` against the pull-request base. Gatehouse owns the
+blocking inventory coverage floor. The flag is independent of the base
+scaffold and of `barbican.toml` validity. Unlike the idempotent base scaffold, an existing
+`.github/workflows/barbican.yml` is never overwritten: the command fails closed
+(exit `1`), reports the path as blocked, and re-prints the intended workflow so
+the difference can be reconciled by hand.
+
+`policy init` also points at the shipped advisory client-side pre-commit hook
+(`templates/hooks/pre-commit`), which runs the cheap `pin check` /
+`inventory --enforce` subset. See [ci.md](ci.md#pre-commit-hook) for install
+instructions and [integration.md](integration.md) for the full consumer flow.
+
 ### `cargo barbican inventory`
 
 Prints a read-only dependency inventory and reviewed-policy coverage audit for
 the current workspace.
 
 ```bash
-cargo barbican inventory
+cargo barbican inventory [--enforce]
 ```
 
 The command is local-only and read-only. It reads:
@@ -716,12 +767,14 @@ The command is local-only and read-only. It reads:
 - root `[workspace.dependencies]` used by `{ workspace = true }`
 - `reviewed-targets.toml` when present
 - checked-in review-record paths
-- `cargo metadata --format-version 1 --frozen` output for live graph execution
-  surfaces
+- `cargo metadata --format-version 1 --frozen` output for Cargo-parsed direct
+  dependency declarations and live graph execution surfaces; exact direct
+  package identities come from matching those declarations to `Cargo.lock`
+  dependency edges
 
 The report includes rollups, direct dependency exact-pin status, resolved
 crates.io packages and checksums, non-crates.io sources, reviewed-family
-coverage, declared allowed execution surfaces, missing review records, and
+coverage, declared allowed execution surfaces, incomplete review records, and
 uncovered resolved crates. Live graph execution surfaces are reported as
 declared when they match checked-in `allowed_surfaces` policy and undeclared
 otherwise.
@@ -740,10 +793,34 @@ generated default base.
 
 Missing `reviewed-targets.toml` is not an error. Malformed policy, malformed
 workspace manifests, and missing or malformed `Cargo.lock` fail closed.
-If `cargo metadata --frozen` cannot collect the graph surfaces, inventory still
+If `cargo metadata --frozen` cannot collect graph facts, inventory still
 renders the offline sections and marks live graph surfaces as not collected.
-Reported observational findings and policy coverage gaps do not change the
-exit code; this command is an audit view, not an enforcement gate.
+It labels uncovered crates.io packages and non-crates.io sources unclassified
+because their direct/transitive ownership cannot be established.
+The summary separates direct coverage-floor readiness and blockers from the
+observational uncovered transitive backlog, undeclared execution surfaces,
+and other findings. The detailed reviewed-policy section explains which
+sibling gate owns each category. In the default mode (no `--enforce`) the
+report remains informational and does not change the exit code.
+
+`--enforce` adds a coverage-floor gate on top of the same report. The coverage
+floor is the minimum bar for adoption: every direct dependency must be covered
+by an active reviewed family. The gate fails closed (exit `1`, concluding with
+`Inventory: FAIL (direct-dependency coverage floor)`) when no `reviewed-targets.toml` policy is configured, when
+exact direct-package facts could not be collected, or when a direct
+dependency has entered the graph — as a raw `cargo add` of an unreviewed crate
+does — without an active reviewed family covering its exact resolved crate.
+The appended coverage-floor section names each offending crate and
+points at `cargo barbican pin add <crate>` to scaffold coverage; a clean floor
+prints `Inventory: PASS (direct-dependency coverage floor)`. Cargo's parsed declarations and exact lockfile edges
+make direct coverage version-precise and immune to manifest renames. Optional,
+development, build, and target-specific direct dependencies are included;
+same-name transitive versions stay observational. Enforcing declared execution surfaces
+(`build.rs` / proc-macro / native-sys) is a documented follow-up: undeclared
+live surfaces are still reported above but not yet gated. Reviewed-record
+completeness is `pin check`'s gate, not this floor; the shipped CI and
+pre-commit templates run both. Without `--enforce` the report body is unchanged
+and `inventory` never prints an `Inventory:` line.
 
 Workspace-member discovery for the offline manifest sections is approximate,
 not Cargo-exact: literal `[workspace] members` paths are read directly, but
@@ -755,6 +832,9 @@ monorepo with directories that look like workspace members but are excluded,
 or with an unrelated `Cargo.toml` under a scanned root, `inventory` can report
 phantom manifest entries that `cargo metadata` would not consider part of the
 workspace. Cross-check against `cargo metadata` output when the two disagree.
+The `--enforce` verdict does not use this approximation: declarations and
+workspace-member identities come from Cargo metadata, and exact resolved
+direct identities come from `Cargo.lock` dependency edges.
 
 ### `cargo barbican pin add`
 
@@ -803,6 +883,60 @@ Fail-closed behaviour — the command exits `1` without mutating anything when:
 
 The scaffold is not a completed review. Complete the review record, then run
 `pin check`.
+
+### `cargo barbican pin exception`
+
+Scaffolds the governed acceptance of one or more RustSec advisories for a crate
+already resolved in `Cargo.lock`, fully offline. This is the audit-side
+parallel to `pin add`: the governed way to accept an advisory finding when
+there is no adoptable patched release yet, instead of an ungoverned `deny.toml`
+or `.cargo/audit.toml` ignore (which `audit` neutralises regardless).
+
+```bash
+cargo barbican pin exception <crate>[@version] <advisory-id>... [--review-by YYYY-MM-DD]
+```
+
+Use this when `audit` reports a finding and remediation is not yet possible.
+
+Examples:
+
+```bash
+cargo barbican pin exception vulnerable-crate RUSTSEC-2026-0001
+cargo barbican pin exception vulnerable-crate@1.2.3 RUSTSEC-2026-0001 RUSTSEC-2026-0002
+cargo barbican pin exception vulnerable-crate@1.2.3 RUSTSEC-2026-0001 --review-by 2026-09-01
+```
+
+The command:
+
+- validates each advisory id against the `RUSTSEC-YYYY-NNNN` form
+- reads the resolved version and `checksum_sha256` from `Cargo.lock`; the
+  acceptance is checksum-bound, so a lockfile entry without a crates.io
+  checksum fails closed
+- appends a `[[rust.families]]` stub (like `pin add`) with a
+  `[rust.families.allowed_advisories]` entry binding each advisory to a
+  `review_by` re-review deadline — 30 days from today by default, overridable
+  with `--review-by`
+- creates a review-record stub under `docs/dependency-reviews/` pre-filled with
+  the accepted advisories
+
+The version may be omitted when the crate resolves to exactly one version in
+`Cargo.lock`. When the crate is already covered by an active reviewed family,
+the command does not rewrite the existing block; it prints the exact
+`allowed_advisories` fragment to add by hand plus the review record to update.
+
+Fail-closed behaviour — the command exits `1` without mutating anything on an
+invalid advisory id or `--review-by` date, a crate or version missing from
+`Cargo.lock`, a checksumless lockfile entry, an advisory already allowed by a
+reviewed family, a family-name or record-path collision, or when
+`reviewed-targets.toml` is absent (run `cargo barbican policy init` first).
+
+The scaffold is not a completed review. The stub carries the
+`BARBICAN-REVIEW-PENDING` marker, and both `pin check` and `audit` reject the
+family until a reviewer completes the record and deletes the marker; `audit`
+also fails the exception again once `review_by` passes. Complete the record,
+then run `gatehouse pre-release`. See
+[configuration.md](configuration.md) for the `allowed_advisories` mechanism and
+[operations.md](operations.md) for the failing-audit workflow this fits into.
 
 ### `cargo barbican pin check`
 
@@ -889,7 +1023,7 @@ The diff includes policy-relevant files when present:
 Runs delegated advisory and source-policy checks.
 
 ```bash
-cargo barbican audit
+cargo barbican audit [--format text|json]
 ```
 
 Use this as the routine delegated advisory and deny-policy check.
@@ -903,12 +1037,24 @@ and owns pass/fail itself. A non-zero scanner exit is normal when findings are
 present; incomplete or unparsable scanner evidence fails closed.
 
 Reviewed advisory exceptions are honoured only when the resolved target and
-checksum still match, the review record exists, and `review_by` has not
+checksum still match, the review record is completed, and `review_by` has not
 expired. Native advisory ignores in `deny.toml` or `.cargo/audit.toml` are
 neutralised and reported according to
 `delegates.unmanaged_delegated_policy` (`warn` | `deny` | `allow`).
 
-See [../functional/cli.md](../functional/cli.md) for the full audit contract.
+To accept a finding when no patched release is adoptable yet, use the governed
+`cargo barbican pin exception` path rather than a native ignore.
+
+`--format` selects the report format. The default `text` report is
+human-oriented and prints the stable `Audit: PASS` / `Audit: FAIL` token.
+`--format json` emits a schema-versioned JSON report on stdout — top-level
+`schema_version`, `status`, `success`, structured `findings`, and per-finding
+remediation objects — for CI consumption. The `Audit:` token is a text-mode
+signal only, so a JSON consumer keys off `status` / `success` and the exit code
+instead of grepping for it.
+
+See [../functional/cli.md](../functional/cli.md) for the full audit contract,
+including the JSON schema.
 
 ### `cargo barbican verify`
 
@@ -943,7 +1089,7 @@ This command executes normal Cargo build and test behaviour. That can run build
 scripts, proc macros, and tests from the dependency graph. Run it after the
 policy and review steps have made that execution acceptable.
 
-#### `audit` and `verify` are the enforcement gate, kept separate
+#### `audit` and `verify` stay separate primitives
 
 `cargo barbican audit` plus `cargo barbican verify` together are the
 enforcement gate a repo runs before trusting its dependency state. They are
@@ -957,6 +1103,7 @@ verdicts depend on different things:
   runs. A new RustSec advisory against an already-locked crate can flip
   `audit` from PASS to FAIL with no repo change at all.
 
-A workflow that composes both gates into one step is a possible future
-addition via `gatehouse`, but is not implemented today; run `audit` and
-`verify` as two commands. See [ci.md](ci.md) for how to schedule each in CI.
+Run them directly when you need independent scheduling or diagnostics. For the
+standard release path, `cargo barbican gatehouse pre-release` composes them
+without merging their semantics and applies the blocking inventory coverage
+floor first. See [ci.md](ci.md) for the scheduled-audit pattern.

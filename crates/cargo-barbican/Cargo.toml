@@ -1,12 +1,15 @@
 [package]
 name = "cargo-barbican"
-version = "0.23.0"
+version = "0.24.0"
 description = "Cargo subcommand for Rust supply-chain hardening. Invokable as `cargo barbican`."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+readme = "../../README.md"
+keywords = ["security", "supply-chain", "cargo", "dependencies", "audit"]
+categories = ["development-tools::cargo-plugins", "command-line-utilities"]
 publish = false
 
 [lints]

@@ -134,6 +134,125 @@ serde_derive = "1.0.228"
     assert!(rendered.contains("Cargo.lock ok for serde_derive: matched {version=1.0.228}"));
 }
 
+/// Writes the manifest, lockfile, and reviewed-targets policy shared by the
+/// review-record status tests below, leaving the family's `review_record`
+/// path for the caller to populate.
+fn write_serde_reviewed_fixture(temp_dir: &Path) {
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[(
+            "serde",
+            "1.0.228",
+            Some("registry+https://github.com/rust-lang/crates.io-index"),
+            Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+        )]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/2026-05-27-serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+    )
+    .expect("reviewed targets should write");
+}
+
+fn run_pin_check(temp_dir: &Path) -> (ExitCode, String) {
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit = run_cli_with_runner(cli, temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("pin check should run");
+    (
+        exit,
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+    )
+}
+
+#[test]
+fn pin_check_fails_when_review_record_is_an_unreviewed_scaffold_stub() {
+    let temp_dir = fresh_temp_dir();
+    write_serde_reviewed_fixture(&temp_dir);
+    let record_path = temp_dir.join("docs/dependency-reviews/2026-05-27-serde.md");
+    fs::create_dir_all(record_path.parent().expect("record has a parent"))
+        .expect("record dir should create");
+    fs::write(
+        &record_path,
+        format!(
+            "# Dependency Review: serde 1.0.228\n\n<!-- {REVIEW_RECORD_SCAFFOLD_MARKER}: complete this scaffold. -->\n\n## Summary\n"
+        ),
+    )
+    .expect("scaffold stub should write");
+
+    let (exit_code, rendered) = run_pin_check(&temp_dir);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(rendered.contains("Pin check: FAIL"));
+    assert!(rendered.contains(
+        "serde-family: review record at docs/dependency-reviews/2026-05-27-serde.md is an unreviewed scaffold"
+    ));
+    assert!(rendered.contains(REVIEW_RECORD_SCAFFOLD_MARKER));
+}
+
+#[test]
+fn pin_check_fails_when_review_record_is_empty() {
+    let temp_dir = fresh_temp_dir();
+    write_serde_reviewed_fixture(&temp_dir);
+    let record_path = temp_dir.join("docs/dependency-reviews/2026-05-27-serde.md");
+    fs::create_dir_all(record_path.parent().expect("record has a parent"))
+        .expect("record dir should create");
+    fs::write(&record_path, "   \n\t\n").expect("blank record should write");
+
+    let (exit_code, rendered) = run_pin_check(&temp_dir);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(rendered.contains("Pin check: FAIL"));
+    assert!(rendered.contains(
+        "serde-family: review record at docs/dependency-reviews/2026-05-27-serde.md is empty"
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn pin_check_fails_when_review_record_is_a_symlink() {
+    let temp_dir = fresh_temp_dir();
+    write_serde_reviewed_fixture(&temp_dir);
+    let review_dir = temp_dir.join("docs/dependency-reviews");
+    fs::create_dir_all(&review_dir).expect("review dir should create");
+    let real_record = temp_dir.join("real-review.md");
+    fs::write(
+        &real_record,
+        "# Dependency Review: serde 1.0.228\n\nreviewed\n",
+    )
+    .expect("real completed record should write");
+    std::os::unix::fs::symlink(&real_record, review_dir.join("2026-05-27-serde.md"))
+        .expect("review record symlink should create");
+
+    let (exit_code, rendered) = run_pin_check(&temp_dir);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(rendered.contains("Pin check: FAIL"));
+    assert!(rendered.contains(
+        "serde-family: review record missing at docs/dependency-reviews/2026-05-27-serde.md"
+    ));
+}
+
 #[test]
 fn pin_check_fails_closed_on_control_characters_in_reviewed_family_name() {
     // `parse_reviewed_targets_toml` rejects control characters in a family

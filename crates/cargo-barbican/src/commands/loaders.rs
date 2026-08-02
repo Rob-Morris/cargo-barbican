@@ -1,12 +1,13 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::io;
 use std::path::Path;
 
 use barbican::{
-    BarbicanConfig, ExactCrateSpec, ReviewRecordFact, ReviewedReleaseAgeException, ReviewedTargets,
-    advisory_ignores_from_toml, parse_lockfile, parse_manifest_dependencies,
+    BarbicanConfig, ExactCrateSpec, ReviewRecordFact, ReviewRecordStatus,
+    ReviewedReleaseAgeException, ReviewedTargets, advisory_ignores_from_toml,
+    classify_review_record, parse_lockfile, parse_manifest_dependencies,
     parse_manifest_direct_requirements, parse_reviewed_targets_toml,
     parse_workspace_dependency_requirements,
 };
@@ -469,6 +470,28 @@ pub(crate) fn load_release_age_context(
     Ok((minimum_days, reviewed_release_age_exceptions))
 }
 
+/// A stdout provenance note when the release-age minimum was set on the command
+/// line and differs from the configured value (or the built-in default when
+/// `barbican.toml` is absent), so a CI log records that configured policy was
+/// overridden for this invocation. Returns `None` when there is no override or
+/// the override matches the configured value, so the common path stays silent.
+pub(crate) fn release_age_override_note(
+    current_dir: &Path,
+    min_age_days: Option<u64>,
+) -> Result<Option<String>, CommandError> {
+    let Some(effective) = min_age_days else {
+        return Ok(None);
+    };
+    let configured = load_config(current_dir)?.release_age.minimum_days;
+    if effective == configured {
+        return Ok(None);
+    }
+
+    Ok(Some(format!(
+        "note: release-age minimum overridden to {effective} days via --min-age-days (configured {configured})"
+    )))
+}
+
 pub(crate) fn load_reviewed_release_age_exceptions(
     current_dir: &Path,
     path: &Path,
@@ -477,33 +500,56 @@ pub(crate) fn load_reviewed_release_age_exceptions(
         return Ok(ReviewedReleaseAgeExceptions::default());
     };
 
+    let mut review_record_statuses = ReviewRecordStatusCache::new(current_dir);
     Ok(collect_reviewed_release_age_exceptions(
         &reviewed_targets,
-        current_dir,
+        &mut review_record_statuses,
     ))
 }
 
 pub(crate) fn collect_reviewed_release_age_exceptions(
     reviewed_targets: &ReviewedTargets,
-    current_dir: &Path,
+    review_record_statuses: &mut ReviewRecordStatusCache<'_>,
 ) -> ReviewedReleaseAgeExceptions {
     let mut exceptions = ReviewedReleaseAgeExceptions::default();
 
     for exception in reviewed_targets.release_age_exceptions() {
-        if review_record_exists(current_dir, exception.review_record()) {
+        let status = review_record_statuses.status(exception.review_record());
+        if status.is_satisfied() {
             exceptions.honoured.push(exception);
         } else {
-            exceptions.missing_review_records.push(exception);
+            exceptions.unsatisfied_review_records.push(exception);
         }
     }
 
     exceptions
 }
 
+pub(crate) struct ReviewRecordStatusCache<'a> {
+    current_dir: &'a Path,
+    statuses: BTreeMap<String, ReviewRecordStatus>,
+}
+
+impl<'a> ReviewRecordStatusCache<'a> {
+    pub(crate) fn new(current_dir: &'a Path) -> Self {
+        Self {
+            current_dir,
+            statuses: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn status(&mut self, review_record: &str) -> ReviewRecordStatus {
+        *self
+            .statuses
+            .entry(review_record.to_owned())
+            .or_insert_with(|| review_record_status(self.current_dir, review_record))
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ReviewedReleaseAgeExceptions {
     honoured: Vec<ReviewedReleaseAgeException>,
-    missing_review_records: Vec<ReviewedReleaseAgeException>,
+    unsatisfied_review_records: Vec<ReviewedReleaseAgeException>,
 }
 
 impl ReviewedReleaseAgeExceptions {
@@ -511,11 +557,11 @@ impl ReviewedReleaseAgeExceptions {
         &self.honoured
     }
 
-    pub(crate) fn missing_for_spec(
+    pub(crate) fn unsatisfied_for_spec(
         &self,
         spec: &ExactCrateSpec,
     ) -> Option<&ReviewedReleaseAgeException> {
-        self.missing_review_records
+        self.unsatisfied_review_records
             .iter()
             .find(|exception| exception.spec() == spec)
     }
@@ -525,22 +571,29 @@ pub(crate) fn check_review_record_paths(
     current_dir: &Path,
     reviewed_targets: &ReviewedTargets,
 ) -> Vec<ReviewRecordFact> {
+    let mut statuses = ReviewRecordStatusCache::new(current_dir);
     reviewed_targets
         .rust_families()
         .iter()
         .map(|family| {
             let review_record = family.review_record().to_owned();
-            let exists = review_record_exists(current_dir, &review_record);
+            let status = statuses.status(&review_record);
 
-            ReviewRecordFact::new(family.name().to_owned(), review_record, exists)
+            ReviewRecordFact::new(family.name().to_owned(), review_record, status)
         })
         .collect()
 }
 
-pub(crate) fn review_record_exists(current_dir: &Path, review_record: &str) -> bool {
-    fs::symlink_metadata(current_dir.join(review_record))
-        .map(|metadata| metadata.is_file())
-        .unwrap_or(false)
+/// Reads a family's review record and classifies it for the reviewed-target
+/// gate. A symlink, non-regular file, missing path, or read error all map to a
+/// [`ReviewRecordStatus::Missing`] fail-closed status, so a swapped symlink or
+/// blank stub can never satisfy the gate. The content read stays in the shell;
+/// the classification itself lives in the library.
+pub(crate) fn review_record_status(current_dir: &Path, review_record: &str) -> ReviewRecordStatus {
+    let content = read_optional_text_no_symlink(current_dir, Path::new(review_record))
+        .ok()
+        .flatten();
+    classify_review_record(content.as_deref())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -598,7 +651,52 @@ mod tests {
     use std::fs;
 
     use super::super::scratch_dir::ScratchDir;
-    use super::{review_record_exists, validate_crates_io_base_url};
+    use super::{release_age_override_note, review_record_status, validate_crates_io_base_url};
+
+    #[test]
+    fn release_age_override_note_flags_only_a_real_override() {
+        let scratch = ScratchDir::create("cargo-barbican-override-note-test", false)
+            .expect("scratch dir should create");
+        let dir = scratch.path();
+
+        assert_eq!(
+            release_age_override_note(dir, None).expect("no override should succeed"),
+            None,
+            "absent override must stay silent"
+        );
+        assert_eq!(
+            release_age_override_note(dir, Some(7)).expect("matching override should succeed"),
+            None,
+            "an override equal to the default must stay silent"
+        );
+        assert_eq!(
+            release_age_override_note(dir, Some(0)).expect("differing override should succeed"),
+            Some(
+                "note: release-age minimum overridden to 0 days via --min-age-days (configured 7)"
+                    .to_owned()
+            ),
+            "an override differing from the default must be reported against the default"
+        );
+
+        fs::write(
+            dir.join("barbican.toml"),
+            "[release_age]\nminimum_days = 14\n",
+        )
+        .expect("barbican.toml should write");
+        assert_eq!(
+            release_age_override_note(dir, Some(3)).expect("differing override should succeed"),
+            Some(
+                "note: release-age minimum overridden to 3 days via --min-age-days (configured 14)"
+                    .to_owned()
+            ),
+            "the note must report the configured value, not the default"
+        );
+        assert_eq!(
+            release_age_override_note(dir, Some(14)).expect("matching override should succeed"),
+            None,
+            "an override equal to the configured value must stay silent"
+        );
+    }
 
     #[test]
     fn accepts_https_crates_io_base_urls() {
@@ -648,9 +746,9 @@ mod tests {
         std::os::unix::fs::symlink(&real_record, review_dir.join("linked.md"))
             .expect("review record symlink should create");
 
-        assert!(!review_record_exists(
-            scratch.path(),
-            "docs/dependency-reviews/linked.md"
-        ));
+        assert!(
+            !review_record_status(scratch.path(), "docs/dependency-reviews/linked.md")
+                .is_satisfied()
+        );
     }
 }

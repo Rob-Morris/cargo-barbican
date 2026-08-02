@@ -6,6 +6,7 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -46,10 +47,145 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
 }
 
 #[test]
+fn policy_init_without_ci_does_not_emit_workflow() {
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(!temp_dir.join(".github/workflows/barbican.yml").exists());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("policy init --ci github"));
+    assert!(rendered.contains("templates/hooks/pre-commit"));
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn policy_init_ci_github_emits_enforcement_workflow() {
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--ci", "github"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    // The base scaffold is created independently of the CI workflow.
+    assert!(temp_dir.join("barbican.toml").exists());
+    assert!(temp_dir.join("reviewed-targets.toml").exists());
+
+    let workflow = fs::read_to_string(temp_dir.join(".github/workflows/barbican.yml"))
+        .expect("workflow should exist");
+    for gate_command in [
+        "cargo barbican gatehouse pre-release",
+        "cargo barbican age-lock --base-ref",
+        "cargo barbican assess --base-ref",
+    ] {
+        assert!(
+            workflow.contains(gate_command),
+            "emitted workflow should run `{gate_command}`"
+        );
+    }
+    assert_eq!(
+        workflow
+            .matches("cargo barbican gatehouse pre-release")
+            .count(),
+        1
+    );
+    assert!(!workflow.contains("cargo barbican inventory --enforce"));
+    assert!(workflow.contains("cargo install --locked"));
+    assert!(workflow.contains("--tag v0.24.0"));
+    assert!(workflow.contains("cargo-deny@0.19.6"));
+    assert!(workflow.contains("cargo-audit@0.22.1"));
+    assert!(
+        workflow.contains("actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3")
+    );
+    assert!(
+        workflow.contains("Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1")
+    );
+
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("- .github/workflows/barbican.yml: created\n"));
+    assert!(
+        rendered
+            .contains("A CI enforcement workflow was written to .github/workflows/barbican.yml")
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn policy_init_ci_github_fails_closed_on_existing_workflow() {
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+
+    let first = Cli::parse_from(["cargo-barbican", "policy", "init", "--ci", "github"]);
+    let mut first_stdout = Vec::new();
+    let mut first_stderr = Vec::new();
+    let first_exit = run_cli_with_runner(
+        first,
+        &temp_dir,
+        &client,
+        &runner,
+        &mut first_stdout,
+        &mut first_stderr,
+    )
+    .expect("first command should run");
+    assert_eq!(first_exit, ExitCode::SUCCESS);
+
+    let workflow_path = temp_dir.join(".github/workflows/barbican.yml");
+    let created =
+        fs::read_to_string(&workflow_path).expect("workflow should exist after first run");
+
+    let second = Cli::parse_from(["cargo-barbican", "policy", "init", "--ci", "github"]);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let second_exit = run_cli_with_runner(
+        second,
+        &temp_dir,
+        &client,
+        &runner,
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("second command should run");
+
+    assert_eq!(second_exit, ExitCode::from(1));
+    assert_eq!(
+        fs::read_to_string(&workflow_path).expect("workflow should still exist"),
+        created,
+        "an existing workflow must not be overwritten"
+    );
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains(
+        "- .github/workflows/barbican.yml: blocked (already exists; refusing to overwrite the CI workflow)"
+    ));
+    assert!(rendered.contains(
+        "The .github/workflows/barbican.yml workflow was not written because a file already exists there"
+    ));
+    // The fail-closed re-print carries the intended workflow so it can be reconciled.
+    assert!(rendered.contains("cargo barbican gatehouse pre-release"));
+    assert!(stderr.is_empty());
+}
+
+#[test]
 fn policy_init_is_idempotent_for_existing_regular_scaffold() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
 
     for _ in 0..2 {
         let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
@@ -85,6 +221,7 @@ fn policy_init_preserves_existing_regular_deny_toml() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let existing_deny = "[bans]\nmultiple-versions = \"warn\"\n";
     fs::write(temp_dir.join("deny.toml"), existing_deny).expect("deny config should write");
     let mut stdout = Vec::new();
@@ -109,6 +246,7 @@ fn policy_init_validates_existing_reviewed_targets_policy() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(temp_dir.join("reviewed-targets.toml"), "[rust]\n")
         .expect("empty reviewed targets policy should write");
     let mut stdout = Vec::new();
@@ -129,6 +267,7 @@ fn policy_init_reports_malformed_existing_reviewed_targets_policy() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("reviewed-targets.toml"),
         "[[rust.families]]\nname = \"bad\"\nreview_record = \"docs/dependency-reviews/bad.md\"\n",
@@ -152,6 +291,7 @@ fn policy_init_escapes_malformed_reviewed_targets_parse_diagnostics() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("reviewed-targets.toml"),
         "[rust]\n\u{001b} = \"pwned\"\n",
@@ -178,6 +318,7 @@ fn policy_init_reports_malformed_config_without_creating_dependent_scaffold() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("barbican.toml"),
         "[release_age]\nminimum_days = 365001\n",
@@ -204,6 +345,7 @@ fn policy_init_escapes_malformed_config_parse_diagnostics() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("barbican.toml"),
         "[delegates]\n\u{001b} = \"pwned\"\n",
@@ -232,6 +374,7 @@ fn policy_init_escapes_unicode_line_separators_in_parse_diagnostics() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("reviewed-targets.toml"),
         "[rust]\n\u{2028} = \"pwned\"\n",
@@ -257,6 +400,7 @@ fn policy_init_fails_closed_on_wrong_type_scaffold_paths() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::create_dir(temp_dir.join("reviewed-targets.toml")).expect("wrong type path should exist");
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -282,6 +426,7 @@ fn policy_init_fails_closed_on_symlinked_policy_paths() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(temp_dir.join("real-reviewed-targets.toml"), "[rust]\n")
         .expect("real target should write");
     std::os::unix::fs::symlink(
@@ -312,6 +457,7 @@ fn policy_init_does_not_write_through_symlinked_review_directory() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::create_dir_all(temp_dir.join("outside-reviews"))
         .expect("outside review directory should create");
     fs::create_dir_all(temp_dir.join("docs")).expect("docs directory should create");
@@ -342,6 +488,7 @@ fn policy_init_does_not_write_through_symlinked_scaffold_ancestors() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::create_dir_all(temp_dir.join("outside-docs")).expect("outside docs should create");
     std::os::unix::fs::symlink(temp_dir.join("outside-docs"), temp_dir.join("docs"))
         .expect("docs symlink should create");

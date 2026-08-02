@@ -12,7 +12,7 @@ How a consumer repo adopts cargo-barbican.
 review-then-pin dogma cargo-barbican asks of its own dependents:
 
 ```bash
-cargo install --locked cargo-deny cargo-audit
+cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
 Review each tool's own release before pinning it, the same way you would
@@ -20,16 +20,22 @@ review any other dependency. Both tools are also the first review records a
 consumer repo typically writes — see the manual onboarding guide
 ([adoption.md](adoption.md)) and step 3 below.
 
-If either tool is missing or not on `PATH`, `cargo barbican audit` fails
-closed: it cannot invoke the delegated scanner, so it reports the subprocess
-failure and exits non-zero rather than silently skipping the check.
+If a required delegate is missing from `PATH`, `cargo barbican audit` detects
+this before delegating and fails closed, naming the tool and the exact install
+command — for example `FAIL cargo-deny: not found on PATH; install with
+cargo install --locked cargo-deny@0.19.6` — then exits non-zero rather than silently
+skipping the check. `cargo-audit` is only required when it is the configured
+lockfile scanner, so a `cargo-deny`-only setup does not force it to be
+installed. If a delegate is installed but its run fails, `audit` surfaces the
+delegate's exit status and a stderr excerpt instead of a confusing JSON-parse
+error.
 
 ## Consumer flow
 
 1. Install:
 
    ```bash
-   cargo install --locked --git https://github.com/rob-morris/cargo-barbican --branch main
+   cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0
    ```
 
 2. Create the policy scaffold in the consumer repo:
@@ -42,6 +48,11 @@ failure and exits non-zero rather than silently skipping the check.
    `barbican.toml`, `deny.toml`, `reviewed-targets.toml`, and
    `docs/dependency-reviews/README.md`. It preserves existing regular files,
    reports issues, and does not review or certify existing dependencies.
+
+   `cargo barbican policy init --ci github` additionally emits a ready-to-run
+   `.github/workflows/barbican.yml` enforcement gate (it fails closed rather
+   than overwriting an existing workflow at that path) and points at the shipped
+   client-side pre-commit hook. See [ci.md](ci.md) for both.
 
    If you need to adopt manually, check out the same cargo-barbican branch, then
    copy the available templates:
@@ -78,14 +89,12 @@ failure and exits non-zero rather than silently skipping the check.
 4. Run the smoke checks:
 
    ```bash
-   cargo barbican pin check
-   cargo barbican audit
-   cargo barbican verify
+   cargo barbican gatehouse pre-release
    ```
 
-   `verify` now reuses the default `pin check` gate before locked build/test
-   execution, so the separate `pin check` run is mainly for seeing the reviewed
-   target report directly before the build step. `audit` and `verify` stay
+   `gatehouse pre-release` first enforces the direct-dependency inventory
+   coverage floor, then runs `audit` and `verify`; `verify` reuses the default
+   `pin check` gate before locked build/test execution. `audit` and `verify` stay
    separate commands: `verify`'s verdict is a deterministic function of the
    repo, while `audit`'s verdict also depends on the advisory landscape at run
    time, so the two are scheduled differently in CI — see
@@ -106,25 +115,34 @@ failure and exits non-zero rather than silently skipping the check.
 5. Update the consumer repo's `AGENTS.md` so dependency-gate instructions
    point at `cargo barbican` instead of a manual process.
 
-6. Wire the gates into CI. See [ci.md](ci.md) for a worked GitHub Actions
-   example, including which gates belong on pull requests versus scheduled
-   runs and a pre-commit-hook note.
+6. Wire the gates into CI. `cargo barbican policy init --ci github` emits a
+   ready-to-run `.github/workflows/barbican.yml` gate, and the shipped
+   `templates/hooks/pre-commit` hook (`pin check` + `inventory --enforce`)
+   installs via `git config core.hooksPath` or a copy into
+   `.git/hooks/pre-commit` for fast local feedback. See [ci.md](ci.md) for the
+   worked GitHub Actions example, which gates belong on pull requests versus
+   scheduled runs, and the hook install instructions.
 
 ## Versioning and re-sync
 
-During the current pre-release window, consumers install from the `main`
-branch. Template files still include a synced version header so copied policy
-files can be compared against the cargo-barbican repo version they came from:
+During the insiders window, consumers install from the immutable release tag.
+Template files still include a synced version header so copied policy
+files can be compared against the cargo-barbican repo version they came from.
+Only the version line is common to every template; the review-record template
+is the strictest, telling you not to edit the copy directly:
 
 ```text
-# Synced from cargo-barbican v0.23.0
+# Synced from cargo-barbican v0.24.0
 # Edit upstream and re-sync; do not edit this file directly.
 ```
 
+The policy files you are meant to tailor — `barbican.toml` and
+`reviewed-targets.toml` — instead carry a header inviting local edits after
+copying.
+
 When cargo-barbican releases a new version, the consumer:
 
-1. Re-runs the copy step from the updated branch, or from the public release
-   tag once public tags are cut.
+1. Re-runs the copy step from the updated immutable tag.
 2. Reviews the diff.
 3. Updates the tool-install review record to cite the new version.
 

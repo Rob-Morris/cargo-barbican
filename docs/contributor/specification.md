@@ -15,7 +15,9 @@ not foreclosed.
 
 ## Source material
 
-Read the matching undertask sources before redesigning behaviour:
+cargo-barbican's origin and reference implementation is undertask, a private
+predecessor project. For maintainers with access to that private repo, the
+matching sources worth consulting before redesigning behaviour are:
 
 - `scripts/check-crate-release-age.py`
 - `scripts/check-cargo-lock-release-age.py`
@@ -25,11 +27,10 @@ Read the matching undertask sources before redesigning behaviour:
 - `deny.toml`
 - `docs/dependency-reviews/`
 
-The reference repo is
-[undertask](https://github.com/rob-morris/undertask). It is a working reference,
-not the specification: re-implement its proven behaviour faithfully where
-surfaces overlap, and expect cargo-barbican to extend beyond it as a policy
-product. Document both deviations and extensions explicitly.
+undertask is a working reference, not the specification: re-implement its proven
+behaviour faithfully where surfaces overlap, and expect cargo-barbican to extend
+beyond it as a policy product. Document both deviations and extensions
+explicitly.
 
 ## Dependency discipline
 
@@ -62,6 +63,8 @@ blocking I/O is acceptable at the CLI boundary.
 
 - No new dependencies without a review record.
 - No second HTTP client. Replace `ureq` if necessary; do not add a peer.
+- Crates.io requests that begin from an HTTPS base URL remain HTTPS-only across
+  redirects; plain HTTP is limited to the validated loopback test seam.
 - The library must remain testable without network access.
 - The binary is the subprocess boundary for `git` and `cargo`.
 - Templates are shipped content for consumer repos, not repo-facing documentation.
@@ -166,6 +169,20 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 - not a repo-integration simulation; repo adoption remains covered by
   `resolve`, `update`, `assess`, `review`, `pin check`, and `verify`
 
+`cargo barbican gatehouse pre-release` is currently:
+
+- the blessed fail-fast whole-repo composition for release use
+- ordered as the blocking `inventory --enforce` coverage floor, blocking
+  `audit`, then blocking `verify`
+- fail-fast on uncovered direct dependencies, external direct sources, or
+  unavailable graph/policy facts, while leaving transitive backlog and
+  undeclared execution surfaces observational
+- non-duplicating: the reviewed-target `pin check` runs once inside `verify`
+- a composition layer only; `audit` and `verify` keep their standalone policy
+  meanings, exit behaviour, and report bodies
+- text-only in this first slice, with no workflow configuration, policy
+  overrides, exception flags, or JSON contract
+
 `cargo barbican policy init` is currently:
 
 - the deterministic setup command for explicit repo policy scaffolding
@@ -196,12 +213,16 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   configured rather than failing
 - fail-closed on malformed required inputs: missing or malformed `Cargo.lock`,
   malformed manifests, and malformed reviewed-target policy stop the command
-- gap-oriented rather than enforcing: non-exact direct pins and non-crates.io
-  sources are reported as observational findings, while missing review records
-  and uncovered resolved crates are reported as policy coverage gaps; live
-  execution surfaces not declared in `allowed_surfaces` are observational when
-  no policy is configured and policy coverage gaps when policy is configured;
-  none of these changes the exit code
+- explicit about readiness categories: the summary separates the
+  direct-dependency coverage floor and its direct blockers from observational
+  uncovered transitive backlog, observational undeclared execution surfaces,
+  enforced incomplete review records, and other observational manifest/source
+  findings; the detailed reviewed-policy section names which sibling gate owns
+  each category
+- informational by default: findings do not change the exit code without
+  `--enforce`; the opt-in floor gates exact direct-dependency coverage only and
+  ends with an explicitly scoped `Inventory: PASS/FAIL (direct-dependency
+  coverage floor)` token
 - scoped to Cargo's ordinary crates.io source identity: source replacement or
   mirror configurations that rewrite the lockfile source string are outside the
   supported coverage model for this slice and may be reported as
@@ -209,11 +230,15 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 - approximate about workspace membership in this manifest-discovery slice: member
   discovery uses local manifest paths and directory walks rather than Cargo's
   exact glob-depth and `[workspace] exclude` semantics, so nested or excluded
-  non-member manifests under walked roots can appear in the inventory; precise
-  member resolution belongs to a future metadata-backed member-discovery slice
-- explicit about surface collection failure: if `cargo metadata --frozen` fails
+  non-member manifests under walked roots can appear in the inventory; the
+  enforcement floor separately uses Cargo metadata's parsed declarations and
+  workspace-member identities plus exact `Cargo.lock` dependency edges
+- explicit about graph collection failure: if `cargo metadata --frozen` fails
   because the graph is unresolved or metadata cannot be parsed, inventory still
-  renders the offline report and marks live graph surfaces as not collected
+  renders the offline report, while `inventory --enforce` fails closed because
+  exact direct-package identities are unavailable; unresolved crates.io and
+  non-crates.io source gaps remain neutral unclassified facts rather than being
+  labelled enforced or observational
 
 `cargo barbican audit` is currently:
 
@@ -273,14 +298,14 @@ The reviewed-target enforcement baseline is:
 - `assess` suppresses matching reviewed `build-rs`, `proc-macro`, and
   `native-sys` execution-surface signals from elevated-risk findings, while
   rendering them in `Allowed policy exceptions:`
-- `assess` validates the matching family `review_record` exists before trusting
+- `assess` validates the matching family `review_record` is completed before trusting
   an applicable allowance
-- review-record checks validate a non-symlink file exists at the configured
-  path; they do not authenticate or parse the record content, so reviewers must
-  inspect reviewed-target changes and their cited records together
+- review-record checks require a regular non-symlink, non-empty file without
+  the scaffold pending marker; they do not authenticate the review content, so
+  reviewers must inspect reviewed-target changes and their cited records together
 - release-age-aware commands honour matching `allowed_age_exceptions` from the
   same reviewed family only when the referenced `resolved` target carries
-  `checksum_sha256` and the family `review_record` exists
+  `checksum_sha256` and the family `review_record` is completed
 - `age`, `age-lock`, `resolve`, `update`, and `assess` compare that reviewed
   digest against crates.io's published checksum metadata; `inspect` and
   `gatehouse candidate` also verify downloaded tarball bytes through the

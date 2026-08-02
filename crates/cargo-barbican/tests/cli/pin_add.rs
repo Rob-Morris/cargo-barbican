@@ -1,7 +1,21 @@
 use super::common::*;
 
+fn run_pin_check(temp_dir: &Path) -> (ExitCode, String) {
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit = run_cli_with_runner(cli, temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("pin check should run");
+    (
+        exit,
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+    )
+}
+
 #[test]
-fn pin_add_scaffolds_record_and_family_then_pin_check_passes() {
+fn pin_add_scaffolds_a_stub_that_fails_pin_check_until_the_record_is_completed() {
     let temp_dir = fresh_temp_dir();
     write_pin_add_workspace(&temp_dir);
 
@@ -24,6 +38,7 @@ fn pin_add_scaffolds_record_and_family_then_pin_check_passes() {
     let record = fs::read_to_string(temp_dir.join("docs/dependency-reviews/2020-06-01-serde.md"))
         .expect("scaffolded review record should exist");
     assert!(record.starts_with("# Dependency Review: serde 1.0.228\n"));
+    assert!(record.contains(REVIEW_RECORD_SCAFFOLD_MARKER));
     assert!(record.contains("- Active family name: serde-2020-06-01"));
     assert!(record.contains("- Direct reviewed set: `serde` `=1.0.228`"));
     assert!(record.contains(PIN_ADD_TEST_CHECKSUM));
@@ -37,27 +52,22 @@ fn pin_add_scaffolds_record_and_family_then_pin_check_passes() {
     assert!(policy.contains("version = \"1.0.228\""));
     assert!(policy.contains(&format!("checksum_sha256 = \"{PIN_ADD_TEST_CHECKSUM}\"")));
 
-    let pin_check_cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
-    let client = FakeCratesIoClient::default();
-    let runner = FakeCommandRunner::default();
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    let pin_check_exit = run_cli_with_runner(
-        pin_check_cli,
-        &temp_dir,
-        &client,
-        &runner,
-        &mut stdout,
-        &mut stderr,
-    )
-    .expect("pin check should run");
-
-    assert_eq!(pin_check_exit, ExitCode::SUCCESS);
+    // The freshly scaffolded stub must NOT satisfy the gate it prepared:
+    // pin check fails closed, naming the record file and the marker.
+    let (scaffold_exit, scaffold_stdout) = run_pin_check(&temp_dir);
+    assert_eq!(scaffold_exit, ExitCode::from(1));
+    assert!(scaffold_stdout.contains("Pin check: FAIL"));
     assert!(
-        String::from_utf8(stdout)
-            .expect("stdout should be utf8")
-            .contains("Pin check: PASS")
+        scaffold_stdout
+            .contains("docs/dependency-reviews/2020-06-01-serde.md is an unreviewed scaffold")
     );
+    assert!(scaffold_stdout.contains(REVIEW_RECORD_SCAFFOLD_MARKER));
+
+    // Completing the record (deleting the marker line) makes the gate pass.
+    complete_scaffolded_review_record(&temp_dir, "docs/dependency-reviews/2020-06-01-serde.md");
+    let (completed_exit, completed_stdout) = run_pin_check(&temp_dir);
+    assert_eq!(completed_exit, ExitCode::SUCCESS);
+    assert!(completed_stdout.contains("Pin check: PASS"));
 }
 
 #[test]

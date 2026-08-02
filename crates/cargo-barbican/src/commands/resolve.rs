@@ -10,7 +10,7 @@ use super::age_lock::recheck_lockfile_age_against_lockfiles;
 use super::lockfile_ops::{LockfileRestoreGuard, MemoizingCratesIoClient};
 use super::{
     CommandError, fail, load_current_lockfile_text, load_current_lockfile_with_text,
-    load_release_age_context,
+    load_release_age_context, release_age_override_note,
 };
 
 pub(super) fn run_resolve<C, R>(
@@ -29,6 +29,9 @@ where
     let memoized_client = MemoizingCratesIoClient::new(client);
     let (minimum_days, reviewed_release_age_exceptions) =
         load_release_age_context(current_dir, min_age_days)?;
+    if let Some(note) = release_age_override_note(current_dir, min_age_days)? {
+        writeln!(stdout, "{note}").map_err(CommandError::Io)?;
+    }
     let base_lockfile_text = match load_current_lockfile_text(current_dir, Path::new("Cargo.lock"))
     {
         Ok(text) => text,

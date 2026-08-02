@@ -6,6 +6,7 @@ fn audit_runs_cargo_deny_json_by_default() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -33,6 +34,7 @@ fn audit_reports_failures() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default().with_cargo_deny_json("not-json");
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -45,8 +47,219 @@ fn audit_reports_failures() {
     assert!(
         String::from_utf8(stderr)
             .expect("stderr should be utf8")
-            .contains("FAIL cargo deny structured output:")
+            .contains("FAIL cargo-deny structured output:")
     );
+}
+
+#[test]
+fn audit_fails_closed_with_install_hint_when_cargo_deny_is_missing() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner =
+        FakeCommandRunner::default().with_missing_delegate(cargo_barbican::Delegate::CargoDeny);
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        runner.recorded_deny_json_calls().is_empty(),
+        "a missing delegate must fail before any subprocess is spawned"
+    );
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert_eq!(
+        rendered_error,
+        "FAIL cargo-deny: not found on PATH; install with `cargo install --locked cargo-deny@0.19.6`\n"
+    );
+}
+
+#[test]
+fn audit_json_fails_closed_with_empty_stdout_when_cargo_deny_is_missing() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner =
+        FakeCommandRunner::default().with_missing_delegate(cargo_barbican::Delegate::CargoDeny);
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(
+        stdout.is_empty(),
+        "a preflight failure emits no JSON report body"
+    );
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains("FAIL cargo-deny: not found on PATH"));
+}
+
+#[test]
+fn audit_fails_closed_with_install_hint_when_configured_cargo_audit_is_missing() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner =
+        FakeCommandRunner::default().with_missing_delegate(cargo_barbican::Delegate::CargoAudit);
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert_eq!(
+        runner.recorded_deny_json_calls().len(),
+        1,
+        "cargo-deny runs before the cargo-audit preflight"
+    );
+    assert!(
+        runner.recorded_audit_json_calls().is_empty(),
+        "a missing delegate must fail before its subprocess is spawned"
+    );
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains(
+        "FAIL cargo-audit: not found on PATH; install with `cargo install --locked cargo-audit@0.22.1`"
+    ));
+}
+
+#[test]
+fn audit_does_not_require_cargo_audit_when_it_is_not_the_configured_scanner() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner =
+        FakeCommandRunner::default().with_missing_delegate(cargo_barbican::Delegate::CargoAudit);
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    assert!(runner.recorded_audit_json_calls().is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: PASS"));
+}
+
+#[test]
+fn audit_fails_closed_when_delegate_availability_probe_errors() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_delegate_probe_error(cargo_barbican::Delegate::CargoDeny, "permission denied");
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(runner.recorded_deny_json_calls().is_empty());
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains("FAIL cargo-deny: unable to probe availability:"));
+    assert!(rendered_error.contains("permission denied"));
+}
+
+#[test]
+fn audit_surfaces_cargo_deny_exit_status_and_stderr_on_runtime_failure() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json_failure(
+        101,
+        "error[unable-to-fetch]: failed to fetch the advisory database\n",
+    );
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains("FAIL cargo-deny: exited with status 101"));
+    assert!(rendered_error.contains("failed to fetch the advisory database"));
+    assert!(
+        !rendered_error.contains("structured output"),
+        "a runtime exit failure must not masquerade as a JSON-parse error"
+    );
+}
+
+#[test]
+fn audit_surfaces_cargo_audit_exit_status_and_stderr_on_runtime_failure() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_cargo_audit_json_failure(2, "error: couldn't open Cargo.lock: not found\n");
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        r#"[delegates.advisories]
+lockfile_scanner = "cargo-audit"
+"#,
+    )
+    .expect("config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains("FAIL cargo-audit: exited with status 2"));
+    assert!(rendered_error.contains("couldn't open Cargo.lock"));
+    assert!(!rendered_error.contains("structured output"));
+}
+
+#[test]
+fn audit_in_non_rust_dir_reports_missing_workspace_root_not_a_delegate_parse_error() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stdout.is_empty());
+    assert!(
+        runner.recorded_deny_json_calls().is_empty(),
+        "audit must not delegate at all when there is no workspace root"
+    );
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.starts_with("FAIL workspace root not found: no Cargo.toml in"));
+    assert!(!rendered_error.contains("missing terminal summary"));
+    assert!(!rendered_error.contains("JSON output is incomplete"));
 }
 
 #[test]
@@ -86,6 +299,7 @@ fn audit_fails_unreviewed_advisory_with_cargo_deny_scanner() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(temp_dir.join("barbican.toml"), "").expect("config should write");
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -295,6 +509,7 @@ fn audit_json_reports_scanner_diagnostics_and_native_ignores_in_contract_fields(
         .with_cargo_deny_json(&cargo_deny_bans_error_jsonl())
         .with_cargo_audit_json(&cargo_audit_ignored_and_idless_json());
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates]
@@ -517,6 +732,7 @@ fn audit_json_reports_completeness_failures_for_missing_summary_checks() {
 "#,
     );
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -802,6 +1018,113 @@ fn audit_degrades_remediation_and_keeps_the_report_when_manifests_cannot_be_pars
 }
 
 #[test]
+fn audit_degrades_when_manifest_is_toml_valid_but_cargo_invalid() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_workspace_manifest_error("failed to parse manifest: missing field `package.name`")
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(serde_direct_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(&temp_dir, "[package]\nversion = \"0.1.0\"\n");
+    write_cargo_audit_config(&temp_dir);
+    fs::write(
+        temp_dir.join("reviewed-targets.toml"),
+        r#"[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/serde.md"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+    )
+    .expect("reviewed policy should write");
+    write_review_record(&temp_dir, "docs/dependency-reviews/serde.md");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(rendered.contains("FAIL RUSTSEC-2026-0001 serde@1.0.228"));
+    assert!(!rendered.contains("remediation:"));
+    assert!(rendered_error.contains("note: remediation context unavailable:"));
+    assert!(rendered_error.contains("missing field `package.name`"));
+}
+
+#[test]
+fn audit_degrades_on_cargo_validation_errors_without_a_standard_prefix() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_workspace_manifest_error("error: invalid character ` ` in package name: `bad name`")
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(serde_direct_metadata_json());
+    let temp_dir = fresh_temp_dir();
+    write_manifest(
+        &temp_dir,
+        "[package]\nname = \"bad name\"\nversion = \"0.1.0\"\n",
+    );
+    write_cargo_audit_config(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(String::from_utf8_lossy(&stdout).contains("Audit: FAIL"));
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains("note: remediation context unavailable:"));
+    assert!(rendered_error.contains("invalid character"));
+}
+
+#[test]
+fn audit_degraded_nested_workspace_root_stays_anchored_to_itself() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_workspace_manifest_error("error: invalid character in package name")
+        .with_cargo_audit_json(&cargo_audit_advisory_with_remediation_json())
+        .with_frozen_metadata(serde_direct_metadata_json());
+    let parent = fresh_temp_dir();
+    write_manifest(&parent, "[workspace]\nmembers = [\"child\"]\n");
+    fs::write(parent.join("barbican.toml"), "not toml [").expect("parent config should write");
+    let child = parent.join("child");
+    fs::create_dir(&child).expect("child should create");
+    write_manifest(
+        &child,
+        "[package]\nname = \"bad name\"\nversion = \"0.1.0\"\n\n[workspace]\n",
+    );
+    write_cargo_audit_config(&child);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &child,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run against the nested workspace root");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(String::from_utf8_lossy(&stdout).contains("Audit: FAIL"));
+    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(rendered_error.contains("note: remediation context unavailable:"));
+    assert!(rendered_error.contains("invalid character"));
+}
+
+#[test]
 fn audit_json_emits_null_remediation_when_manifests_cannot_be_parsed() {
     let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
     let client = FakeCratesIoClient::default();
@@ -832,14 +1155,15 @@ fn audit_json_emits_null_remediation_when_manifests_cannot_be_parsed() {
 fn audit_text_escapes_untrusted_advisory_title_and_patched_ranges() {
     let cli = Cli::parse_from(["cargo-barbican", "audit"]);
     let client = FakeCratesIoClient::default();
-    let runner = FakeCommandRunner::default().with_cargo_audit_json(&cargo_audit_advisory_json_for(
-        "RUSTSEC-2026-0001",
-        "serde",
-        "1.0.228",
-        r"evil \u001b[31mtitle",
-        "high",
-        &[r"\u001b[32m>=1.0.229"],
-    ));
+    let runner =
+        FakeCommandRunner::default().with_cargo_audit_json(&cargo_audit_advisory_json_for(
+            "RUSTSEC-2026-0001",
+            "serde",
+            "1.0.228",
+            r"evil \u001b[31mtitle",
+            "high",
+            &[r"\u001b[32m>=1.0.229"],
+        ));
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     write_cargo_audit_config(&temp_dir);
@@ -851,7 +1175,10 @@ fn audit_text_escapes_untrusted_advisory_title_and_patched_ranges() {
 
     assert_eq!(exit_code, ExitCode::from(1));
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
-    assert!(!rendered.contains('\u{1b}'), "raw escape byte must not reach the terminal");
+    assert!(
+        !rendered.contains('\u{1b}'),
+        "raw escape byte must not reach the terminal"
+    );
     assert!(rendered.contains(r"title: evil \x1b[31mtitle"));
     assert!(rendered.contains(r"fixed in \x1b[32m>=1.0.229"));
 }
@@ -1078,6 +1405,7 @@ fn audit_generated_deny_config_neutralises_native_advisory_ignore() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("deny.toml"),
         r#"[advisories]
@@ -1109,6 +1437,7 @@ fn audit_uses_controlled_cwd_to_neutralise_cargo_audit_config() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -1146,6 +1475,7 @@ fn audit_runs_cargo_deny_checks_when_cargo_audit_scans_advisories() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_bans_error_jsonl());
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -1174,6 +1504,7 @@ fn audit_fails_native_delegated_ignore_when_policy_is_deny() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates]
@@ -1211,6 +1542,7 @@ fn audit_rejects_symlinked_deny_toml_without_reading_target() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(temp_dir.join("secret.env"), "SECRET_TOKEN=do-not-print\n")
         .expect("secret target should write");
     symlink(temp_dir.join("secret.env"), temp_dir.join("deny.toml"))
@@ -1238,6 +1570,7 @@ fn audit_rejects_symlinked_barbican_toml_without_reading_target() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(temp_dir.join("secret.env"), "SECRET_TOKEN=do-not-print\n")
         .expect("secret target should write");
     symlink(temp_dir.join("secret.env"), temp_dir.join("barbican.toml"))
@@ -1265,6 +1598,7 @@ fn audit_rejects_symlinked_reviewed_targets_without_reading_target() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(temp_dir.join("secret.env"), "SECRET_TOKEN=do-not-print\n")
         .expect("secret target should write");
     symlink(
@@ -1328,6 +1662,7 @@ fn audit_reports_cargo_audit_settings_ignore_and_idless_warnings() {
     let runner =
         FakeCommandRunner::default().with_cargo_audit_json(&cargo_audit_ignored_and_idless_json());
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -1358,6 +1693,7 @@ fn audit_fails_closed_on_cargo_audit_parse_errors() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default().with_cargo_audit_json("not-json");
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     fs::write(
         temp_dir.join("barbican.toml"),
         r#"[delegates.advisories]
@@ -1376,7 +1712,7 @@ lockfile_scanner = "cargo-audit"
     assert!(
         String::from_utf8(stderr)
             .expect("stderr should be utf8")
-            .contains("FAIL cargo audit structured output:")
+            .contains("FAIL cargo-audit structured output:")
     );
 }
 
@@ -1529,35 +1865,11 @@ fn quick_xml_via_plist_metadata_json() -> String {
 }
 
 fn serde_direct_metadata_json() -> String {
-    direct_dependency_metadata_json("serde", "1.0.228")
+    crates_io_direct_metadata_json("serde", "1.0.228")
 }
 
 fn tauri_direct_metadata_json() -> String {
-    direct_dependency_metadata_json("tauri", "2.11.2")
-}
-
-fn direct_dependency_metadata_json(crate_name: &str, version: &str) -> String {
-    format!(
-        r#"{{
-  "packages": [
-    {{"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []}},
-    {{"name": "{crate_name}", "id": "registry+https://github.com/rust-lang/crates.io-index#{crate_name}@{version}", "version": "{version}", "targets": []}}
-  ],
-  "workspace_members": ["path+file:///repo#root@0.1.0"],
-  "resolve": {{
-    "nodes": [
-      {{
-        "id": "path+file:///repo#root@0.1.0",
-        "deps": [{{"name": "{crate_name}", "pkg": "registry+https://github.com/rust-lang/crates.io-index#{crate_name}@{version}"}}]
-      }},
-      {{
-        "id": "registry+https://github.com/rust-lang/crates.io-index#{crate_name}@{version}",
-        "deps": []
-      }}
-    ]
-  }}
-}}"#
-    )
+    crates_io_direct_metadata_json("tauri", "2.11.2")
 }
 
 fn metadata_without_advisory_target_json() -> String {

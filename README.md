@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.23.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20branch-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.24.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -37,6 +37,27 @@ execution-surface policy for `build.rs`/proc-macro/native-sys code,
 checked-in reviewed-target records bound to exact checksums, and one intake
 workflow that ties evidence gathering, review, and enforcement together.
 
+## Insiders Release Scope
+
+The initial release is an early, Rust-only insiders build distributed by an
+immutable git tag. It is intended for maintainers who can review the generated
+policy and CI changes and report workflow friction.
+
+The current boundary is deliberately narrower than universal supply-chain
+certification:
+
+- `inventory --enforce` holds exact direct-dependency coverage; uncovered
+  routine transitive crates and undeclared execution surfaces remain clearly
+  labelled review backlog
+- legitimate git, path-outside-workspace, and alternate-registry direct
+  dependencies do not yet have a positive reviewed-target model and fail the
+  coverage floor
+- crates.io publication and Windows support are not part of this release
+- cross-command hostile-checkout symlink containment and race-free filesystem
+  guarantees remain deferred
+- `gatehouse candidate` gathers crates.io candidate evidence; it does not prove
+  a Cargo tool-install workflow or execute the candidate
+
 ## Platform Support
 
 cargo-barbican is developed and tested on Unix-like systems: macOS and Linux.
@@ -50,13 +71,14 @@ support is explicitly delivered.
 
 ## Quickstart
 
-Install the current pre-release from git:
+Install the insiders release candidate from its immutable git tag:
 
 ```bash
-cargo install --locked --git https://github.com/rob-morris/cargo-barbican --branch main
+cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0
 ```
 
-<!-- PRE-RELEASE: cargo-barbican is not yet publicly released and no v* git tag is cut. Before the first public release, cut & push the matching git tag and restore the --tag install line. Tracked in the brain project release checklist. -->
+The tag is the install identity; do not replace it with a moving branch in
+consumer CI.
 
 Set up the minimal policy files in the repository that will use the gate:
 
@@ -65,23 +87,27 @@ cargo barbican policy init
 ```
 
 Then follow the manual adoption guide to review current dependencies, create
-review records, and populate `reviewed-targets.toml`. When policy is ready, run
-the main gates:
+review records, and populate `reviewed-targets.toml`.
+
+`cargo barbican audit` shells out to `cargo-deny` (and `cargo-audit` when
+configured), so install those before running it — a fresh machine without them
+fails closed with an install hint:
 
 ```bash
-cargo barbican pin check
-cargo barbican audit
-cargo barbican verify
+cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
-`pin check` validates reviewed-target policy against the current manifests and
-lockfile. It requires every `Cargo.lock` entry matching a reviewed crate name
-to be crates.io sourced and, for structured entries, checksum-bound; it also
-fails closed on a manifest `[patch]` table or a repo-root `.cargo/config.toml`
-`[source]`, `[patch]`, or `paths` table touching a reviewed crate. `audit`
-runs the delegated advisory and deny checks. `verify` is the final
-CI-oriented gate: it requires `reviewed-targets.toml`, then runs
-reviewed-target policy plus locked build/test verification.
+When policy is ready, run the standard pre-release gate:
+
+```bash
+cargo barbican gatehouse pre-release
+```
+
+`gatehouse pre-release` first applies the direct-dependency coverage floor,
+blocking uncovered crates.io dependencies and unsupported external direct
+sources. It then runs the blocking advisory/source-policy `audit` and the
+blocking `verify` sequence: reviewed-target policy plus locked build/test
+verification.
 
 `cargo barbican audit` and `cargo barbican verify` together are the
 enforcement gate: they stay two separate commands because their verdicts
@@ -90,8 +116,9 @@ repo — the same manifests, lockfile, and reviewed-target policy always
 produce the same result, so it is deterministic and reproducible. `audit`'s
 verdict also depends on the advisory landscape at the moment it runs — a new
 RustSec advisory can flip `audit` from PASS to FAIL with no repo change at
-all. Keeping them separate lets CI schedule each appropriately; see
-[docs/user/ci.md](docs/user/ci.md) for a worked example.
+all. Keeping them separate as primitives lets CI schedule `audit`
+independently; the Gatehouse command is the blessed pre-release composition.
+See [docs/user/ci.md](docs/user/ci.md) for a worked example.
 
 See [docs/user/adoption.md](docs/user/adoption.md) for the full adoption flow,
 [docs/user/integration.md](docs/user/integration.md) for install/template
@@ -191,32 +218,35 @@ for the exact flags.
 
 ### Enforce the final gate
 
-`cargo barbican audit` plus `cargo barbican verify` together are the
-enforcement gate:
+The standard pre-release gate composes the blocking inventory coverage floor,
+`audit`, and `verify`:
 
 ```bash
-cargo barbican audit
-cargo barbican verify
+cargo barbican gatehouse pre-release
 ```
 
-`audit` runs the delegated advisory and deny checks and owns their combined
+The inventory step applies the same direct-dependency floor as standalone
+`inventory --enforce`. `audit` runs the delegated advisory and deny checks and owns their combined
 pass/fail verdict. `verify` requires a repo-root `reviewed-targets.toml` with
 at least one active reviewed family, runs the default reviewed-target policy
 check, then runs locked build and test verification and confirms each passing
-step. `verify` prints a note pointing at `audit` immediately before its final
-`Verify: PASS` line, because a passing `verify` says nothing about the
-advisory landscape on its own. Standalone `pin check` remains a diagnostic
+step. When run standalone, `verify` prints a note pointing at `audit`
+immediately before its final `Verify: PASS` line, because a passing `verify`
+says nothing about the advisory landscape on its own. Gatehouse suppresses
+that note only after `audit` has passed and ends with
+`Gatehouse pre-release: PASS`. Standalone `pin check` remains a diagnostic
 command and skips successfully when no reviewed-target policy or no active
 family is configured; `verify` fails closed in both cases.
 
 ## Configuration and Policy Files
 
-The main files are:
+The main files, all documented in the
+[configuration reference](docs/user/configuration.md):
 
-- `barbican.toml` — release-age, high-scrutiny, and delegate settings
-- `reviewed-targets.toml` — active reviewed dependency families and exact resolved targets
-- `docs/dependency-reviews/` — checked-in human review records
-- `deny.toml` — native `cargo-deny` policy, delegated rather than redefined
+- [`barbican.toml`](docs/user/configuration.md) — release-age, high-scrutiny, and delegate settings
+- [`reviewed-targets.toml`](docs/user/configuration.md) — active reviewed dependency families and exact resolved targets
+- [`docs/dependency-reviews/`](docs/user/configuration.md) — checked-in human review records
+- [`deny.toml`](docs/user/configuration.md) — native `cargo-deny` policy, delegated rather than redefined
 
 The current tool is Rust-only. It intentionally stays above specialist Rust
 tools instead of becoming a cross-ecosystem package-management framework.
@@ -233,8 +263,11 @@ tools instead of becoming a cross-ecosystem package-management framework.
 - [docs/README.md](docs/README.md) — documentation index
 - [docs/user/adoption.md](docs/user/adoption.md) — adoption and manual onboarding guide
 - [docs/user/commands.md](docs/user/commands.md) — command workflows and usage reference
+- [docs/user/configuration.md](docs/user/configuration.md) — `barbican.toml` and `reviewed-targets.toml` reference
 - [docs/user/integration.md](docs/user/integration.md) — install and template integration
 - [docs/user/ci.md](docs/user/ci.md) — GitHub Actions CI workflow example
+- [docs/user/operations.md](docs/user/operations.md) — day-2 operations: failing audits, updates, family lifecycle
+- [docs/user/hardening.md](docs/user/hardening.md) — making the gate hard to bypass
 - [docs/functional/cli.md](docs/functional/cli.md) — command contract
 - [docs/architecture/overview.md](docs/architecture/overview.md) — goals and boundaries
 - [docs/contributor/specification.md](docs/contributor/specification.md) — contributor constraints

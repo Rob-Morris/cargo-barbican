@@ -4,10 +4,48 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Output};
 use std::{env, ffi::OsStr};
 
+/// A delegated scanner binary cargo-barbican shells out to. Each variant is a
+/// cargo subcommand — an executable named `cargo-<name>` on `PATH` — which is
+/// why availability is probed by spawning that binary directly rather than
+/// through `cargo <name>`: only a direct spawn surfaces a true ENOENT when the
+/// binary is absent (spawning `cargo` instead just makes cargo exit non-zero
+/// with a "no such command" message, indistinguishable from a runtime error).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Delegate {
+    CargoDeny,
+    CargoAudit,
+}
+
+impl Delegate {
+    pub fn binary(self) -> &'static str {
+        match self {
+            Self::CargoDeny => "cargo-deny",
+            Self::CargoAudit => "cargo-audit",
+        }
+    }
+
+    pub fn install_command(self) -> &'static str {
+        match self {
+            Self::CargoDeny => "cargo install --locked cargo-deny@0.19.6",
+            Self::CargoAudit => "cargo install --locked cargo-audit@0.22.1",
+        }
+    }
+}
+
 pub trait CommandRunner {
     fn git_show(&self, current_dir: &Path, object: &str) -> Result<String, RunnerError>;
+    /// Whether the delegate binary can be found on `PATH`. `Ok(false)` means a
+    /// clean ENOENT (not installed); an `Err` is any other spawn failure and
+    /// stays fail-closed. No default impl on purpose: a defaulted `Ok(true)`
+    /// would silently fail open if an implementor forgot to override it.
+    fn delegate_available(&self, delegate: Delegate) -> Result<bool, RunnerError>;
     fn cargo_metadata(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn cargo_metadata_frozen(&self, current_dir: &Path) -> Result<String, RunnerError>;
+    fn cargo_locate_project_workspace(
+        &self,
+        current_dir: &Path,
+        manifest_path: &Path,
+    ) -> Result<String, RunnerError>;
     fn cargo_update_precise(
         &self,
         current_dir: &Path,
@@ -17,6 +55,7 @@ pub trait CommandRunner {
     fn cargo_generate_lockfile(&self, current_dir: &Path) -> Result<(), RunnerError>;
     fn cargo_tree(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn git_diff(&self, current_dir: &Path, paths: &[PathBuf]) -> Result<String, RunnerError>;
+    fn git_untracked(&self, current_dir: &Path, paths: &[PathBuf]) -> Result<String, RunnerError>;
     fn cargo_audit(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn cargo_audit_json(
         &self,
@@ -37,6 +76,12 @@ pub trait CommandRunner {
 pub struct CommandOutput {
     pub stdout: String,
     pub stderr: String,
+    /// The delegate's exit code, or `None` if it was terminated by a signal.
+    /// A delegate legitimately exits non-zero when it finds advisories, so
+    /// this is consulted only once the structured output has failed to parse:
+    /// a non-zero exit there means the delegate itself failed, not that it
+    /// reported findings.
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Debug)]
@@ -96,6 +141,14 @@ impl CommandRunner for RealCommandRunner {
         run_command(current_dir, "git", ["show", object])
     }
 
+    fn delegate_available(&self, delegate: Delegate) -> Result<bool, RunnerError> {
+        classify_probe_spawn(
+            ProcessCommand::new(delegate.binary())
+                .arg("--version")
+                .output(),
+        )
+    }
+
     fn cargo_metadata(&self, current_dir: &Path) -> Result<String, RunnerError> {
         run_cargo_command(current_dir, ["metadata", "--format-version", "1"])
     }
@@ -105,6 +158,23 @@ impl CommandRunner for RealCommandRunner {
             current_dir,
             ["metadata", "--format-version", "1", "--frozen"],
         )
+    }
+
+    fn cargo_locate_project_workspace(
+        &self,
+        current_dir: &Path,
+        manifest_path: &Path,
+    ) -> Result<String, RunnerError> {
+        let mut command = prepared_cargo_command(current_dir);
+        command.args([
+            "locate-project",
+            "--workspace",
+            "--message-format",
+            "plain",
+            "--manifest-path",
+        ]);
+        command.arg(manifest_path);
+        stdout_from_output(run_prepared_command(command)?)
     }
 
     fn cargo_update_precise(
@@ -131,6 +201,22 @@ impl CommandRunner for RealCommandRunner {
         command
             .current_dir(current_dir)
             .args(["diff", "HEAD", "--"]);
+        for path in paths {
+            command.arg(path);
+        }
+
+        stdout_from_output(run_prepared_command(command)?)
+    }
+
+    fn git_untracked(&self, current_dir: &Path, paths: &[PathBuf]) -> Result<String, RunnerError> {
+        let mut command = ProcessCommand::new("git");
+        command.current_dir(current_dir).args([
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+        ]);
         for path in paths {
             command.arg(path);
         }
@@ -308,7 +394,20 @@ fn output_from_prepared_command(command: ProcessCommand) -> Result<CommandOutput
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code(),
     })
+}
+
+/// A `NotFound` spawn error is the one benign outcome — the binary simply is
+/// not installed — and resolves to `Ok(false)`. Every other spawn error stays
+/// fail-closed as `Err`. A spawned process that exits (even non-zero) proves
+/// the binary exists, so any `Ok(_)` output means available.
+fn classify_probe_spawn(spawn: io::Result<Output>) -> Result<bool, RunnerError> {
+    match spawn {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(RunnerError::Spawn(error)),
+    }
 }
 
 fn stdout_from_output(output: Output) -> Result<String, RunnerError> {
@@ -334,8 +433,24 @@ fn advisory_database_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
+    use std::io;
 
-    use super::{should_force_serial_nested_tests_with_env, should_strip_from_nested_cargo_env};
+    use super::{
+        RunnerError, classify_probe_spawn, should_force_serial_nested_tests_with_env,
+        should_strip_from_nested_cargo_env,
+    };
+
+    #[test]
+    fn probe_treats_missing_binary_as_unavailable_not_an_error() {
+        let outcome = classify_probe_spawn(Err(io::Error::from(io::ErrorKind::NotFound)));
+        assert!(!outcome.expect("ENOENT should be a clean unavailable"));
+    }
+
+    #[test]
+    fn probe_keeps_other_spawn_failures_fail_closed() {
+        let outcome = classify_probe_spawn(Err(io::Error::from(io::ErrorKind::PermissionDenied)));
+        assert!(matches!(outcome, Err(RunnerError::Spawn(_))));
+    }
 
     #[test]
     fn strips_cargo_run_metadata_from_nested_cargo_commands() {

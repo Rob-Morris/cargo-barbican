@@ -36,26 +36,29 @@ use clap::Parser;
 
 use crate::cli::{Cli, Command};
 use crate::command_runner::{CommandRunner, RealCommandRunner};
-use crate::crates_io_http::UreqCratesIoClient;
+use crate::crates_io_http::{
+    CRATES_IO_BASE_URL_ENV, DEFAULT_CRATES_IO_BASE_URL, UreqCratesIoClient,
+};
 
 use loaders::crates_io_base_url;
 
 pub use errors::CommandError;
 pub(crate) use errors::{escape_diagnostic_for_terminal, exit_code_from_policy_failures};
 pub(crate) use loaders::{
-    NativeDelegatedIgnore, ReviewedReleaseAgeExceptions, check_review_record_paths,
-    collect_reviewed_release_age_exceptions, load_base_manifest_dependencies, load_config,
-    load_current_lockfile, load_current_lockfile_text, load_current_lockfile_with_text,
+    NativeDelegatedIgnore, ReviewRecordStatusCache, ReviewedReleaseAgeExceptions,
+    check_review_record_paths, collect_reviewed_release_age_exceptions,
+    load_base_manifest_dependencies, load_config, load_current_lockfile,
+    load_current_lockfile_text, load_current_lockfile_with_text,
     load_current_manifest_direct_and_workspace_requirements,
     load_current_manifest_direct_requirements, load_git_base_lockfile, load_lockfile_from_path,
     load_manifest_dependencies_from_root, load_manifest_patched_crate_names,
     load_manifest_texts_from_root, load_native_delegated_ignores, load_release_age_context,
     load_reviewed_targets, parse_manifest_requirements, read_optional_text_no_symlink,
-    review_record_exists, source_replacement_finding,
+    release_age_override_note, source_replacement_finding,
 };
 pub(crate) use render::{
     escape_render_field, fail, join_display, render_allowed_policy_exceptions,
-    render_missing_release_age_exception_review_record, render_release_age_report,
+    render_incomplete_release_age_exception_review_record, render_release_age_report,
 };
 pub(crate) use workspace::{
     REVIEW_RECORDS_DIR, collect_relative_files_matching, insert_review_root_paths, review_paths,
@@ -79,7 +82,15 @@ fn run_at(
     stderr: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
     let current_dir = env::current_dir().map_err(CommandError::Io)?;
-    let client = UreqCratesIoClient::new(crates_io_base_url()?);
+    let base_url = crates_io_base_url()?;
+    if base_url != DEFAULT_CRATES_IO_BASE_URL {
+        writeln!(
+            stdout,
+            "note: crates.io source overridden to {base_url} via {CRATES_IO_BASE_URL_ENV}"
+        )
+        .map_err(CommandError::Io)?;
+    }
+    let client = UreqCratesIoClient::new(base_url);
     let runner = RealCommandRunner;
 
     run_cli_with_runner(cli, &current_dir, &client, &runner, stdout, stderr)
@@ -168,6 +179,11 @@ where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
+    let allow_manifest_degradation = matches!(&cli.command, Command::Audit { .. });
+    let workspace =
+        workspace::discover_workspace_root(current_dir, runner, allow_manifest_degradation)?;
+    let current_dir = workspace.root();
+
     match cli.command {
         Command::Age {
             min_age_days,
@@ -260,14 +276,22 @@ where
             gatehouse::run_gatehouse(command, current_dir, client, runner, now, stdout, stderr)
         }
         Command::Policy { command } => policy::run_policy(command, current_dir, stdout),
-        Command::Inventory => inventory::run_inventory(current_dir, runner, now, stdout),
+        Command::Inventory { enforce } => {
+            inventory::run_inventory(current_dir, runner, now, enforce, stdout)
+        }
         Command::Pin { command } => pin::run_pin(command, current_dir, now, stdout, stderr),
         Command::Review { base_dir } => {
             review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)
         }
-        Command::Audit { format } => {
-            audit::run_audit(format, current_dir, runner, now, stdout, stderr)
-        }
+        Command::Audit { format } => audit::run_audit(
+            format,
+            current_dir,
+            workspace.degradation_reason(),
+            runner,
+            now,
+            stdout,
+            stderr,
+        ),
         Command::Verify => verify::run_verify(current_dir, runner, stdout, stderr),
     }
 }
@@ -321,7 +345,7 @@ where
         match check_release_age_at(client, spec, now, minimum_days, age_exception) {
             Ok(report) => match classify_release_age_gate(
                 report.outcome(),
-                reviewed_release_age_exceptions.missing_for_spec(spec),
+                reviewed_release_age_exceptions.unsatisfied_for_spec(spec),
             ) {
                 ReleaseAgeGateVerdict::Routine => {
                     routine_reports.push(report);
@@ -329,11 +353,11 @@ where
                 ReleaseAgeGateVerdict::AllowedByException => {
                     allowed_reports.push(report);
                 }
-                ReleaseAgeGateVerdict::MissingReviewRecord(exception) => {
+                ReleaseAgeGateVerdict::IncompleteReviewRecord(exception) => {
                     writeln!(
                         stderr,
                         "FAIL {}",
-                        render_missing_release_age_exception_review_record(exception)
+                        render_incomplete_release_age_exception_review_record(exception)
                     )
                     .map_err(CommandError::Io)?;
                     failed = true;

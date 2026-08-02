@@ -159,26 +159,47 @@ impl fmt::Display for CrateVcsInfo {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IocHit {
     path: String,
-    indicator: String,
+    category: String,
+    pattern: String,
 }
 
 impl IocHit {
-    fn new(path: String, indicator: String) -> Self {
-        Self { path, indicator }
+    fn new(path: String, category: String, pattern: String) -> Self {
+        Self {
+            path,
+            category,
+            pattern,
+        }
     }
 
     pub fn path(&self) -> &str {
         &self.path
     }
 
-    pub fn indicator(&self) -> &str {
-        &self.indicator
+    pub fn category(&self) -> &str {
+        &self.category
+    }
+
+    pub fn pattern(&self) -> &str {
+        &self.pattern
+    }
+
+    pub fn indicator(&self) -> String {
+        format!("{}: {}", self.category, self.pattern)
     }
 }
 
 impl fmt::Display for IocHit {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} ({})", self.path, self.indicator)
+        // The matched pattern is backtick-quoted because several patterns end
+        // in `(` (e.g. `Command::new(`); without a distinct delimiter the
+        // trailing paren collides with the surrounding `(...)` and the hit
+        // reads ambiguously.
+        write!(
+            formatter,
+            "{} ({}: `{}`)",
+            self.path, self.category, self.pattern
+        )
     }
 }
 
@@ -391,7 +412,8 @@ fn scan_ioc_hits(
                 if file.contents.contains(needle) {
                     Some(IocHit::new(
                         file.path.clone(),
-                        format!("{description}: {needle}"),
+                        (*description).to_owned(),
+                        (*needle).to_owned(),
                     ))
                 } else {
                     None
@@ -909,6 +931,16 @@ mod tests {
                 .ioc_hits()
                 .iter()
                 .any(|hit| hit.indicator().contains("Command::new("))
+        );
+        let command_new_hit = report
+            .ioc_hits()
+            .iter()
+            .find(|hit| hit.pattern() == "Command::new(")
+            .expect("Command::new( hit should be present");
+        assert_eq!(command_new_hit.category(), "process execution");
+        assert_eq!(
+            command_new_hit.to_string(),
+            "build.rs (process execution: `Command::new(`)"
         );
     }
 

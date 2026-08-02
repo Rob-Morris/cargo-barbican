@@ -16,7 +16,7 @@ use super::scratch_dir::ScratchDir;
 use super::{
     CommandError, escape_diagnostic_for_terminal, fail, finish_release_age_checks,
     load_current_lockfile_text, load_current_lockfile_with_text, load_release_age_context,
-    parse_specs,
+    parse_specs, release_age_override_note,
 };
 
 pub(super) fn run_update<C, R>(
@@ -37,7 +37,11 @@ where
     let memoized_client = MemoizingCratesIoClient::new(client);
     let (minimum_days, reviewed_release_age_exceptions) =
         load_release_age_context(current_dir, min_age_days)?;
+    if let Some(note) = release_age_override_note(current_dir, min_age_days)? {
+        writeln!(stdout, "{note}").map_err(CommandError::Io)?;
+    }
     let parse_result = parse_specs(raw_specs, stderr)?;
+    writeln!(stdout, "Release-age check for requested versions:").map_err(CommandError::Io)?;
     let age_exit = finish_release_age_checks(
         &parse_result.specs,
         minimum_days,
@@ -141,6 +145,8 @@ where
         None
     };
 
+    writeln!(stdout, "Release-age recheck for newly selected versions:")
+        .map_err(CommandError::Io)?;
     let age_recheck_exit = match recheck_lockfile_age_against_lockfiles(
         &current_lockfile,
         &base_lockfile,

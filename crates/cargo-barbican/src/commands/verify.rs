@@ -17,6 +17,31 @@ pub(super) fn run_verify<R>(
 where
     R: CommandRunner + ?Sized,
 {
+    run_verify_with_audit_status(current_dir, runner, false, stdout, stderr)
+}
+
+pub(super) fn run_verify_after_audit<R>(
+    current_dir: &Path,
+    runner: &R,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError>
+where
+    R: CommandRunner + ?Sized,
+{
+    run_verify_with_audit_status(current_dir, runner, true, stdout, stderr)
+}
+
+fn run_verify_with_audit_status<R>(
+    current_dir: &Path,
+    runner: &R,
+    audit_completed: bool,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError>
+where
+    R: CommandRunner + ?Sized,
+{
     let config_path = Path::new(REVIEWED_TARGETS_CONFIG_FILE);
     let Some(reviewed_targets) = load_reviewed_targets(current_dir, config_path)? else {
         return fail(
@@ -47,11 +72,13 @@ where
         return fail(stderr, format!("cargo test --locked: {error}"));
     }
     writeln!(stdout, "OK   cargo test --locked").map_err(CommandError::Io)?;
-    writeln!(
-        stdout,
-        "note: advisory audit is a separate gate; run cargo barbican audit"
-    )
-    .map_err(CommandError::Io)?;
+    if !audit_completed {
+        writeln!(
+            stdout,
+            "note: advisory audit is a separate gate; run cargo barbican audit"
+        )
+        .map_err(CommandError::Io)?;
+    }
     writeln!(stdout, "Verify: PASS").map_err(CommandError::Io)?;
 
     Ok(ExitCode::SUCCESS)

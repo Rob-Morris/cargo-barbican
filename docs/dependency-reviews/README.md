@@ -45,8 +45,10 @@ reviewed exception in an `Allowed policy exceptions:` section. The family
 
 When a reviewed family carries `allowed_advisories`, `audit` can accept the
 matching advisory finding only while the resolved crate/version/checksum still
-matches, the family review record exists, and `review_by` has not expired. Once
-the deadline is past, `audit` fails the exception and requires re-review.
+matches, the family review record is a completed review (non-empty and no
+longer carrying the `BARBICAN-REVIEW-PENDING` scaffold marker), and `review_by`
+has not expired. Once the deadline is past, `audit` fails the exception and
+requires re-review.
 
 `inspect` can supply evidence for a review record, but it does not by itself
 activate an entry in `reviewed-targets.toml`.

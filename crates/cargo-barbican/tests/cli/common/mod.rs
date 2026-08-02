@@ -22,14 +22,15 @@ pub(crate) use std::thread;
 pub(crate) use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) use barbican::{
-    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, OffsetDateTime, VersionInfo,
-    parse_version_response_body,
+    CrateRelease, CratesIoClient, CratesIoClientError, ExactCrateSpec, OffsetDateTime,
+    REVIEW_RECORD_SCAFFOLD_MARKER, VersionInfo, parse_version_response_body,
 };
 // `run_cli_with_runner` is deliberately NOT re-exported here: this module
 // defines its own fixed-clock `run_cli_with_runner` below, which would
 // otherwise collide with this name.
 pub(crate) use cargo_barbican::{
-    Cli, CommandOutput, CommandRunner, UreqCratesIoClient, run_cli_with_runner_at,
+    Cli, CommandOutput, CommandRunner, RealCommandRunner, UreqCratesIoClient,
+    run_cli_with_runner_at,
 };
 pub(crate) use clap::Parser;
 pub(crate) use miniz_oxide::deflate::compress_to_vec;
@@ -251,27 +252,35 @@ impl Write for FailAfterWriter {
 pub(crate) struct FakeCommandRunner {
     pub(crate) git_show_results: HashMap<String, Result<String, String>>,
     pub(crate) cargo_metadata_result: Result<String, String>,
+    pub(crate) cargo_locate_project_result: Option<Result<String, String>>,
     pub(crate) cargo_update_result: Result<(), String>,
     pub(crate) cargo_update_lockfile_text: Option<String>,
     pub(crate) cargo_generate_lockfile_result: Result<(), String>,
     pub(crate) cargo_generate_lockfile_text: Option<String>,
     pub(crate) cargo_tree_result: Result<String, String>,
     pub(crate) git_diff_result: Result<String, String>,
+    pub(crate) git_untracked_result: Result<String, String>,
     pub(crate) cargo_audit_result: Result<String, String>,
     /// `RealCommandRunner::cargo_audit_json`/`cargo_deny_json` return
     /// `Ok(CommandOutput)` regardless of the subprocess's exit status (see
-    /// `output_from_prepared_command`) — a non-zero exit is data on stdout,
-    /// not an `Err`. Only a spawn failure could ever produce an `Err` here,
-    /// which is not what these two fields model, so they are not
-    /// independently fallible the way `cargo_audit_result` etc. are.
+    /// `output_from_prepared_command`, which captures that status into
+    /// `CommandOutput::exit_code`) — a non-zero exit is data, not an `Err`.
+    /// Only a spawn failure could ever produce an `Err` here, which is not
+    /// what these two fields model, so they are not independently fallible the
+    /// way `cargo_audit_result` etc. are.
     pub(crate) cargo_audit_json_result: CommandOutput,
     pub(crate) cargo_deny_json_result: CommandOutput,
+    /// Delegate availability the preflight probe reports. A delegate absent
+    /// from the map is available (`Ok(true)`); `Ok(false)` models a clean
+    /// ENOENT and `Err` models any other probe failure.
+    pub(crate) delegate_availability: HashMap<cargo_barbican::Delegate, Result<bool, String>>,
     pub(crate) cargo_build_result: Result<(), String>,
     pub(crate) cargo_test_result: Result<(), String>,
     pub(crate) cargo_updates: RefCell<Vec<(String, String)>>,
     pub(crate) generate_lockfile_calls: RefCell<Vec<PathBuf>>,
     pub(crate) cargo_tree_calls: RefCell<Vec<PathBuf>>,
     pub(crate) git_diff_paths: RefCell<Vec<PathBuf>>,
+    pub(crate) git_untracked_paths: RefCell<Vec<PathBuf>>,
     pub(crate) audit_calls: RefCell<Vec<PathBuf>>,
     pub(crate) audit_json_calls: RefCell<Vec<(PathBuf, PathBuf)>>,
     pub(crate) deny_json_calls: RefCell<Vec<(PathBuf, PathBuf, Vec<barbican::CargoDenyCheck>)>>,
@@ -284,6 +293,7 @@ pub(crate) struct FakeCommandRunner {
     /// `with_frozen_metadata`/`with_frozen_metadata_error`.
     pub(crate) cargo_metadata_frozen_result: Result<String, String>,
     pub(crate) cargo_metadata_frozen_calls: RefCell<u64>,
+    pub(crate) cargo_locate_project_calls: RefCell<Vec<(PathBuf, PathBuf)>>,
 }
 
 impl Default for FakeCommandRunner {
@@ -291,27 +301,33 @@ impl Default for FakeCommandRunner {
         Self {
             git_show_results: HashMap::new(),
             cargo_metadata_result: Ok(metadata_with_packages(&[])),
+            cargo_locate_project_result: None,
             cargo_update_result: Ok(()),
             cargo_update_lockfile_text: None,
             cargo_generate_lockfile_result: Ok(()),
             cargo_generate_lockfile_text: None,
             cargo_tree_result: Ok(String::new()),
             git_diff_result: Ok(String::new()),
+            git_untracked_result: Ok(String::new()),
             cargo_audit_result: Ok(String::new()),
             cargo_audit_json_result: CommandOutput {
                 stdout: clean_cargo_audit_json().to_owned(),
                 stderr: String::new(),
+                exit_code: Some(0),
             },
             cargo_deny_json_result: CommandOutput {
                 stdout: String::new(),
                 stderr: clean_cargo_deny_jsonl().to_owned(),
+                exit_code: Some(0),
             },
+            delegate_availability: HashMap::new(),
             cargo_build_result: Ok(()),
             cargo_test_result: Ok(()),
             cargo_updates: RefCell::new(Vec::new()),
             generate_lockfile_calls: RefCell::new(Vec::new()),
             cargo_tree_calls: RefCell::new(Vec::new()),
             git_diff_paths: RefCell::new(Vec::new()),
+            git_untracked_paths: RefCell::new(Vec::new()),
             audit_calls: RefCell::new(Vec::new()),
             audit_json_calls: RefCell::new(Vec::new()),
             deny_json_calls: RefCell::new(Vec::new()),
@@ -320,6 +336,7 @@ impl Default for FakeCommandRunner {
             test_calls: RefCell::new(0),
             cargo_metadata_frozen_result: Ok(default_metadata_json().to_owned()),
             cargo_metadata_frozen_calls: RefCell::new(0),
+            cargo_locate_project_calls: RefCell::new(Vec::new()),
         }
     }
 }
@@ -342,8 +359,25 @@ impl FakeCommandRunner {
         self
     }
 
+    pub(crate) fn with_workspace_manifest(mut self, manifest_path: &Path) -> Self {
+        self.cargo_locate_project_result = Some(Ok(format!("{}\n", manifest_path.display())));
+        self
+    }
+
+    pub(crate) fn with_workspace_manifest_error(mut self, detail: &str) -> Self {
+        self.cargo_locate_project_result = Some(Err(detail.to_owned()));
+        self
+    }
+
     pub(crate) fn with_git_diff(mut self, diff: &str) -> Self {
         self.git_diff_result = Ok(diff.to_owned());
+        self
+    }
+
+    /// `git ls-files --others --exclude-standard -z` output: NUL-separated
+    /// untracked paths, so a fixture joins entries with `\0`.
+    pub(crate) fn with_git_untracked(mut self, untracked: &str) -> Self {
+        self.git_untracked_result = Ok(untracked.to_owned());
         self
     }
 
@@ -386,6 +420,7 @@ impl FakeCommandRunner {
         self.cargo_audit_json_result = CommandOutput {
             stdout: stdout.to_owned(),
             stderr: String::new(),
+            exit_code: Some(0),
         };
         self
     }
@@ -394,7 +429,47 @@ impl FakeCommandRunner {
         self.cargo_deny_json_result = CommandOutput {
             stdout: String::new(),
             stderr: stderr.to_owned(),
+            exit_code: Some(0),
         };
+        self
+    }
+
+    /// Models a delegate that ran but failed at runtime: a non-zero exit with
+    /// diagnostic text on stderr and no parseable structured output.
+    pub(crate) fn with_cargo_deny_json_failure(mut self, exit_code: i32, stderr: &str) -> Self {
+        self.cargo_deny_json_result = CommandOutput {
+            stdout: String::new(),
+            stderr: stderr.to_owned(),
+            exit_code: Some(exit_code),
+        };
+        self
+    }
+
+    pub(crate) fn with_cargo_audit_json_failure(mut self, exit_code: i32, stderr: &str) -> Self {
+        self.cargo_audit_json_result = CommandOutput {
+            stdout: String::new(),
+            stderr: stderr.to_owned(),
+            exit_code: Some(exit_code),
+        };
+        self
+    }
+
+    /// Simulates a delegate binary that is absent from `PATH` (a clean ENOENT
+    /// probe), so the preflight check fails closed with an install hint.
+    pub(crate) fn with_missing_delegate(mut self, delegate: cargo_barbican::Delegate) -> Self {
+        self.delegate_availability.insert(delegate, Ok(false));
+        self
+    }
+
+    /// Simulates a probe that fails for a reason other than the binary being
+    /// missing, exercising the fail-closed non-ENOENT branch.
+    pub(crate) fn with_delegate_probe_error(
+        mut self,
+        delegate: cargo_barbican::Delegate,
+        detail: &str,
+    ) -> Self {
+        self.delegate_availability
+            .insert(delegate, Err(detail.to_owned()));
         self
     }
 
@@ -432,6 +507,10 @@ impl FakeCommandRunner {
         self.git_diff_paths.borrow().clone()
     }
 
+    pub(crate) fn recorded_untracked_paths(&self) -> Vec<PathBuf> {
+        self.git_untracked_paths.borrow().clone()
+    }
+
     pub(crate) fn with_frozen_metadata(mut self, metadata: impl Into<String>) -> Self {
         self.cargo_metadata_frozen_result = Ok(metadata.into());
         self
@@ -460,6 +539,19 @@ impl CommandRunner for FakeCommandRunner {
             .map_err(runner_exit)
     }
 
+    fn delegate_available(
+        &self,
+        delegate: cargo_barbican::Delegate,
+    ) -> Result<bool, cargo_barbican::RunnerError> {
+        match self.delegate_availability.get(&delegate) {
+            None => Ok(true),
+            Some(Ok(available)) => Ok(*available),
+            Some(Err(detail)) => Err(cargo_barbican::RunnerError::Spawn(io::Error::other(
+                detail.clone(),
+            ))),
+        }
+    }
+
     fn cargo_metadata(&self, _current_dir: &Path) -> Result<String, cargo_barbican::RunnerError> {
         self.cargo_metadata_result.clone().map_err(runner_exit)
     }
@@ -472,6 +564,26 @@ impl CommandRunner for FakeCommandRunner {
         self.cargo_metadata_frozen_result
             .clone()
             .map_err(runner_exit)
+    }
+
+    fn cargo_locate_project_workspace(
+        &self,
+        current_dir: &Path,
+        manifest_path: &Path,
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        self.cargo_locate_project_calls
+            .borrow_mut()
+            .push((current_dir.to_path_buf(), manifest_path.to_path_buf()));
+        if let Some(result) = &self.cargo_locate_project_result {
+            return result.clone().map_err(runner_exit);
+        }
+
+        current_dir
+            .ancestors()
+            .map(|directory| directory.join("Cargo.toml"))
+            .find(|path| path.is_file())
+            .map(|path| format!("{}\n", path.display()))
+            .ok_or_else(|| runner_exit("no Cargo.toml found".to_owned()))
     }
 
     fn cargo_update_precise(
@@ -533,6 +645,17 @@ impl CommandRunner for FakeCommandRunner {
     ) -> Result<String, cargo_barbican::RunnerError> {
         self.git_diff_paths.borrow_mut().extend_from_slice(paths);
         self.git_diff_result.clone().map_err(runner_exit)
+    }
+
+    fn git_untracked(
+        &self,
+        _current_dir: &Path,
+        paths: &[PathBuf],
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        self.git_untracked_paths
+            .borrow_mut()
+            .extend_from_slice(paths);
+        self.git_untracked_result.clone().map_err(runner_exit)
     }
 
     fn cargo_audit(&self, current_dir: &Path) -> Result<String, cargo_barbican::RunnerError> {
@@ -619,7 +742,7 @@ pub(crate) fn run_routine_safe_assess(args: &[&str]) -> (ExitCode, String, Strin
 
 pub(crate) fn run_allowed_surface_assess(
     current_version: &str,
-    write_record: bool,
+    review_record_content: Option<&str>,
     allowed_surfaces: &[&str],
 ) -> (ExitCode, String, String) {
     let cli = Cli::parse_from(["cargo-barbican", "assess"]);
@@ -694,8 +817,11 @@ native-sys = "1.2.3"
         ),
     )
     .expect("reviewed targets should write");
-    if write_record {
-        write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-native.md");
+    if let Some(content) = review_record_content {
+        let path = temp_dir.join("docs/dependency-reviews/2026-05-27-native.md");
+        fs::create_dir_all(path.parent().expect("record should have a parent"))
+            .expect("review directory should create");
+        fs::write(path, content).expect("review record should write");
     }
 
     let exit_code = run_cli_with_runner_at(
@@ -979,11 +1105,35 @@ pub(crate) fn write_workspace_layout(temp_dir: &Path) {
     .expect("member manifest should write");
 }
 
+/// Minimal root manifest so workspace-root discovery anchors the fixture
+/// directory itself. Fixtures that exercise manifest-reading behaviour write
+/// their own richer `Cargo.toml` afterwards, which simply overwrites this.
+pub(crate) fn write_root_manifest(temp_dir: &Path) {
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\n",
+    )
+    .expect("root manifest should write");
+}
+
 pub(crate) fn write_review_record(temp_dir: &Path, relative_path: &str) {
     let path = temp_dir.join(relative_path);
     let parent = path.parent().expect("review record should have a parent");
     fs::create_dir_all(parent).expect("review record dir should exist");
     fs::write(path, "# Dependency Review\n").expect("review record should write");
+}
+
+/// Simulates a reviewer finishing a scaffolded record: deletes every line
+/// carrying the review-pending marker, leaving a non-empty completed record.
+pub(crate) fn complete_scaffolded_review_record(temp_dir: &Path, relative_path: &str) {
+    let path = temp_dir.join(relative_path);
+    let stub = fs::read_to_string(&path).expect("scaffolded review record should exist");
+    let completed = stub
+        .lines()
+        .filter(|line| !line.contains(REVIEW_RECORD_SCAFFOLD_MARKER))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(&path, completed).expect("completed review record should write");
 }
 
 pub(crate) fn write_age_exception_policy(
@@ -1566,12 +1716,180 @@ pub(crate) fn run_inventory_with_runner_at(
     )
 }
 
+pub(crate) fn run_inventory_enforce_with_runner(
+    temp_dir: &Path,
+    runner: &FakeCommandRunner,
+) -> (ExitCode, String, String) {
+    let cli = Cli::parse_from(["cargo-barbican", "inventory", "--enforce"]);
+    let client = FakeCratesIoClient::default();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, temp_dir, &client, runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+    assert_eq!(runner.frozen_metadata_calls(), 1);
+
+    (
+        exit_code,
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        String::from_utf8(stderr).expect("stderr should be utf8"),
+    )
+}
+
 pub(crate) fn default_metadata_json() -> &'static str {
     r#"{
   "packages": [],
   "workspace_members": [],
   "resolve": {"nodes": []}
 }"#
+}
+
+pub(crate) struct InventoryMetadataDependency {
+    pub(crate) dependency_name: String,
+    pub(crate) package_name: String,
+    pub(crate) package_id: String,
+    pub(crate) requirement: String,
+    pub(crate) kind: Option<String>,
+    pub(crate) optional: bool,
+    pub(crate) source: Option<String>,
+    pub(crate) path: Option<String>,
+    pub(crate) declared: bool,
+    pub(crate) resolved: bool,
+}
+
+pub(crate) fn inventory_direct_metadata_json(
+    packages: &[(&str, &str, &str, Option<&str>)],
+    direct_dependencies: &[InventoryMetadataDependency],
+) -> String {
+    let root_id = "path+file:///workspace#fixture@0.0.0";
+    let mut package_values = vec![serde_json::json!({
+        "name": "fixture",
+        "id": root_id,
+        "version": "0.0.0",
+        "source": null,
+        "manifest_path": "/workspace/Cargo.toml",
+        "dependencies": direct_dependencies
+            .iter()
+            .filter(|dependency| dependency.declared)
+            .map(|dependency| serde_json::json!({
+                "name": dependency.package_name,
+                "rename": (dependency.dependency_name != dependency.package_name)
+                    .then_some(&dependency.dependency_name),
+                "req": dependency.requirement,
+                "kind": dependency.kind,
+                "optional": dependency.optional,
+                "source": dependency.source,
+                "path": dependency.path,
+            }))
+            .collect::<Vec<_>>(),
+        "targets": []
+    })];
+    package_values.extend(packages.iter().map(|(name, id, version, source)| {
+        serde_json::json!({
+            "name": name,
+            "id": id,
+            "version": version,
+            "source": source,
+            "targets": []
+        })
+    }));
+
+    let mut nodes = vec![serde_json::json!({
+        "id": root_id,
+        "deps": direct_dependencies
+            .iter()
+            .filter(|dependency| dependency.resolved)
+            .map(|dependency| serde_json::json!({
+                "name": dependency.dependency_name,
+                "pkg": dependency.package_id,
+            }))
+            .collect::<Vec<_>>()
+    })];
+    nodes.extend(
+        packages
+            .iter()
+            .map(|(_, id, _, _)| serde_json::json!({"id": id, "deps": []})),
+    );
+
+    serde_json::json!({
+        "packages": package_values,
+        "workspace_members": [root_id],
+        "resolve": {"nodes": nodes}
+    })
+    .to_string()
+}
+
+pub(crate) fn crates_io_direct_metadata_json(crate_name: &str, version: &str) -> String {
+    crates_io_direct_metadata_json_with_declaration(crate_name, version, false)
+}
+
+pub(crate) fn declared_crates_io_direct_metadata_json(crate_name: &str, version: &str) -> String {
+    crates_io_direct_metadata_json_with_declaration(crate_name, version, true)
+}
+
+pub(crate) fn serde_and_declared_crates_io_direct_metadata_json(
+    crate_name: &str,
+    version: &str,
+) -> String {
+    let crates_io_source = barbican::CRATES_IO_SOURCE;
+    let serde_id = format!("{crates_io_source}#serde@1.0.228");
+    let package_id = format!("{crates_io_source}#{crate_name}@{version}");
+    inventory_direct_metadata_json(
+        &[
+            ("serde", &serde_id, "1.0.228", Some(crates_io_source)),
+            (crate_name, &package_id, version, Some(crates_io_source)),
+        ],
+        &[
+            InventoryMetadataDependency {
+                dependency_name: "serde".to_owned(),
+                package_name: "serde".to_owned(),
+                package_id: serde_id.clone(),
+                requirement: "=1.0.228".to_owned(),
+                kind: None,
+                optional: false,
+                source: Some(crates_io_source.to_owned()),
+                path: None,
+                declared: true,
+                resolved: true,
+            },
+            InventoryMetadataDependency {
+                dependency_name: crate_name.to_owned(),
+                package_name: crate_name.to_owned(),
+                package_id: package_id.clone(),
+                requirement: format!("={version}"),
+                kind: None,
+                optional: false,
+                source: Some(crates_io_source.to_owned()),
+                path: None,
+                declared: true,
+                resolved: true,
+            },
+        ],
+    )
+}
+
+fn crates_io_direct_metadata_json_with_declaration(
+    crate_name: &str,
+    version: &str,
+    declared: bool,
+) -> String {
+    let crates_io_source = barbican::CRATES_IO_SOURCE;
+    let package_id = format!("{crates_io_source}#{crate_name}@{version}");
+    inventory_direct_metadata_json(
+        &[(crate_name, &package_id, version, Some(crates_io_source))],
+        &[InventoryMetadataDependency {
+            dependency_name: crate_name.to_owned(),
+            package_name: crate_name.to_owned(),
+            package_id: package_id.clone(),
+            requirement: "*".to_owned(),
+            kind: None,
+            optional: false,
+            source: Some(crates_io_source.to_owned()),
+            path: None,
+            declared,
+            resolved: true,
+        }],
+    )
 }
 
 pub(crate) fn surface_metadata_json() -> &'static str {
@@ -1581,12 +1899,29 @@ pub(crate) fn surface_metadata_json() -> &'static str {
       "name": "app",
       "id": "path+file:///workspace/crates/app#app@0.1.0",
       "version": "0.1.0",
+      "source": null,
+      "manifest_path": "/workspace/crates/app/Cargo.toml",
+      "dependencies": [
+        {"name":"alt","req":"^1","kind":null,"optional":false,"source":"registry+https://example.invalid/internal"},
+        {"name":"serde","req":"=1.0.228","kind":null,"optional":false,"source":"registry+https://github.com/rust-lang/crates.io-index"},
+        {"name":"local","req":"*","kind":null,"optional":false,"source":null,"path":"/workspace/crates/local"},
+        {"name":"loose","req":"^0.1","kind":"dev","optional":false,"source":"registry+https://github.com/rust-lang/crates.io-index"}
+      ],
       "targets": [{"kind": ["custom-build"]}]
     },
     {
       "name": "explicit-app",
       "id": "path+file:///workspace/app#explicit-app@0.1.0",
       "version": "0.1.0",
+      "source": null,
+      "manifest_path": "/workspace/app/Cargo.toml",
+      "targets": []
+    },
+    {
+      "name": "alt",
+      "id": "registry+https://example.invalid/internal#alt@1.0.0",
+      "version": "1.0.0",
+      "source": "registry+https://example.invalid/internal",
       "targets": []
     },
     {
@@ -1609,7 +1944,10 @@ pub(crate) fn surface_metadata_json() -> &'static str {
       "targets": []
     }
   ],
-  "workspace_members": ["path+file:///workspace/crates/app#app@0.1.0"],
+  "workspace_members": [
+    "path+file:///workspace/crates/app#app@0.1.0",
+    "path+file:///workspace/app#explicit-app@0.1.0"
+  ],
   "resolve": {"nodes": []}
 }"#
 }
@@ -1638,6 +1976,7 @@ serde = "=1.0.228"
 [package]
 name = "app"
 version = "0.1.0"
+dependencies = ["alt", "serde", "local", "loose"]
 edition = "2024"
 
 [dependencies]
@@ -1668,6 +2007,7 @@ version = 4
 [[package]]
 name = "app"
 version = "0.1.0"
+dependencies = ["alt", "serde", "local", "loose"]
 
 [[package]]
 name = "app"
@@ -1686,6 +2026,11 @@ source = "git+https://example.invalid/git-crate"
 [[package]]
 name = "explicit-app"
 version = "0.1.0"
+
+[[package]]
+name = "alt"
+version = "1.0.0"
+source = "registry+https://example.invalid/internal"
 
 [[package]]
 name = "serde"
@@ -1739,6 +2084,133 @@ version = "0.1.0"
 "#,
     )
     .expect("lockfile should write");
+}
+
+pub(crate) fn write_covered_enforce_fixture(root: &Path) {
+    fs::write(
+        root.join("Cargo.toml"),
+        r#"
+[package]
+name = "fixture"
+version = "0.0.0"
+dependencies = ["serde"]
+edition = "2024"
+
+[dependencies]
+serde = "=1.0.228"
+"#,
+    )
+    .expect("root manifest should write");
+    fs::write(
+        root.join("Cargo.lock"),
+        r#"
+version = 4
+
+[[package]]
+name = "fixture"
+version = "0.0.0"
+dependencies = ["serde"]
+
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+[[package]]
+name = "serde_core"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
+"#,
+    )
+    .expect("lockfile should write");
+    write_serde_family_policy(root);
+}
+
+pub(crate) fn write_uncovered_direct_enforce_fixture(root: &Path) {
+    write_serde_enforce_fixture_with(
+        root,
+        "sneaky = \"=3.0.0\"",
+        "sneaky",
+        r#"[[package]]
+name = "sneaky"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2222222222222222222222222222222222222222222222222222222222222222""#,
+    );
+}
+
+fn write_serde_family_policy(root: &Path) {
+    fs::write(
+        root.join("reviewed-targets.toml"),
+        r#"
+[rust]
+
+[[rust.families]]
+name = "serde-family"
+review_record = "docs/dependency-reviews/serde.md"
+
+[rust.families.direct]
+serde = "=1.0.228"
+
+[rust.families.resolved]
+serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+"#,
+    )
+    .expect("reviewed targets should write");
+    write_review_record(root, "docs/dependency-reviews/serde.md");
+}
+
+pub(crate) fn write_serde_enforce_fixture_with(
+    root: &Path,
+    dependency: &str,
+    locked_dependency: &str,
+    locked_package: &str,
+) {
+    let crates_io_source = barbican::CRATES_IO_SOURCE;
+    write_covered_enforce_fixture(root);
+    fs::write(
+        root.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[dependencies]\nserde = \"=1.0.228\"\n{dependency}\n"
+        ),
+    )
+    .expect("manifest should write");
+    fs::write(
+        root.join("Cargo.lock"),
+        format!(
+            "version = 4\n\n[[package]]\nname = \"fixture\"\nversion = \"0.0.0\"\ndependencies = [\"serde\", \"{locked_dependency}\"]\n\n[[package]]\nname = \"serde\"\nversion = \"1.0.228\"\nsource = \"{crates_io_source}\"\nchecksum = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n{locked_package}\n"
+        ),
+    )
+    .expect("lockfile should write");
+}
+
+pub(crate) fn write_git_direct_enforce_fixture(root: &Path) {
+    write_serde_enforce_fixture_with(
+        root,
+        "evilgit = { git = \"https://example.invalid/evil.git\" }",
+        "evilgit",
+        r#"
+[[package]]
+name = "evilgit"
+version = "9.9.9"
+source = "git+https://example.invalid/evil.git#0000000000000000000000000000000000000000"
+"#,
+    );
+}
+
+pub(crate) fn write_external_path_direct_enforce_fixture(root: &Path) {
+    write_serde_enforce_fixture_with(
+        root,
+        "outsider = { path = \"../outsider\" }",
+        "outsider",
+        r#"
+[[package]]
+name = "outsider"
+version = "0.1.0"
+"#,
+    );
 }
 
 pub(crate) fn write_libs_glob_fixture(root: &Path) {

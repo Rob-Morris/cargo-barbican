@@ -1,15 +1,15 @@
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
-use std::collections::BTreeSet;
-
 use barbican::{
     BarbicanConfig, CargoManifestDirectRequirement, CargoManifestError, CargoManifestPackage,
     Inventory, InventoryAdvisoryExceptionStatus, InventoryDirectRequirements, InventoryGap,
-    OffsetDateTime, WorkspacePackageIdentity, build_graph_surfaces, build_inventory,
-    check_reviewed_rust_targets, parse_cargo_metadata, parse_manifest_package_identity,
-    parse_workspace_dependency_requirements, parse_workspace_package_version,
+    InventoryReadinessSummary, OffsetDateTime, WorkspacePackageIdentity, build_inventory,
+    build_inventory_graph_facts, check_reviewed_rust_targets, parse_cargo_metadata,
+    parse_manifest_package_identity, parse_workspace_dependency_requirements,
+    parse_workspace_package_version,
 };
 
 use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
@@ -26,6 +26,7 @@ pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
     current_dir: &Path,
     runner: &R,
     now: OffsetDateTime,
+    enforce: bool,
     stdout: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
     let config = load_config(current_dir)?;
@@ -46,7 +47,7 @@ pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
     let reviewed_report = reviewed_targets
         .as_ref()
         .map(|targets| check_reviewed_rust_targets(targets, &manifest_requirements, &lockfile));
-    let surface_collection = collect_graph_surfaces(current_dir, runner);
+    let graph_collection = collect_graph_facts(current_dir, runner, &lockfile);
 
     let inventory = build_inventory(
         &lockfile,
@@ -55,53 +56,166 @@ pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
         reviewed_report.as_ref(),
         &review_record_facts,
         now,
-        surface_collection.surfaces(),
+        Some(graph_collection.facts()),
     );
 
-    let surface_report = build_surface_report(&inventory, &surface_collection);
+    let surface_report = build_surface_report(&inventory, &graph_collection);
     let delegation_report = InventoryDelegationReport {
         config: &config,
         deny_toml_present: user_deny_toml.is_some(),
         native_ignores: &native_ignores,
     };
-    render_inventory(stdout, &inventory, surface_report, delegation_report)?;
-    Ok(ExitCode::SUCCESS)
+    let readiness = inventory.readiness_summary();
+    render_inventory(
+        stdout,
+        &inventory,
+        &readiness,
+        enforce,
+        surface_report,
+        delegation_report,
+    )?;
+
+    if !enforce {
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let coverage_floor = readiness.coverage_floor();
+    render_coverage_floor(stdout, coverage_floor)?;
+    Ok(if coverage_floor.passed() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
 }
 
-enum SurfaceCollection {
-    Collected(barbican::GraphSurfaces),
-    NotCollected(String),
+/// Renders the `--enforce` coverage-floor verdict beneath the standard report.
+/// The floor names each direct dependency that entered the graph without an
+/// active reviewed family and teaches the `pin add` fix — the teaching moment
+/// for a raw `cargo add` of an unreviewed crate. Undeclared execution surfaces
+/// are a documented follow-up: they remain in the observational report above
+/// and are not gated here.
+fn render_coverage_floor(
+    stdout: &mut dyn Write,
+    coverage_floor: &barbican::InventoryCoverageFloor,
+) -> Result<(), CommandError> {
+    writeln!(stdout).map_err(CommandError::Io)?;
+    writeln!(stdout, "Coverage floor enforcement:").map_err(CommandError::Io)?;
+    if !coverage_floor.policy_configured() {
+        writeln!(
+            stdout,
+            "  no reviewed-targets.toml policy is configured, so no direct dependency can be covered"
+        )
+        .map_err(CommandError::Io)?;
+        writeln!(
+            stdout,
+            "  - run `cargo barbican policy init`, then `cargo barbican pin add <crate>` for each direct dependency"
+        )
+        .map_err(CommandError::Io)?;
+    } else {
+        let uncovered = coverage_floor.uncovered_direct_dependencies();
+        let external = coverage_floor.external_non_crates_io_direct_dependencies();
+        if !coverage_floor.graph_facts_collected() {
+            writeln!(
+                stdout,
+                "  exact direct-dependency facts were not collected, so enforcement cannot establish coverage: {}",
+                escape_render_field(
+                    coverage_floor
+                        .graph_facts_error()
+                        .unwrap_or("no direct-dependency diagnostic was recorded")
+                )
+            )
+            .map_err(CommandError::Io)?;
+        } else if uncovered.is_empty() && external.is_empty() {
+            writeln!(
+                stdout,
+                "  every direct dependency is covered by an active reviewed family"
+            )
+            .map_err(CommandError::Io)?;
+        }
+        if !uncovered.is_empty() {
+            writeln!(
+                stdout,
+                "  direct dependencies entered the graph without an active reviewed family covering them (a raw `cargo add` of an unreviewed crate looks like this):"
+            )
+            .map_err(CommandError::Io)?;
+            for spec in uncovered {
+                writeln!(
+                    stdout,
+                    "  - {spec} is not covered by any reviewed family; run `cargo barbican pin add {}` to scaffold coverage",
+                    spec.crate_name()
+                )
+                .map_err(CommandError::Io)?;
+            }
+        }
+        if !external.is_empty() {
+            writeln!(
+                stdout,
+                "  direct dependencies use a non-crates.io source a reviewed family cannot cover (git, alternate registry, or a path outside the workspace):"
+            )
+            .map_err(CommandError::Io)?;
+            for source in external {
+                let origin = source.source().unwrap_or("an unrecorded source");
+                writeln!(
+                    stdout,
+                    "  - {}@{} resolves via {origin}; a reviewed family cannot cover a non-crates.io source — review it and pin to crates.io, or remove it",
+                    source.name(),
+                    source.version()
+                )
+                .map_err(CommandError::Io)?;
+            }
+        }
+    }
+    let verdict = if coverage_floor.passed() {
+        "PASS"
+    } else {
+        "FAIL"
+    };
+    writeln!(
+        stdout,
+        "Inventory: {verdict} (direct-dependency coverage floor)"
+    )
+    .map_err(CommandError::Io)?;
+
+    Ok(())
 }
 
-impl SurfaceCollection {
-    fn surfaces(&self) -> Option<&barbican::GraphSurfaces> {
+enum GraphCollection {
+    Collected(barbican::InventoryGraphFacts),
+    NotCollected(barbican::InventoryGraphFacts),
+}
+
+impl GraphCollection {
+    fn facts(&self) -> &barbican::InventoryGraphFacts {
         match self {
-            Self::Collected(surfaces) => Some(surfaces),
-            Self::NotCollected(_) => None,
+            Self::Collected(facts) | Self::NotCollected(facts) => facts,
         }
     }
 }
 
-fn collect_graph_surfaces<R: CommandRunner + ?Sized>(
+fn collect_graph_facts<R: CommandRunner + ?Sized>(
     current_dir: &Path,
     runner: &R,
-) -> SurfaceCollection {
-    match try_collect_graph_surfaces(current_dir, runner) {
-        Ok(surfaces) => SurfaceCollection::Collected(surfaces),
-        Err(reason) => SurfaceCollection::NotCollected(reason),
+    lockfile: &barbican::Lockfile,
+) -> GraphCollection {
+    match try_collect_graph_facts(current_dir, runner, lockfile) {
+        Ok(facts) => GraphCollection::Collected(facts),
+        Err(reason) => {
+            GraphCollection::NotCollected(barbican::InventoryGraphFacts::unavailable(reason))
+        }
     }
 }
 
-fn try_collect_graph_surfaces<R: CommandRunner + ?Sized>(
+fn try_collect_graph_facts<R: CommandRunner + ?Sized>(
     current_dir: &Path,
     runner: &R,
-) -> Result<barbican::GraphSurfaces, String> {
+    lockfile: &barbican::Lockfile,
+) -> Result<barbican::InventoryGraphFacts, String> {
     let metadata_json = runner
         .cargo_metadata_frozen(current_dir)
         .map_err(|error| error.to_string())?;
     let metadata = parse_cargo_metadata(&metadata_json).map_err(|error| error.to_string())?;
 
-    build_graph_surfaces(&metadata).map_err(|error| error.to_string())
+    build_inventory_graph_facts(&metadata, lockfile).map_err(|error| error.to_string())
 }
 
 enum SurfaceReport<'a> {
@@ -117,15 +231,19 @@ impl SurfaceReport<'_> {
 
 fn build_surface_report<'a>(
     inventory: &'a Inventory,
-    surface_collection: &'a SurfaceCollection,
+    graph_collection: &'a GraphCollection,
 ) -> SurfaceReport<'a> {
-    match surface_collection {
-        SurfaceCollection::Collected(_) => SurfaceReport::Collected(
+    match graph_collection {
+        GraphCollection::Collected(_) => SurfaceReport::Collected(
             inventory
                 .live_surfaces()
-                .expect("build_inventory receives surfaces when metadata is collected"),
+                .expect("build_inventory receives graph facts when metadata is collected"),
         ),
-        SurfaceCollection::NotCollected(reason) => SurfaceReport::NotCollected(reason),
+        GraphCollection::NotCollected(facts) => SurfaceReport::NotCollected(
+            facts
+                .surface_error()
+                .expect("unavailable graph facts carry the collection error"),
+        ),
     }
 }
 
@@ -183,6 +301,8 @@ fn manifest_parse_error(path: &str, source: CargoManifestError) -> CommandError 
 fn render_inventory(
     stdout: &mut dyn Write,
     inventory: &Inventory,
+    readiness: &InventoryReadinessSummary,
+    enforce: bool,
     surface_report: SurfaceReport<'_>,
     delegation_report: InventoryDelegationReport<'_>,
 ) -> Result<(), CommandError> {
@@ -215,18 +335,7 @@ fn render_inventory(
         rollup.declared_surfaces
     )
     .map_err(CommandError::Io)?;
-    writeln!(
-        stdout,
-        "  observational findings: {}",
-        rollup.observational_findings
-    )
-    .map_err(CommandError::Io)?;
-    writeln!(
-        stdout,
-        "  policy coverage gaps: {}",
-        rollup.policy_coverage_gaps
-    )
-    .map_err(CommandError::Io)?;
+    render_readiness_summary(stdout, readiness, enforce)?;
     if surfaces_not_collected {
         writeln!(
             stdout,
@@ -405,10 +514,10 @@ fn render_inventory(
         .map_err(CommandError::Io)?;
     } else {
         for family in inventory.reviewed_families() {
-            let record_status = if family.review_record_exists() {
-                "record ok"
+            let record_status = if family.review_record_completed() {
+                "record completed"
             } else {
-                "record missing"
+                "record not completed"
             };
             writeln!(
                 stdout,
@@ -435,7 +544,17 @@ fn render_inventory(
 
     let policy_coverage_gaps = inventory.policy_coverage_gaps();
     writeln!(stdout).map_err(CommandError::Io)?;
-    writeln!(stdout, "Policy coverage gaps:").map_err(CommandError::Io)?;
+    writeln!(stdout, "Reviewed-policy findings:").map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  uncovered direct dependencies block when coverage enforcement is active (`inventory --enforce` or `gatehouse pre-release`); uncovered transitive packages and undeclared execution surfaces remain observational"
+    )
+    .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  incomplete family review records are enforced by `pin check` and `verify`"
+    )
+    .map_err(CommandError::Io)?;
     if policy_coverage_gaps.is_empty() {
         writeln!(stdout, "  none").map_err(CommandError::Io)?;
     }
@@ -460,16 +579,96 @@ fn render_inventory(
     } else if inventory.gaps().is_empty() {
         writeln!(
             stdout,
-            "  - Run `cargo barbican pin check` or `cargo barbican verify` to enforce policy."
+            "  - Run `cargo barbican gatehouse pre-release` for the complete release gate."
         )
         .map_err(CommandError::Io)?;
     } else {
         writeln!(
             stdout,
-            "  - Review each finding or gap, update reviewed-targets.toml and review records, then run `cargo barbican verify`."
+            "  - Review the labelled backlog, update reviewed-targets.toml and review records, then run `cargo barbican gatehouse pre-release`."
         )
         .map_err(CommandError::Io)?;
     }
+
+    Ok(())
+}
+
+fn render_readiness_summary(
+    stdout: &mut dyn Write,
+    readiness: &InventoryReadinessSummary,
+    enforce: bool,
+) -> Result<(), CommandError> {
+    let coverage_floor = readiness.coverage_floor();
+    let floor_status = if !coverage_floor.policy_configured() {
+        "NOT READY (reviewed-targets.toml is not configured)"
+    } else if !coverage_floor.graph_facts_collected() {
+        "NOT READY (exact direct-dependency graph facts were not collected)"
+    } else if coverage_floor.passed() && enforce {
+        "PASS (enforced in this run)"
+    } else if coverage_floor.passed() {
+        "PASS-ready (informational run)"
+    } else if enforce {
+        "FAIL (enforced in this run)"
+    } else {
+        "NOT READY (informational run; enforcement would fail)"
+    };
+    writeln!(stdout, "  direct-dependency coverage floor: {floor_status}")
+        .map_err(CommandError::Io)?;
+
+    if coverage_floor.graph_facts_collected() {
+        writeln!(
+            stdout,
+            "  enforced uncovered direct crates.io dependencies: {}",
+            coverage_floor.uncovered_direct_dependencies().len()
+        )
+        .map_err(CommandError::Io)?;
+        writeln!(
+            stdout,
+            "  enforced external direct dependencies: {}",
+            coverage_floor
+                .external_non_crates_io_direct_dependencies()
+                .len()
+        )
+        .map_err(CommandError::Io)?;
+        writeln!(
+            stdout,
+            "  observational uncovered transitive crates.io packages: {}",
+            readiness.uncovered_transitive_crates_io()
+        )
+        .map_err(CommandError::Io)?;
+    } else {
+        writeln!(
+            stdout,
+            "  unclassified uncovered crates.io packages: {} (direct/transitive split unavailable)",
+            readiness.unclassified_uncovered_crates_io()
+        )
+        .map_err(CommandError::Io)?;
+        writeln!(
+            stdout,
+            "  unclassified non-crates.io sources: {} (direct/transitive split unavailable)",
+            readiness.unclassified_non_crates_io_sources()
+        )
+        .map_err(CommandError::Io)?;
+    }
+
+    writeln!(
+        stdout,
+        "  observational undeclared execution surfaces: {}",
+        readiness.undeclared_execution_surfaces()
+    )
+    .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  enforced incomplete review records (pin check/verify): {}",
+        readiness.incomplete_review_records()
+    )
+    .map_err(CommandError::Io)?;
+    writeln!(
+        stdout,
+        "  other observational manifest/source findings: {}",
+        readiness.other_observational_findings()
+    )
+    .map_err(CommandError::Io)?;
 
     Ok(())
 }
@@ -505,7 +704,7 @@ fn render_advisory_exceptions(
                 exception.review_by(),
                 render_advisory_exception_status(exception.status()),
                 if exception.resolved_target_matches() { "matched" } else { "not matched" },
-                if exception.review_record_exists() { "exists" } else { "missing" }
+                if exception.review_record_completed() { "completed" } else { "not-completed" }
             )
             .map_err(CommandError::Io)?;
         }
@@ -585,12 +784,12 @@ fn render_advisory_exception_status(status: InventoryAdvisoryExceptionStatus) ->
 
 fn render_gap(gap: &InventoryGap) -> String {
     match gap {
-        InventoryGap::MissingReviewRecord {
+        InventoryGap::IncompleteReviewRecord {
             family,
             review_record,
         } => {
             format!(
-                "missing review record for family {}: {}",
+                "review record not completed for family {}: {}",
                 escape_render_field(family),
                 escape_render_field(review_record)
             )

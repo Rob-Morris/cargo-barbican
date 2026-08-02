@@ -18,6 +18,7 @@ pub mod metadata;
 pub mod pick;
 pub mod pin_check;
 pub mod release_age;
+pub mod review_record;
 pub mod reviewed_targets;
 pub mod scaffold;
 pub mod sha256;
@@ -27,9 +28,8 @@ pub use advisory::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
     AdvisoryFindingDetails, AdvisoryFindingId, AdvisoryParseError, AdvisoryReconciliationReport,
     AdvisoryRemediation, AdvisoryRemediationBlocker, AdvisoryRemediationKind,
-    CargoAuditAdvisoryReport,
-    CargoDenyAdvisoryReport, CargoDenyNoAdvisoryDiagnostic, CargoDenySummaryCount,
-    advisory_remediation, evaluate_advisory_audit, parse_cargo_audit_json,
+    CargoAuditAdvisoryReport, CargoDenyAdvisoryReport, CargoDenyNoAdvisoryDiagnostic,
+    CargoDenySummaryCount, advisory_remediation, evaluate_advisory_audit, parse_cargo_audit_json,
     parse_cargo_deny_json_lines, reconcile_advisory_findings,
 };
 pub use assessment::{
@@ -53,28 +53,31 @@ pub use deny_config::{
 };
 pub use inspect::{CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate_at};
 pub use inventory::{
-    GraphSurfaces, INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS, Inventory, InventoryAdvisoryException,
-    InventoryAdvisoryExceptionStatus, InventoryDeclaredSurface, InventoryDirectDependency,
-    InventoryDirectRequirements, InventoryGap, InventoryLiveSurface, InventoryNonCratesIoSource,
+    INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS, Inventory, InventoryAdvisoryException,
+    InventoryAdvisoryExceptionStatus, InventoryCoverageFloor, InventoryDeclaredSurface,
+    InventoryDirectDependency, InventoryDirectRequirements, InventoryGap, InventoryGraphFacts,
+    InventoryLiveSurface, InventoryNonCratesIoSource, InventoryReadinessSummary,
     InventoryResolvedCrate, InventoryReviewedFamily, InventoryRollup, ReviewRecordFact,
-    WorkspacePackageIdentity, build_graph_surfaces, build_inventory,
+    WorkspacePackageIdentity, build_inventory, build_inventory_graph_facts,
 };
 pub use lockfile::{
-    CRATES_IO_SOURCE, LockedChecksumChange, LockedPackage, Lockfile, LockfileError,
-    added_crates_io_specs, changed_crates_io_checksums, parse_lockfile,
+    CRATES_IO_SOURCE, LockedChecksumChange, LockedDependency, LockedPackage, Lockfile,
+    LockfileError, added_crates_io_specs, changed_crates_io_checksums, parse_lockfile,
 };
 pub use manifest::{
     CargoDependencySourceKind, CargoManifestDependency, CargoManifestDirectRequirement,
-    CargoManifestError, CargoManifestPackage, parse_manifest_dependencies,
+    CargoManifestError, CargoManifestPackage, WorkspaceManifestMembership, WorkspaceRootDirective,
+    classify_workspace_manifest_membership, parse_manifest_dependencies,
     parse_manifest_direct_requirements, parse_manifest_package_identity,
     parse_manifest_patched_crate_names, parse_workspace_dependency_requirements,
     parse_workspace_member_glob_roots, parse_workspace_member_manifest_paths,
-    parse_workspace_package_version,
+    parse_workspace_package_version, parse_workspace_root_directive,
 };
 pub use metadata::{
-    CargoMetadata, CargoMetadataError, MetadataDependencyPath, MetadataPackageSurfaces,
-    MetadataRequirementEdge, package_surfaces, parse_cargo_metadata, requirement_edges_onto,
-    select_package_id, shortest_workspace_dependency_path,
+    CargoMetadata, CargoMetadataError, MetadataDependencyPath, MetadataDirectDependency,
+    MetadataPackageSurfaces, MetadataRequirementEdge, package_surfaces, parse_cargo_metadata,
+    requirement_edges_onto, select_package_id, shortest_workspace_dependency_path,
+    workspace_direct_dependencies,
 };
 pub use pick::{
     PickError, PickExcludedVersion, PickExclusionReason, PickSelection, PickSpec, PickSpecError,
@@ -88,6 +91,9 @@ pub use pin_check::{
 pub use release_age::{
     ReleaseAgeGateVerdict, ReleaseAgeOutcome, ReleaseAgeReport, check_release_age_at,
     classify_release_age_gate, evaluate_release_age, format_age,
+};
+pub use review_record::{
+    REVIEW_RECORD_SCAFFOLD_MARKER, ReviewRecordStatus, classify_review_record,
 };
 pub use reviewed_targets::{
     ExecutionSurfaceKind, IsoDateError, ReviewedAdvisoryException,

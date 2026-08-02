@@ -3,9 +3,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    ObservedDirectDependency, PatchedReviewedCrate, ReviewRecordFact, ReviewedResolvedTarget,
-    ReviewedTargets, RustReviewedTargetsReport, check_reviewed_rust_targets,
-    patched_reviewed_crates,
+    ObservedDirectDependency, PatchedReviewedCrate, REVIEW_RECORD_SCAFFOLD_MARKER,
+    ReviewRecordFact, ReviewRecordStatus, ReviewedResolvedTarget, ReviewedTargets,
+    RustReviewedTargetsReport, check_reviewed_rust_targets, patched_reviewed_crates,
 };
 
 use super::{
@@ -68,7 +68,9 @@ pub(super) fn enforce_reviewed_targets(
 
     Ok(
         if report.is_success()
-            && review_record_checks.iter().all(ReviewRecordFact::exists)
+            && review_record_checks
+                .iter()
+                .all(ReviewRecordFact::is_satisfied)
             && patched_reviewed.is_empty()
             && source_replacement.is_none()
         {
@@ -88,7 +90,9 @@ fn render_pin_check_report(
     manifest_path: &str,
 ) -> Result<(), CommandError> {
     if report.is_success()
-        && review_record_checks.iter().all(ReviewRecordFact::exists)
+        && review_record_checks
+            .iter()
+            .all(ReviewRecordFact::is_satisfied)
         && patched_reviewed.is_empty()
         && source_replacement.is_none()
     {
@@ -133,22 +137,36 @@ fn render_pin_check_report(
         .map_err(CommandError::Io)?;
 
         if let Some(review_record_check) = review_record_check_for(family.name()) {
-            if review_record_check.exists() {
-                writeln!(
-                    stdout,
-                    "  - {}: review record ok at {}",
-                    family_name,
-                    escape_render_field(review_record_check.review_record())
-                )
-                .map_err(CommandError::Io)?;
-            } else {
-                writeln!(
-                    stdout,
-                    "  - {}: review record missing at {}",
-                    family_name,
-                    escape_render_field(review_record_check.review_record())
-                )
-                .map_err(CommandError::Io)?;
+            let record_path = escape_render_field(review_record_check.review_record());
+            match review_record_check.status() {
+                ReviewRecordStatus::Completed => {
+                    writeln!(
+                        stdout,
+                        "  - {family_name}: review record ok at {record_path}"
+                    )
+                    .map_err(CommandError::Io)?;
+                }
+                ReviewRecordStatus::Missing => {
+                    writeln!(
+                        stdout,
+                        "  - {family_name}: review record missing at {record_path}"
+                    )
+                    .map_err(CommandError::Io)?;
+                }
+                ReviewRecordStatus::Empty => {
+                    writeln!(
+                        stdout,
+                        "  - {family_name}: review record at {record_path} is empty; complete the review before this family is trusted"
+                    )
+                    .map_err(CommandError::Io)?;
+                }
+                ReviewRecordStatus::ScaffoldPlaceholder => {
+                    writeln!(
+                        stdout,
+                        "  - {family_name}: review record at {record_path} is an unreviewed scaffold (still carries the {REVIEW_RECORD_SCAFFOLD_MARKER} marker); complete the review and delete that line"
+                    )
+                    .map_err(CommandError::Io)?;
+                }
             }
         }
 

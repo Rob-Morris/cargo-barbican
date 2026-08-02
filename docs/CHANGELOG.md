@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.24.0](changelog/v0.24.0.md) | 2026-07-22 | Ship the insiders release gate and deployment baseline |
 | [v0.23.0](changelog/v0.23.0.md) | 2026-07-14 | Name provable advisory blockers from requirement edges |
 | [v0.22.0](changelog/v0.22.0.md) | 2026-07-14 | Add pin exception for governed advisory acceptance |
 | [v0.21.1](changelog/v0.21.1.md) | 2026-07-14 | Harden audit remediation classification and output contracts |

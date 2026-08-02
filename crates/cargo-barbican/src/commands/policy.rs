@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use barbican::{BarbicanConfig, parse_reviewed_targets_toml};
 
-use crate::cli::{PolicyCommand, REVIEWED_TARGETS_CONFIG_FILE};
+use crate::cli::{CiSystem, PolicyCommand, REVIEWED_TARGETS_CONFIG_FILE};
 
 use super::scaffold_fs::{ScaffoldState, confined_scaffold_state, create_dir_all, write_new_file};
 use super::{
@@ -23,17 +23,89 @@ const DEFAULT_DEPENDENCY_REVIEWS_README: &str =
 const ADOPTION_GUIDE_PATH: &str =
     "https://github.com/rob-morris/cargo-barbican/blob/main/docs/user/adoption.md";
 
+const PRE_COMMIT_HOOK_TEMPLATE_PATH: &str =
+    "https://github.com/rob-morris/cargo-barbican/blob/main/templates/hooks/pre-commit";
+
+const GITHUB_WORKFLOW_PATH: &str = ".github/workflows/barbican.yml";
+
+/// The ready-to-run GitHub Actions enforcement gate emitted by
+/// `policy init --ci github`. Kept as a plain string literal (not `format!`)
+/// so the workflow's own `${{ ... }}` expressions pass through verbatim rather
+/// than colliding with Rust's format braces. Third-party actions are pinned by
+/// full commit SHA to match the repo's own dogfooded `ci.yml`.
+const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.24.0
+#
+# cargo-barbican enforcement gate (server-side, authoritative).
+#
+# This workflow is the real gate for what enters the dependency graph. The
+# shipped client-side pre-commit hook (templates/hooks/pre-commit) runs a cheap
+# subset and is advisory and skippable (git commit --no-verify); this workflow
+# is not.
+#
+# Third-party actions are pinned by full commit SHA with a version comment.
+# `--locked` installs from committed lockfiles but does not pin the installed
+# tool versions. These installs select the exact reviewed release candidates.
+name: barbican
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gate:
+    name: cargo-barbican gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Full history so age-lock and assess can diff against the PR base commit.
+          fetch-depth: 0
+      - name: Install the pinned Rust toolchain
+        # Reads rust-toolchain.toml; pin your toolchain there for reproducible gates.
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Install cargo-barbican, cargo-deny, and cargo-audit
+        run: |
+          cargo install --locked --git https://github.com/rob-morris/cargo-barbican --tag v0.24.0 cargo-barbican
+          cargo install --locked cargo-deny@0.19.6
+          cargo install --locked cargo-audit@0.22.1
+      - name: Pre-release supply-chain gate
+        run: cargo barbican gatehouse pre-release
+      - name: Age-lock and assess against the PR base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          cargo barbican age-lock --base-ref "$BASE_SHA"
+          cargo barbican assess --base-ref "$BASE_SHA"
+"#;
+
 pub(super) fn run_policy(
     command: PolicyCommand,
     current_dir: &Path,
     stdout: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
     match command {
-        PolicyCommand::Init => run_policy_init(current_dir, stdout),
+        PolicyCommand::Init { ci } => run_policy_init(ci, current_dir, stdout),
     }
 }
 
-fn run_policy_init(current_dir: &Path, stdout: &mut dyn Write) -> Result<ExitCode, CommandError> {
+fn run_policy_init(
+    ci: Option<CiSystem>,
+    current_dir: &Path,
+    stdout: &mut dyn Write,
+) -> Result<ExitCode, CommandError> {
     let mut report = InitReport::default();
 
     let config_path = Path::new("barbican.toml");
@@ -63,9 +135,56 @@ fn run_policy_init(current_dir: &Path, stdout: &mut dyn Write) -> Result<ExitCod
         }
     }
 
-    report.render(stdout)?;
+    // The CI workflow is a self-contained artefact that does not depend on
+    // barbican.toml parsing, so it is emitted independently of `config_ok`.
+    let workflow_blocked_by_existing = match ci {
+        Some(CiSystem::Github) => {
+            ensure_ci_workflow(current_dir, Path::new(GITHUB_WORKFLOW_PATH), &mut report)?
+        }
+        None => false,
+    };
+
+    report.render(ci, stdout)?;
+
+    if workflow_blocked_by_existing {
+        writeln!(
+            stdout,
+            "\nThe {GITHUB_WORKFLOW_PATH} workflow was not written because a file already exists there. Its intended contents are:\n\n{GITHUB_CI_WORKFLOW}"
+        )
+        .map_err(CommandError::Io)?;
+    }
 
     Ok(exit_code_from_policy_failures(report.has_blocked()))
+}
+
+/// Emits the CI enforcement workflow, failing closed rather than overwriting.
+/// Unlike the idempotent base scaffold, an existing regular workflow file is a
+/// blocking condition: the caller re-prints the intended contents so the
+/// difference can be reconciled by hand. Returns `true` when the workflow was
+/// blocked specifically by an existing regular file.
+fn ensure_ci_workflow(
+    current_dir: &Path,
+    relative_path: &Path,
+    report: &mut InitReport,
+) -> Result<bool, CommandError> {
+    match confined_scaffold_state(current_dir, relative_path)? {
+        ScaffoldState::Missing => {
+            write_new_file(current_dir, relative_path, GITHUB_CI_WORKFLOW)?;
+            report.created(relative_path);
+            Ok(false)
+        }
+        ScaffoldState::RegularFile => {
+            report.blocked(
+                relative_path,
+                "already exists; refusing to overwrite the CI workflow",
+            );
+            Ok(true)
+        }
+        state => {
+            report.blocked(relative_path, block_reason(state, ExpectedScaffold::File));
+            Ok(false)
+        }
+    }
 }
 
 fn ensure_config(
@@ -237,7 +356,7 @@ impl InitReport {
             .any(|item| matches!(item.status, InitStatus::Blocked(_)))
     }
 
-    fn render(&self, stdout: &mut dyn Write) -> Result<(), CommandError> {
+    fn render(&self, ci: Option<CiSystem>, stdout: &mut dyn Write) -> Result<(), CommandError> {
         writeln!(stdout, "Policy init:").map_err(CommandError::Io)?;
         for item in &self.items {
             match &item.status {
@@ -266,9 +385,17 @@ impl InitReport {
             )
             .map_err(CommandError::Io)?;
         } else {
+            let ci_step = match ci {
+                Some(CiSystem::Github) => format!(
+                    "- A CI enforcement workflow was written to {GITHUB_WORKFLOW_PATH}; it is the authoritative server-side gate. Review it and commit it."
+                ),
+                None => {
+                    "- Add a CI enforcement gate: rerun with `cargo barbican policy init --ci github` to emit .github/workflows/barbican.yml.".to_owned()
+                }
+            };
             writeln!(
                 stdout,
-                "\nNext steps:\n- Review the manual adoption guide: {ADOPTION_GUIDE_PATH}\n- Review current dependencies and write dependency review records.\n- Populate reviewed-targets.toml only for deliberately reviewed families.\n- Run `cargo barbican pin check`, then `cargo barbican audit`, then `cargo barbican verify`."
+                "\nNext steps:\n- Review the manual adoption guide: {ADOPTION_GUIDE_PATH}\n- Review current dependencies and write dependency review records.\n- Populate reviewed-targets.toml only for deliberately reviewed families.\n- Run `cargo barbican gatehouse pre-release`.\n{ci_step}\n- Install the advisory client-side pre-commit hook shipped at {PRE_COMMIT_HOOK_TEMPLATE_PATH}: point `git config core.hooksPath` at its directory, or copy it into .git/hooks/pre-commit and make it executable. It runs the cheap subset (pin check, inventory --enforce) and is skippable with `git commit --no-verify`; CI is the real gate."
             )
             .map_err(CommandError::Io)?;
         }
@@ -300,7 +427,42 @@ impl InitStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_BARBICAN_CONFIG, DEFAULT_DENY_TOML};
+    use super::{DEFAULT_BARBICAN_CONFIG, DEFAULT_DENY_TOML, GITHUB_CI_WORKFLOW};
+
+    #[test]
+    fn github_ci_workflow_runs_the_enforcement_gate_with_pinned_actions() {
+        for gate_command in [
+            "cargo barbican gatehouse pre-release",
+            "cargo barbican age-lock --base-ref",
+            "cargo barbican assess --base-ref",
+        ] {
+            assert!(
+                GITHUB_CI_WORKFLOW.contains(gate_command),
+                "emitted workflow should run `{gate_command}`"
+            );
+        }
+        assert_eq!(
+            GITHUB_CI_WORKFLOW
+                .matches("cargo barbican gatehouse pre-release")
+                .count(),
+            1
+        );
+        assert!(!GITHUB_CI_WORKFLOW.contains("cargo barbican inventory --enforce"));
+        assert!(GITHUB_CI_WORKFLOW.contains("cargo install --locked"));
+        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.24.0"));
+        assert!(GITHUB_CI_WORKFLOW.contains("cargo-deny@0.19.6"));
+        assert!(GITHUB_CI_WORKFLOW.contains("cargo-audit@0.22.1"));
+        // Third-party actions must stay pinned by full commit SHA with a
+        // version comment rather than a mutable tag.
+        assert!(
+            GITHUB_CI_WORKFLOW
+                .contains("actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3")
+        );
+        assert!(
+            GITHUB_CI_WORKFLOW
+                .contains("Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1")
+        );
+    }
 
     #[test]
     fn embedded_default_config_matches_template() {

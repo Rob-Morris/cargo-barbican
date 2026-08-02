@@ -9,7 +9,7 @@ use crate::command_runner::CommandRunner;
 use super::{
     CommandError, DEFAULT_BASE_REF, ReviewedReleaseAgeExceptions, fail, finish_release_age_checks,
     load_current_lockfile, load_git_base_lockfile, load_lockfile_from_path,
-    load_release_age_context,
+    load_release_age_context, release_age_override_note,
 };
 
 pub(super) fn run_age_lock<C, R>(
@@ -30,6 +30,9 @@ where
 {
     let (minimum_days, reviewed_release_age_exceptions) =
         load_release_age_context(current_dir, min_age_days)?;
+    if let Some(note) = release_age_override_note(current_dir, min_age_days)? {
+        writeln!(stdout, "{note}").map_err(CommandError::Io)?;
+    }
     let current = match load_current_lockfile(current_dir, lockfile) {
         Ok(lockfile) => lockfile,
         Err(error) => return fail(stderr, error),

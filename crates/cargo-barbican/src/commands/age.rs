@@ -6,7 +6,7 @@ use barbican::{CratesIoClient, OffsetDateTime};
 
 use super::{
     CommandError, exit_code_from_policy_failures, finish_release_age_checks,
-    load_release_age_context, parse_specs,
+    load_release_age_context, parse_specs, release_age_override_note,
 };
 
 pub(super) fn run_age<C>(
@@ -23,6 +23,9 @@ where
 {
     let (minimum_days, reviewed_release_age_exceptions) =
         load_release_age_context(current_dir, min_age_days)?;
+    if let Some(note) = release_age_override_note(current_dir, min_age_days)? {
+        writeln!(stdout, "{note}").map_err(CommandError::Io)?;
+    }
     let parse_result = parse_specs(raw_specs, stderr)?;
     let age_exit = finish_release_age_checks(
         &parse_result.specs,

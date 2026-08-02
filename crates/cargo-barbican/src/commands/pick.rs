@@ -3,13 +3,13 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, OffsetDateTime, PickError, PickExclusionReason, PickSelection, parse_pick_spec,
-    pick_version,
+    CratesIoClient, OffsetDateTime, PickError, PickExcludedVersion, PickExclusionReason,
+    PickSelection, parse_pick_spec, pick_version,
 };
 
 use super::{
     CommandError, escape_render_field, exit_code_from_policy_failures, load_release_age_context,
-    render_release_age_report,
+    release_age_override_note, render_release_age_report,
 };
 
 pub(super) fn run_pick<C>(
@@ -33,6 +33,9 @@ where
     };
     let (minimum_days, reviewed_release_age_exceptions) =
         load_release_age_context(current_dir, min_age_days)?;
+    if let Some(note) = release_age_override_note(current_dir, min_age_days)? {
+        writeln!(stdout, "{note}").map_err(CommandError::Io)?;
+    }
     let versions = match client.fetch_versions(pick_spec.crate_name()) {
         Ok(versions) => versions,
         Err(error) => {
@@ -90,16 +93,7 @@ fn render_pick_selection(
         writeln!(stdout, "  excluded candidates: none").map_err(CommandError::Io)?;
     } else {
         writeln!(stdout, "  excluded candidates:").map_err(CommandError::Io)?;
-        for excluded in selection.excluded() {
-            let reason = render_pick_exclusion(excluded.reason());
-            writeln!(
-                stdout,
-                "  - {}: {}",
-                escape_render_field(excluded.version()),
-                escape_render_field(&reason)
-            )
-            .map_err(CommandError::Io)?;
-        }
+        render_pick_exclusions(selection.excluded(), stdout)?;
     }
 
     Ok(())
@@ -120,16 +114,53 @@ fn render_pick_error(
     .map_err(CommandError::Io)?;
     if !error.excluded().is_empty() {
         writeln!(stderr, "  excluded candidates:").map_err(CommandError::Io)?;
-        for excluded in error.excluded() {
-            let reason = render_pick_exclusion(excluded.reason());
-            writeln!(
-                stderr,
-                "  - {}: {}",
-                escape_render_field(excluded.version()),
-                escape_render_field(&reason)
-            )
-            .map_err(CommandError::Io)?;
+        render_pick_exclusions(error.excluded(), stderr)?;
+    }
+
+    Ok(())
+}
+
+/// Itemises the policy-relevant exclusions (yanked, pre-release, too-fresh,
+/// and malformed candidates) one per line, but collapses the plain
+/// requirement-mismatch exclusions into a single summary line: a wide range
+/// like `serde@^1` otherwise buries the few policy-driven exclusions under
+/// ~90 identical "outside requested range" lines. Writes to whichever stream
+/// the caller passes, so the selection path lands on stdout and the
+/// no-candidate error path lands on stderr.
+fn render_pick_exclusions(
+    excluded: &[PickExcludedVersion],
+    out: &mut dyn Write,
+) -> Result<(), CommandError> {
+    let mut outside_range = 0_usize;
+    for candidate in excluded {
+        if matches!(
+            candidate.reason(),
+            PickExclusionReason::DoesNotMatchRequirement
+        ) {
+            outside_range += 1;
+            continue;
         }
+        let reason = render_pick_exclusion(candidate.reason());
+        writeln!(
+            out,
+            "  - {}: {}",
+            escape_render_field(candidate.version()),
+            escape_render_field(&reason)
+        )
+        .map_err(CommandError::Io)?;
+    }
+
+    if outside_range > 0 {
+        let versions = if outside_range == 1 {
+            "version"
+        } else {
+            "versions"
+        };
+        writeln!(
+            out,
+            "  - {outside_range} {versions} excluded: outside requested range"
+        )
+        .map_err(CommandError::Io)?;
     }
 
     Ok(())

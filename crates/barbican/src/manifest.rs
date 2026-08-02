@@ -325,6 +325,209 @@ fn workspace_member_glob_root(
     }
 }
 
+/// How one `Cargo.toml` positions itself for workspace-root discovery,
+/// mirroring the three manifest shapes cargo consults when it selects a
+/// workspace root: an explicit `[workspace]` table makes the manifest the
+/// root, a `[package] workspace = "path"` pointer names the root directory,
+/// and anything else leaves root selection to the ancestor-directory walk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceRootDirective {
+    WorkspaceRoot,
+    MemberOf { workspace_path: String },
+    Standalone,
+}
+
+pub fn parse_workspace_root_directive(
+    manifest_path: &str,
+    text: &str,
+) -> Result<WorkspaceRootDirective, CargoManifestError> {
+    let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    if workspace_table(manifest_path, &root)?.is_some() {
+        return Ok(WorkspaceRootDirective::WorkspaceRoot);
+    }
+
+    let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
+    let Some(package_value) = root_table.get("package") else {
+        return Ok(WorkspaceRootDirective::Standalone);
+    };
+    let Some(package_table) = package_value.as_table() else {
+        return Err(CargoManifestError::InvalidPackageSection {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+    let Some(workspace_value) = package_table.get("workspace") else {
+        return Ok(WorkspaceRootDirective::Standalone);
+    };
+    let Some(workspace_path) = workspace_value.as_str() else {
+        return Err(CargoManifestError::InvalidPackageWorkspacePath {
+            manifest_path: manifest_path.to_owned(),
+        });
+    };
+
+    Ok(WorkspaceRootDirective::MemberOf {
+        workspace_path: workspace_path.to_owned(),
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceManifestMembership {
+    Included,
+    Excluded,
+    Unclaimed,
+}
+
+/// Classifies an ancestor workspace's explicit relationship to a child
+/// manifest during malformed-manifest fallback. Exclusions take precedence.
+pub fn classify_workspace_manifest_membership(
+    manifest_path: &str,
+    text: &str,
+    relative_manifest_path: &Path,
+) -> Result<WorkspaceManifestMembership, CargoManifestError> {
+    let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    let Some(workspace) = workspace_table(manifest_path, &root)? else {
+        return Ok(WorkspaceManifestMembership::Unclaimed);
+    };
+    let Some(relative_dir) = relative_manifest_path.parent() else {
+        return Ok(WorkspaceManifestMembership::Unclaimed);
+    };
+    let relative_dir = relative_dir
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+
+    let excludes = workspace_path_patterns(manifest_path, workspace, "exclude")?;
+    // Cargo treats `exclude` entries as normalized paths, not glob patterns.
+    if excludes.iter().any(|path| path == &relative_dir) {
+        return Ok(WorkspaceManifestMembership::Excluded);
+    }
+
+    let members = workspace_path_patterns(manifest_path, workspace, "members")?;
+    Ok(
+        if members
+            .iter()
+            .any(|pattern| workspace_path_pattern_matches(pattern, &relative_dir))
+        {
+            WorkspaceManifestMembership::Included
+        } else {
+            WorkspaceManifestMembership::Unclaimed
+        },
+    )
+}
+
+fn workspace_path_patterns(
+    manifest_path: &str,
+    workspace: &toml::map::Map<String, Value>,
+    key: &'static str,
+) -> Result<Vec<String>, CargoManifestError> {
+    let Some(value) = workspace.get(key) else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| CargoManifestError::InvalidWorkspacePaths {
+            manifest_path: manifest_path.to_owned(),
+            key,
+        })?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .and_then(normalise_workspace_path_pattern)
+                .ok_or_else(|| CargoManifestError::InvalidWorkspacePaths {
+                    manifest_path: manifest_path.to_owned(),
+                    key,
+                })
+        })
+        .collect()
+}
+
+fn normalise_workspace_path_pattern(path: &str) -> Option<String> {
+    let mut components = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(component) => {
+                components.push(component.to_string_lossy().into_owned());
+            }
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    (!components.is_empty()).then(|| components.join("/"))
+}
+
+fn workspace_path_pattern_matches(pattern: &str, candidate: &str) -> bool {
+    fn matches_segments(pattern: &[&str], candidate: &[&str]) -> bool {
+        match pattern {
+            [] => candidate.is_empty(),
+            ["**", rest @ ..] => {
+                matches_segments(rest, candidate)
+                    || (!candidate.is_empty() && matches_segments(pattern, &candidate[1..]))
+            }
+            [segment, rest @ ..] => candidate.first().is_some_and(|candidate_segment| {
+                wildcard_segment_matches(
+                    &segment.chars().collect::<Vec<_>>(),
+                    &candidate_segment.chars().collect::<Vec<_>>(),
+                ) && matches_segments(rest, &candidate[1..])
+            }),
+        }
+    }
+
+    fn wildcard_segment_matches(pattern: &[char], candidate: &[char]) -> bool {
+        fn class_matches(class: &[char], candidate: char) -> bool {
+            let (negated, class) = match class {
+                ['!' | '^', rest @ ..] => (true, rest),
+                _ => (false, class),
+            };
+            let mut matched = false;
+            let mut index = 0;
+            while index < class.len() {
+                if index + 2 < class.len() && class[index + 1] == '-' {
+                    matched |= (class[index]..=class[index + 2]).contains(&candidate);
+                    index += 3;
+                } else {
+                    matched |= class[index] == candidate;
+                    index += 1;
+                }
+            }
+            matched != negated
+        }
+
+        match pattern {
+            [] => candidate.is_empty(),
+            ['*', rest @ ..] => {
+                wildcard_segment_matches(rest, candidate)
+                    || (!candidate.is_empty() && wildcard_segment_matches(pattern, &candidate[1..]))
+            }
+            ['?', rest @ ..] => {
+                !candidate.is_empty() && wildcard_segment_matches(rest, &candidate[1..])
+            }
+            ['[', rest @ ..] => {
+                let Some(end) = rest.iter().position(|character| *character == ']') else {
+                    return false;
+                };
+                !candidate.is_empty()
+                    && class_matches(&rest[..end], candidate[0])
+                    && wildcard_segment_matches(&rest[end + 1..], &candidate[1..])
+            }
+            ['\\', literal, rest @ ..] => {
+                candidate.first() == Some(literal)
+                    && wildcard_segment_matches(rest, &candidate[1..])
+            }
+            [literal, rest @ ..] => {
+                candidate.first() == Some(literal)
+                    && wildcard_segment_matches(rest, &candidate[1..])
+            }
+        }
+    }
+
+    matches_segments(
+        &pattern.trim_end_matches('/').split('/').collect::<Vec<_>>(),
+        &candidate.split('/').collect::<Vec<_>>(),
+    )
+}
+
 pub fn parse_workspace_dependency_requirements(
     manifest_path: &str,
     text: &str,
@@ -597,6 +800,8 @@ pub enum CargoManifestError {
     InvalidPackageName { manifest_path: String },
     #[error("{manifest_path}: package version must be a string")]
     InvalidPackageVersion { manifest_path: String },
+    #[error("{manifest_path}: package workspace must be a string path")]
+    InvalidPackageWorkspacePath { manifest_path: String },
     #[error("{manifest_path}: workspace package section must be a table")]
     InvalidWorkspacePackageSection { manifest_path: String },
     #[error("{manifest_path}: workspace package version must be a string")]
@@ -605,6 +810,11 @@ pub enum CargoManifestError {
     InvalidWorkspaceSection { manifest_path: String },
     #[error("{manifest_path}: workspace members must be an array of strings")]
     InvalidWorkspaceMembers { manifest_path: String },
+    #[error("{manifest_path}: workspace {key} must be an array of relative path strings")]
+    InvalidWorkspacePaths {
+        manifest_path: String,
+        key: &'static str,
+    },
     #[error("{manifest_path}: workspace member path must stay inside the workspace: {member}")]
     InvalidWorkspaceMemberPath {
         manifest_path: String,
@@ -619,14 +829,121 @@ pub enum CargoManifestError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::path::Path;
 
     use super::{
-        CargoDependencySourceKind, CargoManifestError, parse_manifest_dependencies,
-        parse_manifest_direct_requirements, parse_manifest_package_identity,
-        parse_manifest_patched_crate_names, parse_workspace_dependency_requirements,
-        parse_workspace_member_glob_roots, parse_workspace_member_manifest_paths,
-        parse_workspace_package_version,
+        CargoDependencySourceKind, CargoManifestError, WorkspaceManifestMembership,
+        WorkspaceRootDirective, classify_workspace_manifest_membership,
+        parse_manifest_dependencies, parse_manifest_direct_requirements,
+        parse_manifest_package_identity, parse_manifest_patched_crate_names,
+        parse_workspace_dependency_requirements, parse_workspace_member_glob_roots,
+        parse_workspace_member_manifest_paths, parse_workspace_package_version,
+        parse_workspace_root_directive,
     };
+
+    #[test]
+    fn classifies_workspace_root_directives() {
+        assert_eq!(
+            parse_workspace_root_directive("Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n")
+                .expect("workspace manifest should classify"),
+            WorkspaceRootDirective::WorkspaceRoot
+        );
+        assert_eq!(
+            parse_workspace_root_directive(
+                "Cargo.toml",
+                "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[workspace]\n"
+            )
+            .expect("package with empty workspace table should classify"),
+            WorkspaceRootDirective::WorkspaceRoot
+        );
+        assert_eq!(
+            parse_workspace_root_directive(
+                "crates/demo/Cargo.toml",
+                "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nworkspace = \"../..\"\n"
+            )
+            .expect("workspace pointer should classify"),
+            WorkspaceRootDirective::MemberOf {
+                workspace_path: "../..".to_owned()
+            }
+        );
+        assert_eq!(
+            parse_workspace_root_directive(
+                "crates/demo/Cargo.toml",
+                "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n"
+            )
+            .expect("plain package manifest should classify"),
+            WorkspaceRootDirective::Standalone
+        );
+        assert_eq!(
+            parse_workspace_root_directive("Cargo.toml", "[dependencies]\nserde = \"1\"\n")
+                .expect("packageless manifest should classify"),
+            WorkspaceRootDirective::Standalone
+        );
+    }
+
+    #[test]
+    fn rejects_non_string_package_workspace_pointer() {
+        assert!(matches!(
+            parse_workspace_root_directive(
+                "Cargo.toml",
+                "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nworkspace = true\n"
+            ),
+            Err(CargoManifestError::InvalidPackageWorkspacePath { .. })
+        ));
+    }
+
+    #[test]
+    fn fallback_membership_honours_member_and_exclude_patterns() {
+        let manifest = "[workspace]\nmembers = [\"crates/*\"]\nexclude = [\"crates/excluded\"]\n";
+        assert!(
+            classify_workspace_manifest_membership(
+                "Cargo.toml",
+                manifest,
+                Path::new("crates/included/Cargo.toml")
+            )
+            .expect("membership should parse")
+                == WorkspaceManifestMembership::Included
+        );
+        assert!(
+            classify_workspace_manifest_membership(
+                "Cargo.toml",
+                manifest,
+                Path::new("crates/excluded/Cargo.toml")
+            )
+            .expect("exclusion should parse")
+                == WorkspaceManifestMembership::Excluded
+        );
+
+        let bracket_manifest =
+            "[workspace]\nmembers = [\"./crates/[ab]pp\"]\nexclude = [\"./crates/xpp\"]\n";
+        assert_eq!(
+            classify_workspace_manifest_membership(
+                "Cargo.toml",
+                bracket_manifest,
+                Path::new("crates/app/Cargo.toml"),
+            )
+            .expect("bracket membership should parse"),
+            WorkspaceManifestMembership::Included
+        );
+        assert_eq!(
+            classify_workspace_manifest_membership(
+                "Cargo.toml",
+                bracket_manifest,
+                Path::new("crates/xpp/Cargo.toml"),
+            )
+            .expect("exact exclusion should parse"),
+            WorkspaceManifestMembership::Excluded
+        );
+        assert_eq!(
+            classify_workspace_manifest_membership(
+                "Cargo.toml",
+                "[workspace]\nmembers = []\nexclude = [\"crates/a*\"]\n",
+                Path::new("crates/app/Cargo.toml"),
+            )
+            .expect("literal wildcard exclusion should parse"),
+            WorkspaceManifestMembership::Unclaimed
+        );
+    }
 
     #[test]
     fn parses_root_and_target_dependency_sections() {

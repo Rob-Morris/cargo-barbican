@@ -86,6 +86,7 @@ current implemented surface is:
 - `cargo barbican assess`
 - `cargo barbican inspect`
 - `cargo barbican gatehouse candidate`
+- `cargo barbican gatehouse pre-release`
 - `cargo barbican policy init`
 - `cargo barbican inventory`
 - `cargo barbican pin add`
@@ -127,6 +128,9 @@ The current intake layer now includes the first pre-add deep-review slice:
   pre-add deep-review surface
 - `cargo barbican gatehouse candidate` exists as the first workflow
   convenience surface for isolated exact-candidate intake dossiers
+- `cargo barbican gatehouse pre-release` composes the blocking direct-dependency
+  inventory floor, blocking audit, and blocking verify as the blessed
+  whole-repo release gate
 - `cargo barbican policy init` exists as the deterministic policy scaffold
   command for consumer adoption; it creates missing explicit policy files but
   does not review or certify existing dependencies

@@ -9,18 +9,17 @@ use std::process::ExitCode;
 use barbican::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
     AdvisoryFindingId, AdvisoryRemediation, AdvisoryRemediationBlocker, AdvisoryRemediationKind,
-    CargoDenyNoAdvisoryDiagnostic, ExactCrateSpec, LockfileAdvisoryScanner,
-    MetadataDependencyPath, MetadataRequirementEdge, OffsetDateTime, ReviewRecordFact,
-    ReviewedAdvisoryException, ReviewedTargets, RustReviewedTargetsReport,
-    UnmanagedDelegatedPolicyMode, advisory_remediation, check_reviewed_rust_targets,
-    evaluate_advisory_audit, generate_cargo_deny_runtime_config, parse_cargo_audit_json,
-    parse_cargo_deny_json_lines, parse_cargo_metadata, requirement_edges_onto,
-    shortest_workspace_dependency_path,
+    CargoDenyNoAdvisoryDiagnostic, ExactCrateSpec, LockfileAdvisoryScanner, MetadataDependencyPath,
+    MetadataRequirementEdge, OffsetDateTime, ReviewRecordFact, ReviewedAdvisoryException,
+    ReviewedTargets, RustReviewedTargetsReport, UnmanagedDelegatedPolicyMode, advisory_remediation,
+    check_reviewed_rust_targets, evaluate_advisory_audit, generate_cargo_deny_runtime_config,
+    parse_cargo_audit_json, parse_cargo_deny_json_lines, parse_cargo_metadata,
+    requirement_edges_onto, shortest_workspace_dependency_path,
 };
 use serde_json::json;
 
 use crate::cli::AuditOutputFormat;
-use crate::command_runner::CommandRunner;
+use crate::command_runner::{CommandOutput, CommandRunner, Delegate};
 
 use super::scratch_dir::ScratchDir;
 use super::{
@@ -34,6 +33,7 @@ use super::{
 pub(super) fn run_audit<R>(
     output_format: AuditOutputFormat,
     current_dir: &Path,
+    workspace_degradation_reason: Option<&str>,
     runner: &R,
     now: OffsetDateTime,
     stdout: &mut dyn Write,
@@ -44,13 +44,24 @@ where
 {
     let config = load_config(current_dir)?;
     let reviewed_targets = load_reviewed_targets(current_dir, Path::new("reviewed-targets.toml"))?;
-    let (pin_report, review_record_checks) =
-        load_review_evidence(current_dir, reviewed_targets.as_ref())?;
+    let (pin_report, review_record_checks) = if workspace_degradation_reason.is_some() {
+        // A malformed manifest makes reviewed-family binding indeterminate.
+        // Bind no exceptions (fail closed) but keep the delegated advisory
+        // verdict renderable, matching audit's best-effort context contract.
+        (None, Vec::new())
+    } else {
+        load_review_evidence(current_dir, reviewed_targets.as_ref())?
+    };
     let bound_exceptions = bound_advisory_exceptions(&pin_report, &review_record_checks);
 
     let user_deny_toml = read_optional_text_no_symlink(current_dir, Path::new("deny.toml"))
         .map_err(CommandError::Io)?;
     let native_ignores = load_native_delegated_ignores(current_dir)?;
+
+    if let Some(exit_code) = ensure_delegate_available(runner, Delegate::CargoDeny, stderr)? {
+        return Ok(exit_code);
+    }
+
     let scratch = ScratchDir::create("cargo-barbican-audit", false).map_err(CommandError::Io)?;
     let generated_config = generate_cargo_deny_runtime_config(
         user_deny_toml.as_deref(),
@@ -70,20 +81,23 @@ where
             Err(error) => {
                 return fail(
                     stderr,
-                    format!(
-                        "cargo deny structured output: {}",
-                        escape_diagnostic_for_terminal(&error.to_string())
-                    ),
+                    delegate_output_failure(Delegate::CargoDeny, &output, &error.to_string()),
                 );
             }
         },
-        Err(error) => return fail(stderr, format!("cargo deny -f json: {error}")),
+        Err(error) => {
+            return fail(stderr, format!("{}: {error}", Delegate::CargoDeny.binary()));
+        }
     };
 
     let cargo_audit_report = if matches!(
         config.delegates.advisories.lockfile_scanner,
         LockfileAdvisoryScanner::CargoAudit | LockfileAdvisoryScanner::Both
     ) {
+        if let Some(exit_code) = ensure_delegate_available(runner, Delegate::CargoAudit, stderr)? {
+            return Ok(exit_code);
+        }
+
         let lockfile_path = current_dir.join("Cargo.lock");
         match runner.cargo_audit_json(scratch.path(), &lockfile_path) {
             Ok(output) => match parse_cargo_audit_json(&output.stdout) {
@@ -91,14 +105,16 @@ where
                 Err(error) => {
                     return fail(
                         stderr,
-                        format!(
-                            "cargo audit structured output: {}",
-                            escape_diagnostic_for_terminal(&error.to_string())
-                        ),
+                        delegate_output_failure(Delegate::CargoAudit, &output, &error.to_string()),
                     );
                 }
             },
-            Err(error) => return fail(stderr, format!("cargo audit --json: {error}")),
+            Err(error) => {
+                return fail(
+                    stderr,
+                    format!("{}: {error}", Delegate::CargoAudit.binary()),
+                );
+            }
         }
     } else {
         None
@@ -119,7 +135,12 @@ where
         );
     let passed = outcome.is_success() && !native_ignores_fail;
     let dependency_paths = collect_dependency_paths(current_dir, runner, &outcome, output_format);
-    let remediations = collect_remediations(current_dir, &outcome, &dependency_paths);
+    let remediations = collect_remediations(
+        current_dir,
+        workspace_degradation_reason,
+        &outcome,
+        &dependency_paths,
+    );
     if let Some(reason) = remediations.unavailable_reason() {
         writeln!(
             stderr,
@@ -165,6 +186,88 @@ where
     } else {
         ExitCode::from(1)
     })
+}
+
+/// Fail closed before delegating when the scanner binary cannot be run: a
+/// clean ENOENT names the tool and its install command, any other probe error
+/// surfaces the underlying failure. `Ok(None)` means the delegate is present
+/// and the caller may proceed; `Ok(Some(exit))` means a `FAIL` line has
+/// already been written and the caller must return that exit code.
+fn ensure_delegate_available<R>(
+    runner: &R,
+    delegate: Delegate,
+    stderr: &mut dyn Write,
+) -> Result<Option<ExitCode>, CommandError>
+where
+    R: CommandRunner + ?Sized,
+{
+    match runner.delegate_available(delegate) {
+        Ok(true) => Ok(None),
+        Ok(false) => fail(
+            stderr,
+            format!(
+                "{}: not found on PATH; install with `{}`",
+                delegate.binary(),
+                delegate.install_command()
+            ),
+        )
+        .map(Some),
+        Err(error) => fail(
+            stderr,
+            format!(
+                "{}: unable to probe availability: {error}",
+                delegate.binary()
+            ),
+        )
+        .map(Some),
+    }
+}
+
+/// A delegate legitimately exits non-zero when it reports findings, but by the
+/// time this is reached its structured output has already failed to parse — so
+/// a non-zero exit here means the delegate itself failed, not that it enumerated
+/// advisories. Surface its status and a stderr excerpt in that case; only a
+/// clean exit with unparseable output is a genuine structured-output contract
+/// violation worth reporting as a parse error.
+fn delegate_output_failure(
+    delegate: Delegate,
+    output: &CommandOutput,
+    parse_error: &str,
+) -> String {
+    match output.exit_code {
+        Some(0) => format!(
+            "{} structured output: {}",
+            delegate.binary(),
+            escape_diagnostic_for_terminal(parse_error)
+        ),
+        Some(code) => format!(
+            "{}: exited with status {code}{}",
+            delegate.binary(),
+            delegate_stderr_excerpt(&output.stderr)
+        ),
+        None => format!(
+            "{}: terminated without an exit code{}",
+            delegate.binary(),
+            delegate_stderr_excerpt(&output.stderr)
+        ),
+    }
+}
+
+fn delegate_stderr_excerpt(stderr: &str) -> String {
+    let trimmed = stderr.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    const MAX_CHARS: usize = 500;
+    let excerpt = if trimmed.chars().count() > MAX_CHARS {
+        let head = trimmed.chars().take(MAX_CHARS).collect::<String>();
+        format!("{head}...")
+    } else {
+        trimmed.to_owned()
+    };
+
+    format!("; stderr: {}", escape_diagnostic_for_terminal(&excerpt))
 }
 
 fn collect_dependency_paths<R>(
@@ -234,6 +337,7 @@ where
 /// solely by advisory disposition, matching the dependency-path posture.
 fn collect_remediations(
     current_dir: &Path,
+    workspace_degradation_reason: Option<&str>,
     outcome: &AdvisoryAuditOutcome,
     dependency_paths: &DependencyPathReport,
 ) -> AdvisoryRemediationReport {
@@ -252,6 +356,10 @@ fn collect_remediations(
 
     if remediation_candidates.is_empty() {
         return AdvisoryRemediationReport::default();
+    }
+
+    if let Some(reason) = workspace_degradation_reason {
+        return AdvisoryRemediationReport::unavailable(reason.to_owned());
     }
 
     let (manifest_requirements, workspace_requirements) =

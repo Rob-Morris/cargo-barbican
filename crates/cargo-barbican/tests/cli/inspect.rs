@@ -33,6 +33,7 @@ fn inspect_smoke_tests_fetch_release_tarball_against_a_local_http_server() {
     let client = UreqCratesIoClient::new(base_url);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -83,6 +84,7 @@ fn inspect_reports_tarball_exceeding_max_size_from_the_ureq_client() {
     let client = UreqCratesIoClient::new(base_url);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -92,7 +94,10 @@ fn inspect_reports_tarball_exceeding_max_size_from_the_ureq_client() {
     handle.join().expect("stub server should exit cleanly");
 
     assert_eq!(exit_code, ExitCode::from(1));
-    assert!(stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(stdout).expect("stdout should be utf8"),
+        "note: release-age minimum overridden to 0 days via --min-age-days (configured 7)\n"
+    );
     requests
         .recv()
         .expect("stub server should capture the version request");
@@ -126,6 +131,7 @@ fn inspect_reports_routine_safe_for_clean_crate() {
         .with_tarball("sample@0.1.0", &tarball);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -172,6 +178,7 @@ fn inspect_honours_injected_clock_for_release_age() {
         .with_tarball("sample@0.1.0", &tarball);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -209,6 +216,7 @@ fn inspect_renders_reviewed_release_age_exception() {
         .with_tarball("sample@0.1.0", &tarball);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -253,6 +261,7 @@ fn inspect_reports_elevated_risk_for_build_script_and_native_surface() {
         .with_tarball("native-sys@0.1.0", &tarball);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -292,6 +301,7 @@ fn inspect_reports_policy_violation_for_checksum_mismatch() {
         .with_tarball("sample@0.1.0", &tarball);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -305,6 +315,95 @@ fn inspect_reports_policy_violation_for_checksum_mismatch() {
     assert!(rendered.contains("checksum: FAIL local sha256"));
     assert!(rendered.contains("build.rs surfaces: none"));
     assert!(rendered.contains("IOC hits: none"));
+}
+
+#[test]
+fn inspect_explains_ioc_driven_policy_violation_with_remediation() {
+    // The reproduction: a first-time inspect of a crate whose build script
+    // shells out reads as "do not add this" with no path forward. The verdict
+    // basis must name the IOC hits as the driver, the IOC line must render each
+    // matched pattern unambiguously, and the remediation must point at the
+    // reviewed-family path plus the fuller gatehouse dossier.
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        (
+            "build.rs",
+            "fn main() { std::process::Command::new(\"curl\").arg(\"https://example.com\"); }\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let checksum = sha256_hex(&tarball);
+    let cli = Cli::parse_from(["cargo-barbican", "inspect", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum("sample@0.1.0", "2020-05-01T00:00:00Z", false, &checksum)
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("classification: policy-violating"));
+    // The matched pattern is quoted so the trailing `(` no longer collides
+    // with the surrounding delimiters.
+    assert!(rendered.contains("build.rs (process execution: `Command::new(`)"));
+    assert!(rendered.contains("build.rs (process execution: `std::process::Command`)"));
+    assert!(rendered.contains("verdict basis: policy-violating is driven by the IOC hits above."));
+    assert!(rendered.contains("record the crate in a reviewed family with an allowed_surfaces"));
+    assert!(rendered.contains("cargo barbican pin add sample"));
+    assert!(rendered.contains("docs/user/configuration.md"));
+    assert!(rendered.contains("cargo barbican gatehouse candidate sample@0.1.0"));
+}
+
+#[test]
+fn inspect_checksum_mismatch_verdict_names_checksum_not_surfaces() {
+    // A checksum mismatch is an integrity failure, never a reviewable surface,
+    // so the verdict basis must name the mismatch and no allowed_surfaces
+    // remediation may appear.
+    let tarball = build_crate_tarball(&[
+        (
+            "Cargo.toml",
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\n",
+        ),
+        ("src/lib.rs", "pub fn ok() {}\n"),
+    ]);
+    let cli = Cli::parse_from(["cargo-barbican", "inspect", "sample@0.1.0"]);
+    let client = FakeCratesIoClient::default()
+        .with_release_checksum(
+            "sample@0.1.0",
+            "2020-05-01T00:00:00Z",
+            false,
+            "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        )
+        .with_tarball("sample@0.1.0", &tarball);
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("classification: policy-violating"));
+    assert!(
+        rendered
+            .contains("verdict basis: policy-violating is driven by the checksum mismatch above.")
+    );
+    assert!(!rendered.contains("allowed_surfaces"));
+    assert!(!rendered.contains("reviewed-family path"));
 }
 
 #[test]
@@ -331,6 +430,7 @@ fn inspect_escapes_hostile_vcs_info_and_package_links() {
         .with_tarball("sample@0.1.0", &tarball);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 

@@ -70,6 +70,16 @@ pub enum CommandError {
         path: String,
         source: io::Error,
     },
+    WorkspaceRootNotFound {
+        start_dir: String,
+    },
+    WorkspaceRootDiscovery {
+        start_dir: String,
+        source: RunnerError,
+    },
+    WorkspaceRootOutput {
+        output: String,
+    },
     Io(io::Error),
 }
 
@@ -203,6 +213,29 @@ impl fmt::Display for CommandError {
                     ))
                 )
             }
+            Self::WorkspaceRootNotFound { start_dir } => {
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!(
+                        "workspace root not found: no Cargo.toml in {start_dir} or any parent directory; commands anchor to the workspace Cargo selects with `cargo locate-project --workspace`, so run from inside a Cargo project"
+                    ))
+                )
+            }
+            Self::WorkspaceRootDiscovery { start_dir, source } => write!(
+                formatter,
+                "{}",
+                escape_diagnostic_for_terminal(&format!(
+                    "unable to locate Cargo workspace root from {start_dir}: {source}"
+                ))
+            ),
+            Self::WorkspaceRootOutput { output } => write!(
+                formatter,
+                "{}",
+                escape_diagnostic_for_terminal(&format!(
+                    "cargo locate-project returned an invalid workspace manifest path: {output:?}"
+                ))
+            ),
             Self::Io(error) => {
                 write!(
                     formatter,
@@ -265,6 +298,9 @@ impl std::error::Error for CommandError {
             Self::ReviewedTargetsParse { source, .. } => Some(source),
             Self::ReviewedTargetsRead { source, .. } => Some(source),
             Self::ScaffoldIo { source, .. } => Some(source),
+            Self::WorkspaceRootNotFound { .. } => None,
+            Self::WorkspaceRootDiscovery { source, .. } => Some(source),
+            Self::WorkspaceRootOutput { .. } => None,
             Self::Io(error) => Some(error),
         }
     }

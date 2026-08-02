@@ -1,9 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::path::Path;
 
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{ExactCrateSpec, ExecutionSurfaceKind, is_native_sys_execution_surface};
+use crate::lockfile::{LockedPackageLookup, resolved_sources_match};
+use crate::{
+    ExactCrateSpec, ExecutionSurfaceKind, LockedDependency, Lockfile,
+    is_native_sys_execution_surface,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CargoMetadata {
@@ -15,6 +20,13 @@ pub struct CargoMetadata {
 impl CargoMetadata {
     fn workspace_member_ids(&self) -> HashSet<&str> {
         self.workspace_members.iter().map(String::as_str).collect()
+    }
+
+    fn packages_by_id(&self) -> BTreeMap<&str, &MetadataPackage> {
+        self.packages
+            .iter()
+            .map(|package| (package.id.as_str(), package))
+            .collect()
     }
 }
 
@@ -29,6 +41,8 @@ pub fn parse_cargo_metadata(text: &str) -> Result<CargoMetadata, CargoMetadataEr
                 name: package.name,
                 id: package.id,
                 version: package.version,
+                source: package.source,
+                manifest_path: package.manifest_path,
                 links: package.links,
                 targets: package
                     .targets
@@ -42,6 +56,8 @@ pub fn parse_cargo_metadata(text: &str) -> Result<CargoMetadata, CargoMetadataEr
                         name: dependency.name,
                         req: dependency.req,
                         kind: dependency.kind,
+                        source: dependency.source,
+                        path: dependency.path,
                     })
                     .collect(),
             })
@@ -64,6 +80,212 @@ pub fn parse_cargo_metadata(text: &str) -> Result<CargoMetadata, CargoMetadataEr
                 })
                 .collect(),
         }),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MetadataDirectDependency {
+    resolved: LockedDependency,
+    workspace_member: bool,
+}
+
+impl MetadataDirectDependency {
+    pub fn spec(&self) -> &ExactCrateSpec {
+        self.resolved.spec()
+    }
+
+    pub fn source(&self) -> Option<&str> {
+        self.resolved.source()
+    }
+
+    pub fn is_crates_io(&self) -> bool {
+        self.resolved.is_crates_io()
+    }
+
+    pub fn is_workspace_member(&self) -> bool {
+        self.workspace_member
+    }
+}
+
+pub fn workspace_direct_dependencies(
+    metadata: &CargoMetadata,
+    lockfile: &Lockfile,
+) -> Result<Vec<MetadataDirectDependency>, CargoMetadataError> {
+    let workspace_members = metadata.workspace_member_ids();
+    let workspace_manifest_dirs = metadata
+        .packages
+        .iter()
+        .filter(|package| workspace_members.contains(package.id.as_str()))
+        .filter_map(|package| package.manifest_path.as_deref())
+        .filter_map(|manifest_path| Path::new(manifest_path).parent())
+        .collect::<BTreeSet<_>>();
+    let locked_packages = lockfile.package_index();
+    let mut dependencies = BTreeSet::new();
+
+    for package in &metadata.packages {
+        if !workspace_members.contains(package.id.as_str()) {
+            continue;
+        }
+        let locked_parent = match locked_packages.find(
+            package.name.as_str(),
+            package.version.as_str(),
+            package.source.as_deref(),
+        ) {
+            LockedPackageLookup::Found(locked_parent) => locked_parent,
+            LockedPackageLookup::Ambiguous => {
+                return Err(CargoMetadataError::AmbiguousLockedWorkspacePackage {
+                    package_id: package.id.clone(),
+                });
+            }
+            LockedPackageLookup::NotFound => {
+                return Err(CargoMetadataError::LockedWorkspacePackageNotFound {
+                    package_id: package.id.clone(),
+                });
+            }
+        };
+        dependencies.extend(resolve_workspace_package_direct_dependencies(
+            package,
+            locked_parent,
+            &workspace_manifest_dirs,
+        )?);
+    }
+
+    Ok(dependencies.into_iter().collect())
+}
+
+fn resolve_workspace_package_direct_dependencies(
+    package: &MetadataPackage,
+    locked_parent: &crate::LockedPackage,
+    workspace_manifest_dirs: &BTreeSet<&Path>,
+) -> Result<Vec<MetadataDirectDependency>, CargoMetadataError> {
+    let declared_names = package
+        .dependencies
+        .iter()
+        .map(|dependency| dependency.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let locked_dependencies_by_name = locked_parent.dependencies().iter().fold(
+        BTreeMap::<&str, Vec<_>>::new(),
+        |mut by_name, dependency| {
+            by_name
+                .entry(dependency.spec().crate_name())
+                .or_default()
+                .push(dependency);
+            by_name
+        },
+    );
+    let locked_names = locked_dependencies_by_name
+        .keys()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    if declared_names != locked_names {
+        return Err(CargoMetadataError::LockedDirectDependencySetMismatch {
+            package_id: package.id.clone(),
+            declared: declared_names.into_iter().map(str::to_owned).collect(),
+            locked: locked_names.into_iter().map(str::to_owned).collect(),
+        });
+    }
+
+    package
+        .dependencies
+        .iter()
+        .map(|declaration| {
+            let resolved = resolve_declared_dependency(
+                package,
+                declaration,
+                locked_dependencies_by_name
+                    .get(declaration.name.as_str())
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+            )?;
+            Ok(MetadataDirectDependency {
+                resolved: resolved.clone(),
+                workspace_member: declaration
+                    .path
+                    .as_deref()
+                    .is_some_and(|path| workspace_manifest_dirs.contains(Path::new(path))),
+            })
+        })
+        .collect()
+}
+
+fn resolve_declared_dependency<'a>(
+    parent: &MetadataPackage,
+    declaration: &MetadataDependencyDeclaration,
+    locked_dependencies: &'a [&LockedDependency],
+) -> Result<&'a LockedDependency, CargoMetadataError> {
+    let requirement = declaration
+        .req
+        .as_deref()
+        .map(semver::VersionReq::parse)
+        .transpose()
+        .map_err(|source| CargoMetadataError::InvalidDependencyRequirement {
+            package_id: parent.id.clone(),
+            dependency_name: declaration.name.clone(),
+            source,
+        })?;
+    let versionless_external = declaration.req.as_deref() == Some("*")
+        && (declaration.path.is_some()
+            || declaration
+                .source
+                .as_deref()
+                .is_some_and(|source| source.starts_with("git+")));
+    let version_candidates = locked_dependencies
+        .iter()
+        .copied()
+        .filter(|dependency| {
+            versionless_external
+                || requirement.as_ref().is_none_or(|requirement| {
+                    semver::Version::parse(dependency.spec().version())
+                        .is_ok_and(|version| requirement.matches(&version))
+                })
+        })
+        .collect::<Vec<_>>();
+    let source_candidates = version_candidates
+        .iter()
+        .copied()
+        .filter(|dependency| {
+            if declaration.path.is_some() {
+                dependency.source().is_none()
+            } else {
+                declaration.source.as_deref().is_some_and(|declared| {
+                    dependency
+                        .source()
+                        .is_some_and(|resolved| resolved_sources_match(declared, resolved))
+                })
+            }
+        })
+        .collect::<Vec<_>>();
+    // Registry patches legitimately replace the declaration's registry source
+    // with a git or path edge. Cargo has already selected that edge; retain the
+    // source match when available, then fall back to an otherwise unique
+    // version match so the resolved source remains visible to enforcement.
+    let mut candidates = if source_candidates.is_empty()
+        && declaration.source.as_deref() == Some(crate::CRATES_IO_SOURCE)
+    {
+        version_candidates.into_iter()
+    } else {
+        source_candidates.into_iter()
+    };
+    let Some(first) = candidates.next() else {
+        return Err(CargoMetadataError::LockedDirectDependencyNotFound {
+            package_id: parent.id.clone(),
+            dependency_name: declaration.name.clone(),
+            requirement: declaration.req.clone(),
+        });
+    };
+    let Some(second) = candidates.next() else {
+        return Ok(first);
+    };
+
+    Err(CargoMetadataError::AmbiguousLockedDirectDependency {
+        package_id: parent.id.clone(),
+        dependency_name: declaration.name.clone(),
+        requirement: declaration.req.clone(),
+        candidates: std::iter::once(first)
+            .chain(std::iter::once(second))
+            .chain(candidates)
+            .map(|dependency| dependency.spec().to_string())
+            .collect(),
     })
 }
 
@@ -148,11 +370,7 @@ pub fn shortest_workspace_dependency_path(
         .resolve
         .as_ref()
         .ok_or(CargoMetadataError::MissingResolveGraph)?;
-    let packages_by_id = metadata
-        .packages
-        .iter()
-        .map(|package| (package.id.as_str(), package))
-        .collect::<BTreeMap<_, _>>();
+    let packages_by_id = metadata.packages_by_id();
     let target_ids = metadata
         .packages
         .iter()
@@ -255,11 +473,7 @@ pub fn requirement_edges_onto(
         .resolve
         .as_ref()
         .ok_or(CargoMetadataError::MissingResolveGraph)?;
-    let packages_by_id = metadata
-        .packages
-        .iter()
-        .map(|package| (package.id.as_str(), package))
-        .collect::<BTreeMap<_, _>>();
+    let packages_by_id = metadata.packages_by_id();
     let target_ids = metadata
         .packages
         .iter()
@@ -415,6 +629,44 @@ pub enum CargoMetadataError {
         #[source]
         source: crate::ExactCrateSpecError,
     },
+    #[error("workspace package {package_id:?} is absent from Cargo.lock")]
+    LockedWorkspacePackageNotFound { package_id: String },
+    #[error("workspace package {package_id:?} has an ambiguous Cargo.lock identity")]
+    AmbiguousLockedWorkspacePackage { package_id: String },
+    #[error(
+        "workspace package {package_id:?} direct dependency names differ between cargo metadata and Cargo.lock: declared={declared:?}, locked={locked:?}"
+    )]
+    LockedDirectDependencySetMismatch {
+        package_id: String,
+        declared: Vec<String>,
+        locked: Vec<String>,
+    },
+    #[error(
+        "workspace package {package_id:?} declares {dependency_name:?} {requirement:?}, but no matching direct Cargo.lock edge exists"
+    )]
+    LockedDirectDependencyNotFound {
+        package_id: String,
+        dependency_name: String,
+        requirement: Option<String>,
+    },
+    #[error(
+        "workspace package {package_id:?} declares {dependency_name:?} {requirement:?}, but its direct Cargo.lock edge is ambiguous: {candidates:?}"
+    )]
+    AmbiguousLockedDirectDependency {
+        package_id: String,
+        dependency_name: String,
+        requirement: Option<String>,
+        candidates: Vec<String>,
+    },
+    #[error(
+        "workspace package {package_id:?} has invalid requirement for {dependency_name:?}: {source}"
+    )]
+    InvalidDependencyRequirement {
+        package_id: String,
+        dependency_name: String,
+        #[source]
+        source: semver::Error,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -478,6 +730,8 @@ struct MetadataPackage {
     name: String,
     id: String,
     version: String,
+    source: Option<String>,
+    manifest_path: Option<String>,
     links: Option<String>,
     targets: Vec<MetadataTarget>,
     dependencies: Vec<MetadataDependencyDeclaration>,
@@ -488,6 +742,8 @@ struct MetadataDependencyDeclaration {
     name: String,
     req: Option<String>,
     kind: Option<String>,
+    source: Option<String>,
+    path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -526,6 +782,8 @@ struct RawMetadataPackage {
     name: String,
     id: String,
     version: String,
+    source: Option<String>,
+    manifest_path: Option<String>,
     links: Option<String>,
     #[serde(default)]
     targets: Vec<RawMetadataTarget>,
@@ -539,6 +797,8 @@ struct RawMetadataDependencyDeclaration {
     req: Option<String>,
     #[serde(default)]
     kind: Option<String>,
+    source: Option<String>,
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -568,12 +828,296 @@ struct RawMetadataDependency {
 
 #[cfg(test)]
 mod tests {
-    use crate::ExactCrateSpec;
+    use crate::{ExactCrateSpec, parse_lockfile};
 
     use super::{
         CargoMetadataError, package_surfaces, parse_cargo_metadata, requirement_edges_onto,
-        select_package_id, shortest_workspace_dependency_path,
+        select_package_id, shortest_workspace_dependency_path, workspace_direct_dependencies,
     };
+
+    #[test]
+    fn resolves_declared_workspace_dependencies_through_lock_edges() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages": [
+    {"name":"root","id":"path+file:///repo#root@0.1.0","version":"0.1.0","source":null,"manifest_path":"/repo/Cargo.toml","targets":[],"dependencies":[
+      {"name":"real","rename":"alias","req":"=1.0.0","kind":null,"optional":true,"source":"registry+https://github.com/rust-lang/crates.io-index"},
+      {"name":"external","rename":"external_alias","req":"*","kind":"dev","optional":false,"source":null,"path":"/outside"},
+      {"name":"gitdep","req":"*","kind":null,"optional":false,"source":"git+https://example.invalid/gitdep?rev=main"},
+      {"name":"member","req":"*","kind":"build","optional":false,"source":null,"path":"/repo/member"}
+    ]},
+    {"name":"real","id":"registry+https://github.com/rust-lang/crates.io-index#real@1.0.0","version":"1.0.0","source":"registry+https://github.com/rust-lang/crates.io-index","targets":[]},
+    {"name":"real","id":"registry+https://github.com/rust-lang/crates.io-index#real@2.0.0","version":"2.0.0","source":"registry+https://github.com/rust-lang/crates.io-index","targets":[]},
+    {"name":"external","id":"path+file:///outside#external@3.0.0","version":"3.0.0","source":null,"targets":[]},
+    {"name":"member","id":"path+file:///repo/member#member@0.1.0","version":"0.1.0","source":null,"manifest_path":"/repo/member/Cargo.toml","targets":[]}
+  ],
+  "workspace_members": [
+    "path+file:///repo#root@0.1.0",
+    "path+file:///repo/member#member@0.1.0"
+  ],
+  "resolve": {"nodes":[
+    {"id":"path+file:///repo#root@0.1.0","deps":[
+      {"name":"external_alias","pkg":"path+file:///outside#external@3.0.0"},
+      {"name":"member","pkg":"path+file:///repo/member#member@0.1.0"}
+    ]},
+    {"id":"registry+https://github.com/rust-lang/crates.io-index#real@1.0.0","deps":[
+      {"name":"real","pkg":"registry+https://github.com/rust-lang/crates.io-index#real@2.0.0"}
+    ]},
+    {"id":"registry+https://github.com/rust-lang/crates.io-index#real@2.0.0","deps":[]},
+    {"id":"path+file:///outside#external@3.0.0","deps":[]},
+    {"id":"path+file:///repo/member#member@0.1.0","deps":[]}
+  ]}
+}"#,
+        )
+        .expect("metadata should parse");
+        let lockfile = parse_lockfile(
+            r#"
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = [
+ "real 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "external",
+ "gitdep 4.0.0 (git+https://example.invalid/gitdep?rev=main#0123456789abcdef)",
+ "member",
+]
+
+[[package]]
+name = "real"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = ["real 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)"]
+
+[[package]]
+name = "real"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "external"
+version = "3.0.0"
+
+[[package]]
+name = "gitdep"
+version = "4.0.0"
+source = "git+https://example.invalid/gitdep?rev=main#0123456789abcdef"
+
+[[package]]
+name = "member"
+version = "0.1.0"
+"#,
+        )
+        .expect("lockfile should parse");
+
+        let dependencies = workspace_direct_dependencies(&metadata, &lockfile)
+            .expect("direct dependencies should resolve");
+        let facts = dependencies
+            .iter()
+            .map(|dependency| {
+                (
+                    dependency.spec().to_string(),
+                    dependency.source().map(str::to_owned),
+                    dependency.is_workspace_member(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            facts,
+            vec![
+                ("external@3.0.0".to_owned(), None, false),
+                (
+                    "gitdep@4.0.0".to_owned(),
+                    Some("git+https://example.invalid/gitdep?rev=main#0123456789abcdef".to_owned(),),
+                    false,
+                ),
+                ("member@0.1.0".to_owned(), None, true),
+                (
+                    "real@1.0.0".to_owned(),
+                    Some("registry+https://github.com/rust-lang/crates.io-index".to_owned()),
+                    false,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn git_source_matching_preserves_repository_and_query_identity() {
+        assert!(crate::lockfile::resolved_sources_match(
+            "git+https://example.invalid/repo?rev=main",
+            "git+https://example.invalid/repo?rev=main#0123456789abcdef",
+        ));
+        assert!(!crate::lockfile::resolved_sources_match(
+            "git+https://example.invalid/repo?rev=main",
+            "git+https://example.invalid/other?rev=main#0123456789abcdef",
+        ));
+        assert!(!crate::lockfile::resolved_sources_match(
+            "git+https://example.invalid/repo?branch=main",
+            "git+https://example.invalid/repo?rev=main#0123456789abcdef",
+        ));
+    }
+
+    #[test]
+    fn resolves_patched_registry_and_versionless_prerelease_dependencies() {
+        let metadata = parse_cargo_metadata(
+            r#"{
+  "packages":[
+    {"name":"root","id":"path+file:///repo#root@0.1.0","version":"0.1.0","source":null,"manifest_path":"/repo/Cargo.toml","targets":[],"dependencies":[
+      {"name":"patched","req":"=1.0.0","kind":null,"optional":false,"source":"registry+https://github.com/rust-lang/crates.io-index"},
+      {"name":"gitdev","req":"*","kind":null,"optional":false,"source":"git+https://example.invalid/gitdev"},
+      {"name":"pathdev","req":"*","kind":null,"optional":false,"source":null,"path":"/outside/pathdev"}
+    ]},
+    {"name":"patched","id":"git+https://example.invalid/patched#1.0.0","version":"1.0.0","source":"git+https://example.invalid/patched#aaaaaaaa","targets":[]},
+    {"name":"gitdev","id":"git+https://example.invalid/gitdev#0.15.0-dev","version":"0.15.0-dev","source":"git+https://example.invalid/gitdev#bbbbbbbb","targets":[]},
+    {"name":"pathdev","id":"path+file:///outside/pathdev#0.2.0-dev","version":"0.2.0-dev","source":null,"targets":[]}
+  ],
+  "workspace_members":["path+file:///repo#root@0.1.0"],
+  "resolve":{"nodes":[]}
+}"#,
+        )
+        .expect("metadata should parse");
+        let lockfile = parse_lockfile(
+            r#"
+version = 4
+
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = [
+  "patched 1.0.0 (git+https://example.invalid/patched)",
+  "gitdev 0.15.0-dev (git+https://example.invalid/gitdev)",
+  "pathdev",
+]
+
+[[package]]
+name = "patched"
+version = "1.0.0"
+source = "git+https://example.invalid/patched#aaaaaaaa"
+
+[[package]]
+name = "gitdev"
+version = "0.15.0-dev"
+source = "git+https://example.invalid/gitdev#bbbbbbbb"
+
+[[package]]
+name = "pathdev"
+version = "0.2.0-dev"
+"#,
+        )
+        .expect("lockfile should parse");
+
+        let dependencies = workspace_direct_dependencies(&metadata, &lockfile)
+            .expect("Cargo-selected patch and prerelease edges should resolve");
+        assert_eq!(
+            dependencies
+                .iter()
+                .map(|dependency| dependency.spec().to_string())
+                .collect::<Vec<_>>(),
+            vec!["gitdev@0.15.0-dev", "patched@1.0.0", "pathdev@0.2.0-dev"]
+        );
+        assert!(
+            dependencies
+                .iter()
+                .all(|dependency| !dependency.is_crates_io())
+        );
+    }
+
+    #[test]
+    fn handles_source_replacements_and_rejects_missing_or_ambiguous_lock_mappings() {
+        let missing_metadata = parse_cargo_metadata(
+            r#"{
+  "packages":[
+    {"name":"root","id":"path+file:///repo#root@0.1.0","version":"0.1.0","source":null,"manifest_path":"/repo/Cargo.toml","targets":[],"dependencies":[
+      {"name":"foo","req":"^1","kind":null,"optional":false,"source":"registry+https://github.com/rust-lang/crates.io-index"}
+    ]}
+  ],
+  "workspace_members":["path+file:///repo#root@0.1.0"],
+  "resolve":{"nodes":[]}
+}"#,
+        )
+        .expect("metadata should parse");
+        let missing_lockfile = parse_lockfile(
+            r#"
+version = 4
+
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = ["foo 1.0.0 (registry+https://example.invalid/private)"]
+
+[[package]]
+name = "foo"
+version = "1.0.0"
+source = "registry+https://example.invalid/private"
+"#,
+        )
+        .expect("lockfile should parse");
+        let replaced = workspace_direct_dependencies(&missing_metadata, &missing_lockfile)
+            .expect("Cargo-selected source replacement should remain visible");
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(
+            replaced[0].source(),
+            Some("registry+https://example.invalid/private")
+        );
+
+        let path_metadata = parse_cargo_metadata(
+            r#"{
+  "packages":[
+    {"name":"root","id":"path+file:///repo#root@0.1.0","version":"0.1.0","source":null,"manifest_path":"/repo/Cargo.toml","targets":[],"dependencies":[
+      {"name":"foo","req":"^1","kind":null,"optional":false,"source":null,"path":"/outside/foo"}
+    ]}
+  ],
+  "workspace_members":["path+file:///repo#root@0.1.0"],
+  "resolve":{"nodes":[]}
+}"#,
+        )
+        .expect("metadata should parse");
+        assert!(matches!(
+            workspace_direct_dependencies(&path_metadata, &missing_lockfile),
+            Err(CargoMetadataError::LockedDirectDependencyNotFound { .. })
+        ));
+
+        let ambiguous_metadata = parse_cargo_metadata(
+            r#"{
+  "packages":[
+    {"name":"root","id":"path+file:///repo#root@0.1.0","version":"0.1.0","source":null,"manifest_path":"/repo/Cargo.toml","targets":[],"dependencies":[
+      {"name":"foo","req":">=1","kind":null,"optional":false,"source":"registry+https://github.com/rust-lang/crates.io-index"}
+    ]}
+  ],
+  "workspace_members":["path+file:///repo#root@0.1.0"],
+  "resolve":{"nodes":[]}
+}"#,
+        )
+        .expect("metadata should parse");
+        let ambiguous_lockfile = parse_lockfile(
+            r#"
+version = 4
+
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = [
+  "foo 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+  "foo 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "foo"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "foo"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+"#,
+        )
+        .expect("lockfile should parse");
+        assert!(matches!(
+            workspace_direct_dependencies(&ambiguous_metadata, &ambiguous_lockfile),
+            Err(CargoMetadataError::AmbiguousLockedDirectDependency { .. })
+        ));
+    }
 
     #[test]
     fn selects_the_only_matching_package_id() {
@@ -715,7 +1259,8 @@ mod tests {
 }"#,
         )
         .expect("metadata should parse");
-        let target = ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("target should parse");
+        let target =
+            ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("target should parse");
 
         let edges = requirement_edges_onto(&metadata, &target).expect("edges should collect");
 
@@ -748,7 +1293,8 @@ mod tests {
 }"#,
         )
         .expect("metadata should parse");
-        let target = ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("target should parse");
+        let target =
+            ExactCrateSpec::from_parts("quick-xml", "0.39.4").expect("target should parse");
 
         assert!(matches!(
             requirement_edges_onto(&metadata, &target),

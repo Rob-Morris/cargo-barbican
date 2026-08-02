@@ -10,8 +10,8 @@ use barbican::{
 
 use super::{
     CommandError, escape_render_field, exit_code_from_policy_failures, join_display,
-    load_release_age_context, parse_specs, render_missing_release_age_exception_review_record,
-    render_release_age_report,
+    load_release_age_context, parse_specs, release_age_override_note,
+    render_incomplete_release_age_exception_review_record, render_release_age_report,
 };
 
 pub(super) fn run_inspect<C>(
@@ -28,6 +28,9 @@ where
 {
     let (minimum_days, reviewed_release_age_exceptions) =
         load_release_age_context(current_dir, min_age_days)?;
+    if let Some(note) = release_age_override_note(current_dir, min_age_days)? {
+        writeln!(stdout, "{note}").map_err(CommandError::Io)?;
+    }
     let parse_result = parse_specs(raw_specs, stderr)?;
     let mut failed = parse_result.failed;
 
@@ -51,14 +54,14 @@ where
             minimum_days,
             age_exception,
         );
-        if let ReleaseAgeGateVerdict::MissingReviewRecord(exception) = classify_release_age_gate(
+        if let ReleaseAgeGateVerdict::IncompleteReviewRecord(exception) = classify_release_age_gate(
             release_age.outcome(),
-            reviewed_release_age_exceptions.missing_for_spec(&spec),
+            reviewed_release_age_exceptions.unsatisfied_for_spec(&spec),
         ) {
             writeln!(
                 stderr,
                 "FAIL {}",
-                render_missing_release_age_exception_review_record(exception)
+                render_incomplete_release_age_exception_review_record(exception)
             )
             .map_err(CommandError::Io)?;
             failed = true;
@@ -75,7 +78,7 @@ where
         };
         let report =
             inspect_published_crate_at(spec, release, &tarball, now, minimum_days, age_exception);
-        let rendered = render_inspect_report(&report);
+        let rendered = render_inspect_report(&report, InspectRenderContext::Inspect);
 
         write!(stdout, "{rendered}").map_err(CommandError::Io)?;
         if !matches!(
@@ -89,7 +92,22 @@ where
     Ok(exit_code_from_policy_failures(failed))
 }
 
-pub(super) fn render_inspect_report(report: &RustInspectReport) -> String {
+/// Where a rendered inspect report is being shown.
+///
+/// `inspect` and `gatehouse candidate` share the same report body, but the
+/// pointer to `gatehouse candidate` for a fuller dossier is only useful from
+/// `inspect`: inside the dossier it would tell the reviewer to re-run the exact
+/// command they already ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum InspectRenderContext {
+    Inspect,
+    GatehouseCandidate,
+}
+
+pub(super) fn render_inspect_report(
+    report: &RustInspectReport,
+    context: InspectRenderContext,
+) -> String {
     let mut rendered = String::new();
     rendered.push_str(&format!("Inspect {}\n", report.spec()));
     rendered.push_str(&format!("  classification: {}\n", report.classification()));
@@ -140,11 +158,92 @@ pub(super) fn render_inspect_report(report: &RustInspectReport) -> String {
         render_slice(report.ioc_hits())
     ));
     rendered.push_str(&format!(
-        "  inspection failures: {}\n\n",
+        "  inspection failures: {}\n",
         render_slice(report.inspection_failures())
     ));
 
+    rendered.push_str(&render_policy_violation_explanation(report, context));
+    rendered.push('\n');
+
     rendered
+}
+
+/// Explains a `policy-violating` verdict and, where an execution surface is in
+/// play, the reviewed-family path forward.
+///
+/// Returns an empty string for non-`policy-violating` reports so the routine
+/// and elevated evidence bodies are unchanged. The block never downgrades or
+/// bypasses the fail-closed verdict: recording an `allowed_surfaces` allowance
+/// does not change what `inspect` reports (it never consults allowances); it
+/// lets the repo intake gate admit the reviewed surface.
+fn render_policy_violation_explanation(
+    report: &RustInspectReport,
+    context: InspectRenderContext,
+) -> String {
+    if !matches!(
+        report.classification(),
+        RustAssessmentClassification::PolicyViolating
+    ) {
+        return String::new();
+    }
+
+    let mut drivers = Vec::new();
+    if !report.release_age().is_success() {
+        drivers.push("the release-age gate above");
+    }
+    if !report.checksum_matches() {
+        drivers.push("the checksum mismatch above");
+    }
+    if !report.ioc_hits().is_empty() {
+        drivers.push("the IOC hits above");
+    }
+    if !report.inspection_failures().is_empty() {
+        drivers.push("the inspection failures above");
+    }
+
+    let mut block = String::new();
+    block.push_str(&format!(
+        "  verdict basis: policy-violating is driven by {}.\n",
+        join_conjunction(&drivers)
+    ));
+
+    // The reviewed-family path only helps when the driver is an execution
+    // surface the reviewer can bless, i.e. an IOC hit (which is always found on
+    // a build script, proc-macro, or native source). A too-fresh, yanked,
+    // checksum-mismatched, or inspection-failed verdict is not something
+    // `allowed_surfaces` can address, so pointing there would mislead.
+    if !report.ioc_hits().is_empty() {
+        block.push_str(
+            "  remediation: review the flagged execution surface in the crate source; \
+             if it is acceptable, record the crate in a reviewed family with an \
+             allowed_surfaces allowance so the repo intake gate (assess, pin check, verify) \
+             admits the surface. This does not change what inspect reports.\n",
+        );
+        block.push_str(&format!(
+            "  reviewed-family path: once {} is resolved in Cargo.lock, `cargo barbican pin add {}` \
+             scaffolds the reviewed family and review record; see docs/user/configuration.md for the \
+             allowed_surfaces mechanism.\n",
+            report.spec().crate_name(),
+            report.spec().crate_name()
+        ));
+        if matches!(context, InspectRenderContext::Inspect) {
+            block.push_str(&format!(
+                "  fuller dossier: `cargo barbican gatehouse candidate {}` assembles sandboxed \
+                 cargo tree and audit evidence alongside this inspection.\n",
+                report.spec()
+            ));
+        }
+    }
+
+    block
+}
+
+fn join_conjunction(parts: &[&str]) -> String {
+    match parts {
+        [] => "the findings above".to_owned(),
+        [only] => (*only).to_owned(),
+        [head @ .., last] => format!("{} and {last}", head.join(", ")),
+    }
 }
 
 fn render_native_ffi_surface(report: &RustInspectReport) -> String {

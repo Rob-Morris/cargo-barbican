@@ -9,6 +9,7 @@ fn age_lock_reports_when_no_new_registry_packages_were_selected() {
         &lockfile_with_packages(&[("serde", "1.0.227", true)]),
     );
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -46,6 +47,7 @@ fn age_lock_checks_added_registry_packages_against_release_age() {
         &lockfile_with_packages(&[("serde", "1.0.227", true)]),
     );
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -87,6 +89,7 @@ fn age_lock_checks_added_registry_packages_against_non_git_base_lockfile() {
         FakeCratesIoClient::default().with_release("serde@1.0.228", "2999-01-01T00:00:00Z", false);
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let baseline_dir = temp_dir.join("baseline");
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -126,6 +129,7 @@ fn age_lock_reports_missing_non_git_base_lockfile() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -160,6 +164,7 @@ fn age_lock_checks_against_an_explicit_non_head_base_ref() {
         &lockfile_with_packages(&[("serde", "1.0.227", true)]),
     );
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -195,6 +200,7 @@ fn age_lock_accepts_a_custom_lockfile_path() {
         &lockfile_with_packages(&[("serde", "1.0.228", true)]),
     );
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -228,6 +234,7 @@ fn age_lock_reports_missing_custom_lockfile_path() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
