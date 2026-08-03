@@ -69,9 +69,11 @@ diff:
   explicit lockfile path, so `.cargo/audit.toml` ignores do not apply either —
   and if the scanner's runtime settings still report an ignore, that is itself
   a failure. Native ignores found in `deny.toml` / `.cargo/audit.toml` are
-  always rendered in the report, and under
-  `delegates.unmanaged_delegated_policy = "deny"` their presence alone fails
-  the audit.
+  always rendered in the report. An ID is marked governed only when every
+  current occurrence is accepted by active Barbican governance; under
+  `delegates.unmanaged_delegated_policy = "deny"`, any remaining unmanaged ID
+  fails the audit. Adding a native ignore cannot turn a Barbican failure into
+  a pass.
 - **Advisory acceptance is checksum-bound and expires.** The only way to
   accept an advisory finding is an `allowed_advisories` entry in a reviewed
   family. Parsing rejects the entry unless the crate is in the same family's
@@ -190,9 +192,9 @@ surfaces for every dependency change — never raw cargo mutations:
 - Bring a crate under reviewed-target policy with
   `cargo barbican pin add <crate>`.
 - Accept an advisory finding only with
-  `cargo barbican pin exception <crate> <RUSTSEC-id>` — never with a
-  `deny.toml` or `.cargo/audit.toml` ignore; native ignores are neutralised
-  by `cargo barbican audit` and can fail the build.
+  `cargo barbican pin exception <crate> <RUSTSEC-id>`. A matching
+  `deny.toml` or `.cargo/audit.toml` ignore may coexist for direct-tool use,
+  but it is neutralised by `cargo barbican audit` and supplies no authority.
 - Never edit `barbican.toml`, `reviewed-targets.toml`, `deny.toml`, or
   anything under `docs/dependency-reviews/` on your own initiative. These
   files record human policy decisions. If a task requires a policy change,

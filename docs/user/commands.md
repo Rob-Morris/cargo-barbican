@@ -1039,8 +1039,11 @@ present; incomplete or unparsable scanner evidence fails closed.
 Reviewed advisory exceptions are honoured only when the resolved target and
 checksum still match, the review record is completed, and `review_by` has not
 expired. Native advisory ignores in `deny.toml` or `.cargo/audit.toml` are
-neutralised and reported according to
-`delegates.unmanaged_delegated_policy` (`warn` | `deny` | `allow`).
+neutralised. IDs for which every current occurrence is accepted by active
+Barbican governance are reported as governed compatibility entries; all other
+native IDs are reported according to `delegates.unmanaged_delegated_policy`
+(`warn` | `deny` | `allow`). Adding a native ignore never authorises a
+Barbican pass.
 
 By default `audit` runs the `cargo-deny` `advisories`, `bans`, and `sources`
 checks, and adds the `licenses` check whenever the checked-in `deny.toml`
@@ -1051,7 +1054,8 @@ posture. See
 [configuration.md](configuration.md) for the resolution rules.
 
 To accept a finding when no patched release is adoptable yet, use the governed
-`cargo barbican pin exception` path rather than a native ignore.
+`cargo barbican pin exception` path first. A matching native ignore may then be
+added for direct-tool compatibility; it supplies no authority to Barbican.
 
 `--format` selects the report format. The default `text` report is
 human-oriented and prints the stable `Audit: PASS` / `Audit: FAIL` token.

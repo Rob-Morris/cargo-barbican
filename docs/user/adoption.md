@@ -100,19 +100,21 @@ exception.
 For advisory findings that are intentionally accepted — for example when
 `audit` fails and there is no adoptable patched release yet — use the governed
 `cargo barbican pin exception <crate>[@version] <RUSTSEC-id>...` path rather
-than hand-authoring the entry or reaching for a native `deny.toml` ignore. It
+than hand-authoring the entry or relying on a native `deny.toml` ignore. It
 scaffolds a checksum-bound `allowed_advisories` entry (with a `review_by`
 re-review deadline, 30 days by default) plus a review-record stub, creating the
 reviewed family when the crate is not yet covered. `audit` reconciles each
 finding against the bound resolved target, checksum, review record, and
 deadline before accepting the risk, and fails it again once `review_by` passes.
 See [operations.md](operations.md) for the full failing-audit workflow.
+After governance is complete, repositories that run cargo-deny directly may
+mirror the same ID into its native ignore list without weakening Barbican.
 
 Review `[delegates]` in `barbican.toml` before enforcing audit. It selects the
 lockfile scanner (`cargo-deny`, `cargo-audit`, or `both`), configures the
 `cargo-deny` check groups, and controls how native advisory ignores in
-`deny.toml` / `.cargo/audit.toml` are reported. Native ignores are neutralised
-regardless of the reporting mode.
+`deny.toml` / `.cargo/audit.toml` are reported when they do not match active
+governance. Native ignores are neutralised regardless of the reporting mode.
 
 ## 3. Check Reviewed-Target Policy
 

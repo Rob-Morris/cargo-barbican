@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.27.0](changelog/v0.27.0.md) | 2026-08-03 | Let native advisory ignores coexist with governed exceptions |
 | [v0.26.0](changelog/v0.26.0.md) | 2026-08-03 | Stream verify's build and test delegate output live |
 | [v0.25.0](changelog/v0.25.0.md) | 2026-08-03 | Enforce declared deny.toml licence policies by default |
 | [v0.24.0](changelog/v0.24.0.md) | 2026-07-22 | Ship the insiders release gate and deployment baseline |

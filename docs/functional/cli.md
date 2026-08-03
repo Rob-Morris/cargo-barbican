@@ -233,10 +233,11 @@ cargo barbican policy init [--ci <system>]
     - `reviewed-targets.toml`
     - `docs/dependency-reviews/`
     - `docs/dependency-reviews/README.md`
-    `deny.toml` carries the preserved non-advisory `cargo-deny` posture for
-    bans and sources. It deliberately contains no `[advisories]` section:
-    `cargo barbican audit` owns advisory disclosure at runtime and forces that
-    section when invoking `cargo-deny`.
+    `deny.toml` carries a normal `[advisories]` table for direct cargo-deny use
+    plus the preserved bans and sources posture. `cargo barbican audit` still
+    owns advisory disclosure at runtime: it forces maximum disclosure when
+    invoking cargo-deny and treats native ignores only as compatibility input,
+    never as authorisation.
     It does not create active reviewed families, dependency review records, or
     inventory reports.
     Existing regular files are preserved. Existing `barbican.toml` is read
@@ -523,9 +524,14 @@ cargo barbican audit [--format text|json]
     exceptions, and compute a Barbican-owned verdict. Fail on any unreviewed
     or expired advisory finding, any non-advisory scanner error
     (`cargo-deny` bans/sources/licenses), incomplete enumeration, or — when
-    `delegates.unmanaged_delegated_policy = "deny"` — any native delegated
-    advisory ignore. Accepted exceptions and native delegated ignores are
-    rendered.
+    `delegates.unmanaged_delegated_policy = "deny"` — any unmanaged native
+    delegated advisory ignore. A native ID is rendered as governed only when
+    every current occurrence is accepted by active Barbican governance;
+    accepted exceptions and all native delegated ignores remain visible.
+
+    Native ignores are compatibility input, never authorisation: for an
+    unchanged graph and Barbican policy, adding an ID to a native ignore list
+    cannot change the Barbican verdict from failure to success.
 
     When `delegates.cargo_deny.checks` is unset, the `cargo-deny` check set
     is presence-driven: `advisories`, `bans`, and `sources` always run, and
@@ -671,7 +677,7 @@ contract, not a routine rewording.
 - `cargo barbican audit --format json` emits a stable JSON report on stdout.
   Its top-level `schema_version` identifies the JSON contract version. Adding,
   removing, or renaming fields, changing field meaning, or changing existing
-  field types requires a new `schema_version`. In schema version `4`,
+  field types requires a new `schema_version`. In schema version `5`,
   consumers may rely on the top-level `schema_version`, `status` (`"pass"` or
   `"fail"`), `success`, `dependency_paths_available`,
   `remediations_available`, `findings`, `completeness_failures`,
@@ -682,7 +688,10 @@ contract, not a routine rewording.
   reviewed-exception object, remediation object, and `governed_exception` —
   `null`, or an object with a `command_hint` string for the `pin exception`
   scaffolder on unreviewed findings with RustSec-form ids.
-  Schema version `4` adds `cargo_deny.licenses`: an object with `posture`
+  Each `native_delegated_ignores` entry carries its original `advisory_ids`
+  plus `governed_advisory_ids` and `unmanaged_advisory_ids`; only the latter
+  are subject to the reported `policy`. Schema version `4` added
+  `cargo_deny.licenses`: an object with `posture`
   (`"enforced"`, `"skipped"`, or `"disabled"`) and `reason`
   (`"deny-toml-policy"`, `"explicit-checks"`, or `"no-deny-toml-policy"`)
   reporting whether the `cargo-deny` licenses check ran and why.

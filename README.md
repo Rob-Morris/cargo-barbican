@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.26.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.27.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -85,11 +85,35 @@ support is explicitly delivered.
 Install the insiders release candidate from its immutable git tag:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.26.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.27.0
 ```
 
 The tag is the install identity; do not replace it with a moving branch in
 consumer CI.
+
+> [!IMPORTANT]
+> **While the repository is private, that command needs one extra setting.**
+> Cargo's built-in git fetcher cannot use a shell-command
+> `credential.helper` — including the one `gh auth login` installs — so it
+> fails with `failed to authenticate when downloading repository` even when
+> your `git` CLI can clone the repo perfectly well. Tell cargo to fetch
+> through the git CLI instead:
+>
+> ```bash
+> CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install --locked \
+>   --git https://github.com/Rob-Morris/cargo-barbican --tag v0.27.0
+> ```
+>
+> To make it persistent, add this to `~/.cargo/config.toml`:
+>
+> ```toml
+> [net]
+> git-fetch-with-cli = true
+> ```
+>
+> You also need read access to the repository. This requirement disappears
+> once the repository is public, because the clone is then anonymous and needs
+> no credentials at all.
 
 Set up the minimal policy files in the repository that will use the gate:
 

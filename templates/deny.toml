@@ -1,12 +1,17 @@
-# Synced from cargo-barbican v0.26.0
-# Runtime advisory checks are owned by cargo-barbican audit.
-#
-# Do not add [advisories] here to weaken advisory handling. During audit,
+# Synced from cargo-barbican v0.27.0
+# Runtime advisory verdicts are owned by cargo-barbican audit. During audit,
 # cargo-barbican generates a runtime cargo-deny config that forces:
 # - ignore = []
 # - yanked = "deny"
 # - unmaintained = "all"
 # - unsound = "all"
+#
+# IDs in the checked-in ignore list therefore affect direct cargo-deny use but
+# never authorise a Barbican pass. `cargo barbican audit` reports an ID as
+# GOVERNED only when every current occurrence has an active checksum-bound,
+# reviewed, expiring `allowed_advisories` exception; other findings still fail.
+# Keeping governed IDs here lets direct cargo-deny coexist with Barbican, while
+# leaving the list empty (or omitting this table) remains fully supported.
 #
 # This checked-in file carries the non-advisory cargo-deny posture that
 # cargo-barbican preserves for bans, sources, and licenses checks.
@@ -29,6 +34,12 @@
 #   "x86_64-unknown-linux-gnu",
 #   "x86_64-pc-windows-msvc",
 # ]
+
+[advisories]
+yanked = "deny"
+unmaintained = "all"
+unsound = "all"
+ignore = []
 
 [bans]
 # Tighten to "deny" once duplicate versions are resolved for this repo.

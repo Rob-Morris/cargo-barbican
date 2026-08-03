@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.26.0
+# Synced from cargo-barbican v0.27.0
 # Review and edit this local policy after copying or running `cargo barbican policy init`.
 
 [release_age]
@@ -13,8 +13,8 @@ proc_macro_changes = true
 native_sys_crates = true
 
 [delegates]
-# How to report native deny.toml/.cargo/audit.toml advisory ignores.
-# These ignores are always neutralised by audit; this setting controls reporting only.
+# How to report native deny.toml/.cargo/audit.toml IDs without active governance.
+# All native ignores are neutralised; governed compatibility IDs bypass this posture.
 unmanaged_delegated_policy = "warn" # warn | deny | allow
 
 [delegates.advisories]

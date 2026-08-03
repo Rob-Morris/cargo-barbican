@@ -190,9 +190,10 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   or generate active reviewed families
 - template-backed: it writes the shipped `barbican.toml`, `deny.toml`,
   `reviewed-targets.toml`, and dependency-review README templates when absent
-- advisory-owned: the shipped `deny.toml` carries non-advisory bans/sources
-  posture only and deliberately omits `[advisories]`; `cargo barbican audit`
-  forces advisory disclosure in its runtime cargo-deny config
+- advisory-owned: the shipped `deny.toml` carries a normal `[advisories]`
+  table for direct cargo-deny use plus bans/sources posture; `cargo barbican
+  audit` still forces maximum disclosure and never derives authorisation from
+  native ignores
 - conservative with existing files: regular files are preserved, existing
   `barbican.toml` is validated, and symlinks or wrong-type scaffold paths fail
   closed
@@ -249,6 +250,9 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 - reconciliation-driven: every enumerated finding is reconciled against
   reviewed advisory exceptions in `reviewed-targets.toml`; unreviewed and
   expired findings fail, accepted exceptions are rendered visibly
+- native-tool compatible: a native ignore is classified as governed only when
+  every current occurrence is accepted by active Barbican governance; adding
+  a native ignore cannot turn a Barbican failure into a pass
 - machine-consumable: `--format json` emits a stable `schema_version`ed
   report whose fields and value sets are defined in the CLI output-stability
   contract

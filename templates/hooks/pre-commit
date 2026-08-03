@@ -1,5 +1,5 @@
 #!/bin/sh
-# Synced from cargo-barbican v0.26.0
+# Synced from cargo-barbican v0.27.0
 #
 # Advisory client-side pre-commit hook for cargo-barbican.
 #

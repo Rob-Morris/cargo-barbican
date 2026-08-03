@@ -115,15 +115,18 @@ it treats native advisory suppression it finds in their config files.
 | `cargo_deny.checks` | unset — presence-driven (see below) | array drawn from `"advisories"`, `"bans"`, `"sources"`, `"licenses"` |
 
 **`unmanaged_delegated_policy`** controls how `audit` reports native advisory
-ignores found in a checked-in `deny.toml` (`[advisories] ignore`) or
-`.cargo/audit.toml`. Those ignores are **always neutralised** at runtime —
-this key never re-enables them; it controls reporting only:
+ignore IDs found in a checked-in `deny.toml` (`[advisories] ignore`) or
+`.cargo/audit.toml` when they do not match active Barbican governance. Native
+ignores are **always neutralised** at runtime — this key never re-enables them
+or authorises a Barbican pass; it controls reporting of unmatched IDs only.
+When every current occurrence of an ID is accepted by an active,
+checksum-bound `allowed_advisories` exception, `audit` reports the native ID as
+`GOVERNED` and this policy does not apply to it:
 
 - `"warn"` (default) — report each native ignore as a warning; the verdict
   is unaffected.
-- `"deny"` — any native delegated advisory ignore fails `audit`. Use this to
-  force every advisory acceptance through the governed
-  `allowed_advisories` path in `reviewed-targets.toml`.
+- `"deny"` — any unmanaged native delegated advisory ignore fails `audit`.
+  Governed compatibility entries remain permitted.
 - `"allow"` — native ignores are still neutralised and rendered, without the
   warning posture.
 
@@ -443,26 +446,34 @@ source supplied the minimum.
 
 `cargo barbican audit` splits the checked-in `deny.toml` along a firm line:
 
-- **`[advisories]` is forced at runtime.** `audit` never uses a checked-in
-  `[advisories]` section. It generates a runtime `cargo-deny` config that
+- **`[advisories]` cannot authorise Barbican.** `audit` reads native ignore IDs
+  for reconciliation and reporting, but never passes them to its scanner. It
+  generates a runtime `cargo-deny` config that
   forces `ignore = []`, `yanked = "deny"`, `unmaintained = "all"`, and
   `unsound = "all"`, and strips graph-exclusion keys that could hide
   advisories (user `targets`/`features` graph scope is preserved). Barbican
   then reconciles the complete finding set against `allowed_advisories`
-  exceptions and owns the pass/fail verdict itself. Adding `[advisories]`
-  ignores to `deny.toml` therefore cannot weaken the gate — those native
-  ignores are neutralised and reported per
-  `delegates.unmanaged_delegated_policy`. The same neutralise-and-report
-  treatment applies to `.cargo/audit.toml` ignores when `cargo-audit` is
-  the configured scanner.
+  exceptions and owns the pass/fail verdict itself. Adding an ignore therefore
+  cannot change a Barbican failure into a pass. An ID is reported as governed
+  only when every current occurrence is accepted by active Barbican
+  governance; otherwise it remains unmanaged and any unreviewed or expired
+  finding still fails. The same neutralise-and-reconcile treatment applies to
+  `.cargo/audit.toml` ignores when `cargo-audit` is the configured scanner.
 - **`[bans]`, `[sources]`, and `[licenses]` are trusted as checked in.**
   The runtime config preserves the repo's non-advisory posture from
   `deny.toml`; when no `deny.toml` exists, `audit` falls back to a
   generated default base. A checked-in `[licenses]` policy additionally
   opts the repo into the licenses check by default (see
-  `cargo_deny.checks` above). This is why the `policy init` scaffold's
-  `deny.toml` carries bans/sources posture plus a commented `[licenses]`
-  example, and deliberately contains no `[advisories]` section.
+  `cargo_deny.checks` above). The `policy init` scaffold therefore carries a
+  normal `[advisories]` table for direct cargo-deny use, bans/sources posture,
+  and a commented `[licenses]` example.
+
+Repositories that run cargo-deny directly may mirror governed advisory IDs in
+`[advisories].ignore`; direct cargo-deny then applies its native policy, while
+Barbican independently applies the stronger checksum, review-record, and
+expiry checks. Repositories that invoke only Barbican may leave the native
+ignore list empty or omit the table entirely. `cargo barbican audit` remains
+the authoritative enhanced verdict in either case.
 
 `inventory` reports this boundary without running the scanners: the
 configured scanner, checks, unmanaged-ignore policy, any native advisory

@@ -138,7 +138,10 @@ where
         &bound_exceptions,
         now,
     );
-    let native_ignores_fail = !native_ignores.is_empty()
+    let reconciled_native_ignores = reconcile_native_ignores(&native_ignores, &outcome);
+    let native_ignores_fail = reconciled_native_ignores
+        .iter()
+        .any(ReconciledNativeIgnore::has_unmanaged_ids)
         && matches!(
             config.delegates.unmanaged_delegated_policy,
             UnmanagedDelegatedPolicyMode::Deny
@@ -176,7 +179,7 @@ where
                 &outcome,
                 &dependency_paths,
                 &remediations,
-                &native_ignores,
+                &reconciled_native_ignores,
                 config.delegates.unmanaged_delegated_policy,
                 licenses_posture,
             )?;
@@ -187,7 +190,7 @@ where
             &outcome,
             &dependency_paths,
             &remediations,
-            &native_ignores,
+            &reconciled_native_ignores,
             config.delegates.unmanaged_delegated_policy,
             licenses_posture,
         )?,
@@ -509,7 +512,7 @@ fn render_audit_report(
     outcome: &AdvisoryAuditOutcome,
     dependency_paths: &DependencyPathReport,
     remediations: &AdvisoryRemediationReport,
-    native_ignores: &[NativeDelegatedIgnore],
+    native_ignores: &[ReconciledNativeIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
     licenses_posture: CargoDenyLicensesPosture,
 ) -> Result<(), CommandError> {
@@ -611,7 +614,7 @@ fn render_audit_json_report(
     outcome: &AdvisoryAuditOutcome,
     dependency_paths: &DependencyPathReport,
     remediations: &AdvisoryRemediationReport,
-    native_ignores: &[NativeDelegatedIgnore],
+    native_ignores: &[ReconciledNativeIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
     licenses_posture: CargoDenyLicensesPosture,
 ) -> Result<(), CommandError> {
@@ -622,7 +625,7 @@ fn render_audit_json_report(
         .map(|disposition| finding_json(disposition, dependency_paths, remediations))
         .collect::<Vec<_>>();
     let report = json!({
-        "schema_version": 4,
+        "schema_version": 5,
         "status": if passed { "pass" } else { "fail" },
         "success": passed,
         "dependency_paths_available": dependency_paths.available,
@@ -661,6 +664,8 @@ fn render_audit_json_report(
             .map(|entry| json!({
                 "source": entry.source(),
                 "advisory_ids": entry.advisory_ids(),
+                "governed_advisory_ids": entry.governed_advisory_ids(),
+                "unmanaged_advisory_ids": entry.unmanaged_advisory_ids(),
                 "policy": unmanaged_policy_json(unmanaged_policy),
             }))
             .collect::<Vec<_>>(),
@@ -964,7 +969,7 @@ fn render_patched_ranges(patched_versions: &[String]) -> String {
 
 fn render_native_ignores(
     stdout: &mut dyn Write,
-    native_ignores: &[NativeDelegatedIgnore],
+    native_ignores: &[ReconciledNativeIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
 ) -> Result<(), CommandError> {
     if native_ignores.is_empty() {
@@ -978,21 +983,87 @@ fn render_native_ignores(
     };
     writeln!(stdout, "Native delegated advisory ignores:").map_err(CommandError::Io)?;
     for entry in native_ignores {
-        writeln!(
-            stdout,
-            "  - {prefix} {} ignores {}",
-            entry.source(),
-            entry
-                .advisory_ids()
-                .iter()
-                .map(|id| escape_render_field(id))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-        .map_err(CommandError::Io)?;
+        if !entry.governed_advisory_ids().is_empty() {
+            writeln!(
+                stdout,
+                "  - GOVERNED {} ignores {} (matched active Barbican governance)",
+                entry.source(),
+                render_native_ignore_ids(entry.governed_advisory_ids()),
+            )
+            .map_err(CommandError::Io)?;
+        }
+        if !entry.unmanaged_advisory_ids().is_empty() {
+            writeln!(
+                stdout,
+                "  - {prefix} {} ignores {} (no active Barbican governance)",
+                entry.source(),
+                render_native_ignore_ids(entry.unmanaged_advisory_ids()),
+            )
+            .map_err(CommandError::Io)?;
+        }
     }
 
     Ok(())
+}
+
+fn render_native_ignore_ids(ids: &[String]) -> String {
+    ids.iter()
+        .map(|id| escape_render_field(id))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReconciledNativeIgnore {
+    source: &'static str,
+    advisory_ids: Vec<String>,
+    governed_advisory_ids: Vec<String>,
+    unmanaged_advisory_ids: Vec<String>,
+}
+
+impl ReconciledNativeIgnore {
+    fn source(&self) -> &'static str {
+        self.source
+    }
+
+    fn advisory_ids(&self) -> &[String] {
+        &self.advisory_ids
+    }
+
+    fn governed_advisory_ids(&self) -> &[String] {
+        &self.governed_advisory_ids
+    }
+
+    fn unmanaged_advisory_ids(&self) -> &[String] {
+        &self.unmanaged_advisory_ids
+    }
+
+    fn has_unmanaged_ids(&self) -> bool {
+        !self.unmanaged_advisory_ids.is_empty()
+    }
+}
+
+fn reconcile_native_ignores(
+    native_ignores: &[NativeDelegatedIgnore],
+    outcome: &AdvisoryAuditOutcome,
+) -> Vec<ReconciledNativeIgnore> {
+    native_ignores
+        .iter()
+        .map(|entry| {
+            let (governed_advisory_ids, unmanaged_advisory_ids) = entry
+                .advisory_ids()
+                .iter()
+                .cloned()
+                .partition(|advisory_id| outcome.governs_native_advisory_ignore(advisory_id));
+
+            ReconciledNativeIgnore {
+                source: entry.source(),
+                advisory_ids: entry.advisory_ids().to_vec(),
+                governed_advisory_ids,
+                unmanaged_advisory_ids,
+            }
+        })
+        .collect()
 }
 
 fn render_finding(finding: &AdvisoryFinding) -> String {

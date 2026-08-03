@@ -1389,6 +1389,27 @@ impl AdvisoryAuditOutcome {
             && self.cargo_audit_settings_ignore.is_empty()
             && self.cargo_audit_idless_warnings == 0
     }
+
+    pub fn governs_native_advisory_ignore(&self, advisory_id: &str) -> bool {
+        if !self.completeness_failures.is_empty()
+            || !self.cargo_deny_no_advisory_errors.is_empty()
+            || !self.cargo_audit_settings_ignore.is_empty()
+            || self.cargo_audit_idless_warnings > 0
+        {
+            return false;
+        }
+
+        let mut matching = self
+            .reconciliation
+            .dispositions()
+            .iter()
+            .filter(|disposition| disposition.finding().advisory_id().to_string() == advisory_id)
+            .peekable();
+
+        matching.peek().is_some()
+            && matching
+                .all(|disposition| matches!(disposition, AdvisoryDisposition::Accepted { .. }))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

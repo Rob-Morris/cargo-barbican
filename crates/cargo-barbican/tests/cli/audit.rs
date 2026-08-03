@@ -191,7 +191,7 @@ fn audit_json_reports_enforced_licenses_posture_from_deny_toml_policy() {
     assert_eq!(exit_code, ExitCode::SUCCESS);
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
-    assert_eq!(report["schema_version"], 4);
+    assert_eq!(report["schema_version"], 5);
     assert_eq!(
         report["cargo_deny"]["licenses"],
         serde_json::json!({ "posture": "enforced", "reason": "deny-toml-policy" })
@@ -464,6 +464,94 @@ fn audit_accepts_reviewed_advisory_with_cargo_deny_scanner() {
 }
 
 #[test]
+fn audit_treats_native_ignore_as_governed_when_every_finding_is_accepted() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
+    let temp_dir = fresh_temp_dir();
+    write_advisory_audit_fixture(&temp_dir, None, "2026-09-21");
+    fs::write(
+        temp_dir.join("barbican.toml"),
+        "[delegates]\nunmanaged_delegated_policy = \"deny\"\n",
+    )
+    .expect("config should write");
+    fs::write(
+        temp_dir.join("deny.toml"),
+        "[advisories]\nignore = [\"RUSTSEC-2026-0001\"]\n",
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let generated = runner.recorded_deny_json_config_texts();
+    assert_eq!(generated.len(), 1);
+    assert!(generated[0].contains("ignore = []"));
+    assert!(!generated[0].contains("RUSTSEC-2026-0001"));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: PASS"));
+    assert!(rendered.contains(
+        "GOVERNED deny.toml ignores RUSTSEC-2026-0001 (matched active Barbican governance)"
+    ));
+    assert!(!rendered.contains("FAIL deny.toml ignores"));
+}
+
+#[test]
+fn audit_json_distinguishes_governed_native_compatibility_ids() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", "json"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
+    let temp_dir = fresh_temp_dir();
+    write_advisory_audit_fixture(&temp_dir, None, "2026-09-21");
+    fs::write(
+        temp_dir.join("deny.toml"),
+        "[advisories]\nignore = [\"RUSTSEC-2026-0001\"]\n",
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(stderr.is_empty());
+    let report: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("stdout should be valid json");
+    assert_eq!(report["schema_version"], 5);
+    assert_eq!(
+        report["native_delegated_ignores"],
+        serde_json::json!([{
+            "source": "deny.toml",
+            "advisory_ids": ["RUSTSEC-2026-0001"],
+            "governed_advisory_ids": ["RUSTSEC-2026-0001"],
+            "unmanaged_advisory_ids": [],
+            "policy": "warn"
+        }])
+    );
+}
+
+#[test]
 fn audit_fails_unreviewed_advisory_with_cargo_deny_scanner() {
     let cli = Cli::parse_from(["cargo-barbican", "audit"]);
     let client = FakeCratesIoClient::default();
@@ -494,6 +582,115 @@ fn audit_fails_unreviewed_advisory_with_cargo_deny_scanner() {
         "governed exception: cargo barbican pin exception serde@1.0.228 RUSTSEC-2026-0001"
     ));
     assert!(!rendered.contains("Allowed policy exceptions:"));
+}
+
+#[test]
+fn adding_native_ignore_cannot_turn_unreviewed_finding_into_pass() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    fs::write(
+        temp_dir.join("deny.toml"),
+        "[advisories]\nignore = [\"RUSTSEC-2026-0001\"]\n",
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let generated = runner.recorded_deny_json_config_texts();
+    assert_eq!(generated.len(), 1);
+    assert!(generated[0].contains("ignore = []"));
+    assert!(!generated[0].contains("RUSTSEC-2026-0001"));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Audit: FAIL"));
+    assert!(rendered.contains("FAIL RUSTSEC-2026-0001 serde@1.0.228: unreviewed advisory finding"));
+    assert!(
+        rendered
+            .contains("WARN deny.toml ignores RUSTSEC-2026-0001 (no active Barbican governance)")
+    );
+}
+
+#[test]
+fn native_ignore_is_unmanaged_when_same_advisory_has_an_unreviewed_occurrence() {
+    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default().with_cargo_deny_json(
+        r#"{"type":"diagnostic","fields":{"severity":"error","code":"vulnerability","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
+{"type":"diagnostic","fields":{"severity":"error","code":"vulnerability","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"other-crate","version":"1.2.3"}}]}}
+{"type":"summary","fields":{"advisories":{"errors":2,"warnings":0,"helps":0,"notes":0},"bans":{"errors":0,"warnings":0,"helps":0,"notes":0},"sources":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
+"#,
+    );
+    let temp_dir = fresh_temp_dir();
+    write_advisory_audit_fixture(&temp_dir, None, "2026-09-21");
+    fs::write(
+        temp_dir.join("Cargo.toml"),
+        "[dependencies]\nserde = \"=1.0.228\"\nother-crate = \"=1.2.3\"\n",
+    )
+    .expect("manifest should write");
+    fs::write(
+        temp_dir.join("Cargo.lock"),
+        lockfile_with_package_records(&[
+            (
+                "serde",
+                "1.0.228",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            ),
+            (
+                "other-crate",
+                "1.2.3",
+                Some("registry+https://github.com/rust-lang/crates.io-index"),
+                Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"),
+            ),
+        ]),
+    )
+    .expect("lockfile should write");
+    fs::write(
+        temp_dir.join("deny.toml"),
+        "[advisories]\nignore = [\"RUSTSEC-2026-0001\"]\n",
+    )
+    .expect("deny config should write");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner_at(
+        cli,
+        &temp_dir,
+        &client,
+        &runner,
+        fixed_now(),
+        &mut stdout,
+        &mut stderr,
+    )
+    .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(stderr.is_empty());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("serde@1.0.228 RUSTSEC-2026-0001 accepted by reviewed family"));
+    assert!(
+        rendered.contains("FAIL RUSTSEC-2026-0001 other-crate@1.2.3: unreviewed advisory finding")
+    );
+    assert!(
+        rendered
+            .contains("WARN deny.toml ignores RUSTSEC-2026-0001 (no active Barbican governance)")
+    );
+    assert!(!rendered.contains("GOVERNED deny.toml ignores"));
 }
 
 #[test]
@@ -624,7 +821,7 @@ lockfile_scanner = "cargo-audit"
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
 
-    assert_eq!(report["schema_version"], 4);
+    assert_eq!(report["schema_version"], 5);
     assert_eq!(report["status"], "fail");
     assert_eq!(report["success"], false);
     assert_eq!(report["dependency_paths_available"], true);
@@ -731,6 +928,8 @@ ignore = ["RUSTSEC-2026-0002"]
         serde_json::json!([{
             "source": "deny.toml",
             "advisory_ids": ["RUSTSEC-2026-0002"],
+            "governed_advisory_ids": [],
+            "unmanaged_advisory_ids": ["RUSTSEC-2026-0002"],
             "policy": "deny"
         }])
     );
@@ -1054,7 +1253,7 @@ fn audit_json_outputs_null_remediation_when_patched_versions_are_empty() {
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
 
-    assert_eq!(report["schema_version"], 4);
+    assert_eq!(report["schema_version"], 5);
     assert!(
         report["findings"][0]["patched"]
             .as_array()

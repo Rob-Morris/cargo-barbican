@@ -33,7 +33,7 @@ const GITHUB_WORKFLOW_PATH: &str = ".github/workflows/barbican.yml";
 /// so the workflow's own `${{ ... }}` expressions pass through verbatim rather
 /// than colliding with Rust's format braces. Third-party actions are pinned by
 /// full commit SHA to match the repo's own dogfooded `ci.yml`.
-const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.26.0
+const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.27.0
 #
 # cargo-barbican enforcement gate (server-side, authoritative).
 #
@@ -77,7 +77,7 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Install cargo-barbican, cargo-deny, and cargo-audit
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.26.0 cargo-barbican
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.27.0 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
       - name: Fetch dependencies for every target platform
@@ -459,7 +459,7 @@ mod tests {
         );
         assert!(!GITHUB_CI_WORKFLOW.contains("cargo barbican inventory --enforce"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo install --locked"));
-        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.26.0"));
+        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.27.0"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-deny@0.19.6"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-audit@0.22.1"));
         // Third-party actions must stay pinned by full commit SHA with a
@@ -492,6 +492,13 @@ mod tests {
             std::fs::read_to_string(template_path).expect("deny template should be readable");
 
         assert_eq!(DEFAULT_DENY_TOML, template);
+    }
+
+    #[test]
+    fn embedded_default_deny_toml_preserves_advisory_coexistence_boundary() {
+        assert!(DEFAULT_DENY_TOML.contains("never authorise a Barbican pass"));
+        assert!(DEFAULT_DENY_TOML.contains("GOVERNED"));
+        assert!(DEFAULT_DENY_TOML.contains("ignore = []"));
     }
 
     #[test]

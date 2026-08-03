@@ -118,14 +118,16 @@ rewrite the existing family block and instead prints the exact
 `allowed_advisories` fragment to add manually, plus the review record to
 update.
 
-Never reach for a native `deny.toml` or `.cargo/audit.toml` ignore instead.
-`audit` neutralises native advisory ignores regardless of configuration — it
-generates a max-disclosure runtime `cargo-deny` config and reports the ignores
-according to `delegates.unmanaged_delegated_policy`, failing them outright
-under `deny`. An ungoverned ignore has no owner, no checksum binding, and no
-deadline; the governed exception has all three, and `inventory` tracks each
-exception's expiry status (active, soon-to-expire within 30 days, expired, or
-stale) without running the scanners.
+Create the governed exception first. If the repository also runs cargo-deny or
+cargo-audit directly, the same ID may then be mirrored into that tool's native
+ignore list. `audit` neutralises the native ignore during its max-disclosure
+scan and marks it governed only when every current occurrence is accepted by
+active Barbican governance; otherwise the finding still fails and the ID is
+reported according to `delegates.unmanaged_delegated_policy`. The native entry
+therefore improves direct-tool coexistence but supplies no owner, checksum
+binding, or deadline itself. `inventory` tracks each Barbican exception's
+expiry status (active, soon-to-expire within 30 days, expired, or stale)
+without running the scanners.
 
 ## Routine Update Cadence
 
