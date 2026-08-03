@@ -1,6 +1,6 @@
 [package]
 name = "barbican"
-version = "0.25.0"
+version = "0.26.0"
 description = "Library for Rust supply-chain hardening: release-age gating, lockfile diffing, policy assessment."
 edition.workspace = true
 license.workspace = true

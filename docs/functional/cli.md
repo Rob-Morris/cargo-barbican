@@ -607,6 +607,13 @@ cargo barbican verify
     On success, `verify` confirms each executed step explicitly
     (`OK   cargo build --locked`, `OK   cargo test --locked`) and ends with
     `Verify: PASS`, so a passing gate is distinguishable from a skipped one.
+    The build and test delegates stream their output to the terminal while
+    they run, with stdout inherited directly and each stderr line carrying a
+    `delegate stderr: ` prefix. That output is delegate evidence, not part of
+    the report body, and is not a stable parse target. Delegate stdin is
+    closed. When a delegate fails, the terminal failure line on stderr
+    carries only the delegate's exit status — the delegate's own output has
+    already streamed above it.
 ```
 
 `<crate@version>` candidate specs are exact crates.io package specs. A single
@@ -705,6 +712,11 @@ contract, not a routine rewording.
   reviewed-target failure, or a build/test error on stderr — and exits `1`
   without printing a `Verify:` line at all.
 
+During `verify`'s build and test steps, dependency-controlled delegate output
+shares stdout with the stable tokens. Consumers must therefore accept a token
+as a verdict only together with the command's exit code; stdout text alone is
+not authoritative.
+
 All other output — evidence reports, dossiers, inventory findings, review
 diffs, and human-oriented notes such as `verify`'s scope-honesty pointer to
 `audit`, `inspect`'s `verdict basis:` line and reviewed-family remediation
@@ -729,6 +741,14 @@ Every command follows one rule for where output goes:
   report enrichment degrades — for example `audit`'s dependency-path and
   remediation context notes — so a missing enrichment stays visible without
   entering the stdout report body or changing the verdict.
+- **Streaming delegates are the one exception to captured execution:**
+  `verify`'s `cargo build --locked` and `cargo test --locked` steps inherit
+  terminal stdout and relay each stderr line with a `delegate stderr: `
+  prefix while they run. Stdin is closed so a delegate cannot block on or
+  consume operator input. Streamed output is non-stable delegate evidence;
+  the distinguishing stderr prefix reserves line-leading `FAIL ` for the
+  terminal failure rendered by cargo-barbican, which carries the delegate's
+  exit status.
 - **stderr** carries the terminal failure line and every propagated error.
   Any `CommandError` that reaches the top of a command — a missing or
   malformed input file, a failed `git`/`cargo` subprocess, an invalid
@@ -740,13 +760,13 @@ Every command follows one rule for where output goes:
   write their `FAIL` line to stderr, matching the same stream.
 
 Because every failure path funnels through that one renderer (or writes to
-stderr directly using the same `FAIL` token), grepping stderr for `FAIL`
-reliably surfaces every failure, not just the ones a given command happened
-to render itself. The renderer also escapes the detail through the same
-terminal-injection guard used for evidence fields — untrusted crate names,
-requirements, network-sourced strings, and policy file paths cannot inject
-ANSI or bidi control sequences into the terminal — and never changes the exit
-code: a propagated error still exits `1`.
+stderr directly using the same `FAIL` token), grepping stderr for
+line-leading `^FAIL ` reliably surfaces every failure, not just the ones a
+given command happened to render itself. The renderer also escapes the detail
+through the same terminal-injection guard used for evidence fields — untrusted
+crate names, requirements, network-sourced strings, and policy file paths
+cannot inject ANSI or bidi control sequences into the terminal — and never
+changes the exit code: a propagated error still exits `1`.
 
 ## Behavioural boundaries
 

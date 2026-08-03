@@ -64,10 +64,15 @@ where
         return Ok(pin_check_exit);
     }
 
+    // The build/test delegates stream through this process's terminal, so
+    // flush our buffered report lines before each handoff or they can land
+    // after the delegate's streamed output.
+    stdout.flush().map_err(CommandError::Io)?;
     if let Err(error) = runner.cargo_build_locked(current_dir) {
         return fail(stderr, format!("cargo build --locked: {error}"));
     }
     writeln!(stdout, "OK   cargo build --locked").map_err(CommandError::Io)?;
+    stdout.flush().map_err(CommandError::Io)?;
     if let Err(error) = runner.cargo_test_locked(current_dir) {
         return fail(stderr, format!("cargo test --locked: {error}"));
     }

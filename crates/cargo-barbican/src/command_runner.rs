@@ -1,8 +1,8 @@
 use std::fmt;
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command as ProcessCommand, Output};
-use std::{env, ffi::OsStr};
+use std::process::{Command as ProcessCommand, Output, Stdio};
+use std::{env, ffi::OsStr, thread};
 
 /// A delegated scanner binary cargo-barbican shells out to. Each variant is a
 /// cargo subcommand — an executable named `cargo-<name>` on `PATH` — which is
@@ -267,7 +267,10 @@ impl CommandRunner for RealCommandRunner {
     }
 
     fn cargo_build_locked(&self, current_dir: &Path) -> Result<(), RunnerError> {
-        run_cargo_command_status(current_dir, ["build", "--locked"])
+        let mut command = prepared_cargo_command(current_dir);
+        command.args(["build", "--locked"]);
+
+        streamed_command_status(command)
     }
 
     fn cargo_test_locked(&self, current_dir: &Path) -> Result<(), RunnerError> {
@@ -314,7 +317,77 @@ fn run_cargo_test_locked(current_dir: &Path) -> Result<(), RunnerError> {
         command.env("RUST_TEST_THREADS", "1");
     }
 
-    stdout_from_output(run_prepared_command(command)?).map(|_| ())
+    streamed_command_status(command)
+}
+
+/// The build/test delegates stream to the caller's terminal instead of being
+/// captured: their output is never parsed, and a long `cargo test` run with
+/// nothing on screen reads as a hang. Delegate stderr is distinguished from
+/// cargo-barbican's reserved `FAIL ` lines, and stdin stays closed so delegates
+/// cannot block on or consume operator input. The `Exited` output fields stay
+/// empty because nothing was captured.
+fn streamed_command_status(mut command: ProcessCommand) -> Result<(), RunnerError> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().map_err(RunnerError::Spawn)?;
+    let child_stderr = child
+        .stderr
+        .take()
+        .expect("piped delegate stderr should be available");
+    let stderr_forwarder = thread::spawn(move || {
+        let stderr = io::stderr();
+        forward_delegate_stderr(child_stderr, stderr.lock())
+    });
+
+    let status = child.wait().map_err(RunnerError::Spawn)?;
+    stderr_forwarder
+        .join()
+        .map_err(|_| RunnerError::Spawn(io::Error::other("delegate stderr forwarder panicked")))?
+        .map_err(RunnerError::Spawn)?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(RunnerError::Exited {
+            code: status.code(),
+            stdout: String::new(),
+            stderr: String::new(),
+        })
+    }
+}
+
+fn forward_delegate_stderr(mut source: impl Read, mut destination: impl Write) -> io::Result<()> {
+    const PREFIX: &[u8] = b"delegate stderr: ";
+    let mut buffer = [0_u8; 8 * 1024];
+    let mut line_start = true;
+
+    loop {
+        let read = source.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+
+        let mut offset = 0;
+        while offset < read {
+            if line_start {
+                destination.write_all(PREFIX)?;
+            }
+
+            let end = buffer[offset..read]
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(read, |position| offset + position + 1);
+            destination.write_all(&buffer[offset..end])?;
+            line_start = buffer[end - 1] == b'\n';
+            offset = end;
+        }
+        destination.flush()?;
+    }
+
+    Ok(())
 }
 
 fn prepared_cargo_command(current_dir: &Path) -> ProcessCommand {
@@ -432,12 +505,16 @@ fn advisory_database_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
     use std::ffi::OsStr;
+    use std::fs;
     use std::io;
+    use std::process::{Command as ProcessCommand, Stdio};
 
     use super::{
-        RunnerError, classify_probe_spawn, should_force_serial_nested_tests_with_env,
-        should_strip_from_nested_cargo_env,
+        RunnerError, classify_probe_spawn, forward_delegate_stderr,
+        should_force_serial_nested_tests_with_env, should_strip_from_nested_cargo_env,
+        streamed_command_status,
     };
 
     #[test]
@@ -491,6 +568,54 @@ mod tests {
         ] {
             assert!(!should_strip_from_nested_cargo_env(OsStr::new(name)));
         }
+    }
+
+    #[test]
+    fn exited_error_with_no_captured_output_renders_status_only() {
+        let error = RunnerError::Exited {
+            code: Some(101),
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        assert_eq!(error.to_string(), "command exited with status 101");
+    }
+
+    #[test]
+    fn delegate_stderr_lines_receive_a_distinguishing_prefix() {
+        let mut forwarded = Vec::new();
+
+        forward_delegate_stderr(
+            &b"FAIL counterfeit failure\nwarning from delegate\nFAIL without newline"[..],
+            &mut forwarded,
+        )
+        .expect("delegate stderr should forward");
+
+        let rendered = String::from_utf8(forwarded).expect("forwarded stderr should be utf8");
+        assert_eq!(
+            rendered,
+            "delegate stderr: FAIL counterfeit failure\ndelegate stderr: warning from delegate\ndelegate stderr: FAIL without newline"
+        );
+        assert!(rendered.lines().all(|line| !line.starts_with("FAIL ")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn streamed_commands_override_configured_stdin_with_null() {
+        let input_path = env::temp_dir().join(format!(
+            "cargo-barbican-streamed-stdin-{}",
+            std::process::id()
+        ));
+        fs::write(&input_path, b"operator input\n").expect("test stdin should write");
+        let input = fs::File::open(&input_path).expect("test stdin should open");
+
+        let mut command = ProcessCommand::new("sh");
+        command
+            .args(["-c", "if IFS= read -r _; then exit 42; fi"])
+            .stdin(Stdio::from(input));
+        let result = streamed_command_status(command);
+
+        fs::remove_file(input_path).expect("test stdin should clean up");
+        assert!(result.is_ok(), "streamed command inherited readable stdin");
     }
 
     #[test]

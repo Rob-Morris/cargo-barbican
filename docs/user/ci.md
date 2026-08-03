@@ -28,7 +28,7 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.25.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.26.0
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -90,7 +90,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.25.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.26.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -122,7 +122,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.25.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.26.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
