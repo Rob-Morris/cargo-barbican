@@ -88,6 +88,38 @@ Only after that check passes should the commit and tag be pushed. Finish with
 a clean install from the published tag; that remote install is the deployment
 proof that the release identity advertised in user documentation is usable.
 
+Two things about that install step are easy to get wrong.
+
+**While this repository is private, the documented install command fails on
+its own.** Cargo's built-in git fetcher cannot invoke a shell-command
+`credential.helper` — including the one `gh auth login` installs — so it exits
+with `failed to authenticate when downloading repository` even though the `git`
+CLI can clone the repo. Route the fetch through the CLI:
+
+```bash
+CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install --locked \
+  --git https://github.com/Rob-Morris/cargo-barbican --tag vX.Y.Z \
+  --root /tmp/barbican-install-proof cargo-barbican
+```
+
+`--root` keeps the proof out of `~/.cargo/bin` until you actually want the
+binary installed. The requirement lapses once the repository is public and the
+clone becomes anonymous.
+
+**If a tag name is being reused for a different commit** — a re-cut release
+after amending, which the insiders sequence has done repeatedly — cargo may
+reuse its cached checkout under `~/.cargo/git` and rebuild the *old* commit
+while still reporting success. Pass `--force` and confirm the commit hash cargo
+prints matches the tag:
+
+```text
+Installed package `cargo-barbican vX.Y.Z (…?tag=vX.Y.Z#<short-sha>)`
+```
+
+If that SHA is not the intended release commit, the cache served a stale
+checkout; clear `~/.cargo/git/db/cargo-barbican-*` and retry. Exit status alone
+does not prove the drill built the tagged tree.
+
 ## Verification Expectations
 
 The repo-level verification entry point is:
