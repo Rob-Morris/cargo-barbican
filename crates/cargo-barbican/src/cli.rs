@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use barbican::MAXIMUM_RELEASE_AGE_MINIMUM_DAYS;
+use barbican::{ExactRustToolchainChannel, MAXIMUM_RELEASE_AGE_MINIMUM_DAYS};
 use clap::builder::RangedU64ValueParser;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -186,7 +186,8 @@ pub(crate) enum Command {
         about = "Manage the explicit policy scaffold",
         long_about = "policy manages the explicit on-disk policy scaffold a repo adopts \
             cargo-barbican with. Its one subcommand, init, creates any missing barbican.toml, \
-            deny.toml, reviewed-targets.toml, and docs/dependency-reviews/ files — and, with \
+            deny.toml, reviewed-targets.toml, and docs/dependency-reviews/ files — and, with an \
+            explicit --toolchain pin, rust-toolchain.toml — and, with \
             --ci, a ready-to-run CI enforcement workflow — while preserving whatever is already \
             present. It scaffolds structure only: it does not review, certify, or enforce any \
             dependency. Run it once when first adopting cargo-barbican in a repo."
@@ -294,12 +295,20 @@ pub(crate) enum PolicyCommand {
     #[command(
         about = "Create the explicit policy scaffold for adoption",
         long_about = "Creates missing barbican.toml, deny.toml, reviewed-targets.toml, and \
-            docs/dependency-reviews/ files, preserving existing regular files and validating an \
-            existing barbican.toml. Does not review or certify existing dependencies. With \
+            docs/dependency-reviews/ files, preserving existing regular files and validating \
+            existing barbican.toml and rust-toolchain.toml policy. An absent toolchain file is \
+            created only from an explicit exact --toolchain value. Does not review or certify \
+            existing dependencies. With \
             --ci, also emits a ready-to-run CI enforcement workflow, failing closed rather than \
             overwriting an existing workflow file."
     )]
     Init {
+        #[arg(
+            long,
+            value_name = "EXACT_CHANNEL",
+            help = "Create a missing rust-toolchain.toml from an explicit exact release such as 1.95.0 or dated nightly"
+        )]
+        toolchain: Option<ExactRustToolchainChannel>,
         #[arg(
             long,
             value_enum,

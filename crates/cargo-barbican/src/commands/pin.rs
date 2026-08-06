@@ -11,6 +11,7 @@ use barbican::{
 };
 
 use crate::cli::{PinCommand, REVIEWED_TARGETS_CONFIG_FILE};
+use crate::command_runner::CommandRunner;
 
 use super::lockfile_ops::write_file_atomically;
 use super::scaffold_fs::{ScaffoldState, confined_scaffold_state, write_new_file};
@@ -19,13 +20,17 @@ use super::{
     load_reviewed_targets, read_optional_text_no_symlink,
 };
 
-pub(super) fn run_pin(
+pub(super) fn run_pin<R>(
     command: PinCommand,
     current_dir: &Path,
+    runner: &R,
     now: OffsetDateTime,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
-) -> Result<ExitCode, CommandError> {
+) -> Result<ExitCode, CommandError>
+where
+    R: CommandRunner + ?Sized,
+{
     match command {
         PinCommand::Add { spec } => run_pin_add(&spec, current_dir, now, stdout, stderr),
         PinCommand::Exception {
@@ -42,7 +47,7 @@ pub(super) fn run_pin(
             stderr,
         ),
         PinCommand::Check { config } => {
-            super::pin_check::run_pin_check(&config, current_dir, stdout)
+            super::pin_check::run_pin_check(&config, current_dir, runner, stdout)
         }
     }
 }

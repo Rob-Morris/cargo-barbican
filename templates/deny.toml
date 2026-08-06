@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.27.0
+# Synced from cargo-barbican v0.28.0
 # Runtime advisory verdicts are owned by cargo-barbican audit. During audit,
 # cargo-barbican generates a runtime cargo-deny config that forces:
 # - ignore = []

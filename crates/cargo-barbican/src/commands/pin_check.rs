@@ -8,17 +8,24 @@ use barbican::{
     RustReviewedTargetsReport, check_reviewed_rust_targets, patched_reviewed_crates,
 };
 
+use crate::command_runner::{CommandRunner, cargo_home_from_environment};
+
 use super::{
     CommandError, check_review_record_paths, escape_render_field, load_current_lockfile,
-    load_current_manifest_direct_requirements, load_manifest_patched_crate_names,
-    load_reviewed_targets, render_allowed_policy_exceptions, source_replacement_finding,
+    load_current_manifest_direct_requirements, load_effective_cargo_configs,
+    load_manifest_patched_crate_names, load_reviewed_targets, render_allowed_policy_exceptions,
+    source_replacement_finding,
 };
 
-pub(super) fn run_pin_check(
+pub(super) fn run_pin_check<R>(
     config_path: &Path,
     current_dir: &Path,
+    runner: &R,
     stdout: &mut dyn Write,
-) -> Result<ExitCode, CommandError> {
+) -> Result<ExitCode, CommandError>
+where
+    R: CommandRunner + ?Sized,
+{
     let Some(reviewed_targets) = load_reviewed_targets(current_dir, config_path)? else {
         writeln!(
             stdout,
@@ -39,13 +46,26 @@ pub(super) fn run_pin_check(
         return Ok(ExitCode::SUCCESS);
     }
 
-    enforce_reviewed_targets(&reviewed_targets, config_path, current_dir, stdout)
+    let Some(cargo_home) = cargo_home_from_environment(|name| runner.environment_variable(name))
+    else {
+        return Err(CommandError::CargoHomeUnresolved);
+    };
+    let cargo_configs = load_effective_cargo_configs(current_dir, &cargo_home)?;
+
+    enforce_reviewed_targets(
+        &reviewed_targets,
+        config_path,
+        current_dir,
+        &cargo_configs,
+        stdout,
+    )
 }
 
 pub(super) fn enforce_reviewed_targets(
     reviewed_targets: &ReviewedTargets,
     config_path: &Path,
     current_dir: &Path,
+    cargo_configs: &[super::loaders::EffectiveCargoConfig],
     stdout: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
     let manifest_requirements = load_current_manifest_direct_requirements(current_dir)?;
@@ -53,7 +73,7 @@ pub(super) fn enforce_reviewed_targets(
     let lockfile = load_current_lockfile(current_dir, Path::new("Cargo.lock"))?;
     let patched_crate_names = load_manifest_patched_crate_names(current_dir)?;
     let patched_reviewed = patched_reviewed_crates(reviewed_targets, &patched_crate_names);
-    let source_replacement = source_replacement_finding(current_dir)?;
+    let source_replacement = source_replacement_finding(cargo_configs)?;
 
     let report = check_reviewed_rust_targets(reviewed_targets, &manifest_requirements, &lockfile);
 

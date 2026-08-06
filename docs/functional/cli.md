@@ -189,10 +189,13 @@ cargo barbican inspect [--min-age-days N] <crate@version>...
 cargo barbican gatehouse pre-release
     Run the standard pre-release supply-chain workflow over the current Rust
     workspace. The workflow is fail-fast and runs, in order:
+    - exact `rust-toolchain.toml` and active toolchain conformance
     - `inventory --enforce`, as the blocking direct-dependency coverage floor
     - `audit`, as a blocking advisory and source-policy gate
     - `verify`, as the blocking reviewed-target, locked-build, and locked-test gate
-    Uncovered direct dependencies, external direct sources, unavailable exact
+    Missing or floating toolchain policy, higher-precedence toolchain
+    executable controls, unverifiable rustup/Cargo/rustc/rustdoc facts, uncovered direct
+    dependencies, external direct sources, unavailable exact
     graph facts, or missing reviewed policy stop before audit. Uncovered
     transitive packages and undeclared execution surfaces remain labelled
     observational backlog. `verify` includes the default `pin check`, so the
@@ -225,7 +228,7 @@ cargo barbican gatehouse candidate [--preserve-sandbox] <crate@version>
     manual inspection and prints the sandbox path. Any failed required evidence
     step returns exit 1 after rendering the failure in the dossier.
 
-cargo barbican policy init [--ci <system>]
+cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>]
     Create the explicit policy scaffold for adopting cargo-barbican in a repo.
     The first slice creates missing:
     - `barbican.toml`
@@ -233,6 +236,9 @@ cargo barbican policy init [--ci <system>]
     - `reviewed-targets.toml`
     - `docs/dependency-reviews/`
     - `docs/dependency-reviews/README.md`
+    - `rust-toolchain.toml`, only when absent and `--toolchain` supplies an
+      exact full release, numbered beta prerelease, or dated nightly; the
+      generated file uses rustup's `minimal` profile and reports that choice
     `deny.toml` carries a normal `[advisories]` table for direct cargo-deny use
     plus the preserved bans and sources posture. `cargo barbican audit` still
     owns advisory disclosure at runtime: it forces maximum disclosure when
@@ -241,7 +247,9 @@ cargo barbican policy init [--ci <system>]
     It does not create active reviewed families, dependency review records, or
     inventory reports.
     Existing regular files are preserved. Existing `barbican.toml` is read
-    and validated. Malformed config fails before dependent scaffold files are
+    and validated. Existing `rust-toolchain.toml` is validated and preserved;
+    missing, floating, path-based, legacy-shadowed, or conflicting toolchain
+    policy blocks that item and blocks CI workflow creation. Malformed config fails before dependent scaffold files are
     created. Symlinks, directories, and other wrong-type paths at scaffold
     locations or existing scaffold ancestors fail closed rather than being
     followed or overwritten.
@@ -468,16 +476,19 @@ cargo barbican pin check [--config reviewed-targets.toml]
       covered by an active reviewed family's `resolved` or `direct` map, since
       a patch repoints an already-reviewed crate at a different source without
       touching `Cargo.lock`
-    - fails closed when a repo-root `.cargo/config.toml` (or legacy
-      `.cargo/config`) declares a `[source]` table, a config-defined `[patch]`
-      table (stable since Rust 1.56, works exactly like a manifest `[patch]`),
-      or a top-level `paths` dependency override, while any reviewed family is
-      active, since each of these can repoint a reviewed crate name away from
+    - fails closed when any effective `.cargo/config` or `.cargo/config.toml`
+      from the workspace root, its ancestors, or Cargo home includes indirect
+      configuration, declares a
+      `[source]` table, a config-defined `[patch]` table (stable since Rust
+      1.56, works exactly like a manifest `[patch]`), or a top-level `paths`
+      dependency override, while any reviewed family is active, since each of
+      these can or may repoint a reviewed crate name away from
       crates.io — or substitute local source code for it, with `Cargo.lock`
       keeping its crates.io source and checksum — without any change to
-      `Cargo.toml` or `Cargo.lock`; this check only reads the repo-root file —
-      hierarchical cargo config in parent directories or `CARGO_HOME` is a
-      documented residual boundary, not inspected
+      `Cargo.toml` or `Cargo.lock`; repository and ancestor config symlinks are
+      refused, while a Cargo-home config symlink is inspected when Cargo home
+      and its target both resolve outside the workspace, and the target is a
+      readable regular file
     The first slice treats exact `Cargo.lock` parity as the load-bearing
     execution gate. It does not yet verify installed-tree or stronger
     build-input parity.
@@ -602,14 +613,20 @@ cargo barbican audit [--format text|json]
 
 cargo barbican verify
     Run the local execution gates in order:
-    1. `pin check` with the default repo-root `reviewed-targets.toml`
-    2. `cargo build --locked`
-    3. `cargo test --locked`
+    1. exact `rust-toolchain.toml` and active toolchain conformance
+    2. `pin check` with the default repo-root `reviewed-targets.toml`
+    3. `cargo build --locked`
+    4. `cargo test --locked`
     The standalone `pin check` command skips successfully when no
     reviewed-target manifest is present or no active Rust families are
     configured. `verify` fails closed in both cases: build/test execution
     requires an explicit reviewed-target policy with at least one active
     reviewed family.
+    The toolchain step establishes Rust toolchain executable identity, not
+    binary provenance or a sandbox for Cargo's wider execution surface.
+    `RUSTUP_HOME` may select the rustup installation tree, and target runners,
+    linkers, rustflags, and Cargo `[env]` settings remain ordinary inputs to
+    the subsequent build/test delegates.
     On success, `verify` confirms each executed step explicitly
     (`OK   cargo build --locked`, `OK   cargo test --locked`) and ends with
     `Verify: PASS`, so a passing gate is distinguishable from a skipped one.
@@ -710,14 +727,17 @@ contract, not a routine rewording.
   is known; it is `null` for exact-pin manifest edits (including exact-pinned
   blockers) and for generic transitive hints where no parent dependency path
   was available.
-- `Gatehouse pre-release: PASS` / `Gatehouse pre-release: FAIL (inventory)` /
+- `Toolchain check: PASS` / `Toolchain check: FAIL` — printed by the
+  toolchain preflight used by standalone `verify` and `gatehouse pre-release`.
+- `Gatehouse pre-release: PASS` / `Gatehouse pre-release: FAIL (toolchain)` / `Gatehouse pre-release: FAIL (inventory)` /
   `Gatehouse pre-release: FAIL (audit)` / `Gatehouse pre-release: FAIL (verify)` — printed by `gatehouse pre-release`
   after its blocking primitives pass or fail. Operational errors that prevent
   a primitive from producing a verdict use the ordinary stderr `FAIL` contract.
 - `Verify: PASS` — printed by `verify` on success; there is no matching
   `Verify: FAIL` token. A failing `verify` run stops at the failing step
   (`pin check`, `cargo build --locked`, or `cargo test --locked`), reports the
-  failure through that step's own output — `Pin check: FAIL` on stdout for a
+  failure through that step's own output — `Toolchain check: FAIL` or `Pin
+  check: FAIL` on stdout for a
   reviewed-target failure, or a build/test error on stderr — and exits `1`
   without printing a `Verify:` line at all.
 

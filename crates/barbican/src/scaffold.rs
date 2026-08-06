@@ -4,12 +4,13 @@ use std::fmt::Write as _;
 use thiserror::Error;
 use time::Date;
 
+use crate::format_iso_date;
 use crate::lockfile::{LockedPackage, Lockfile};
 use crate::manifest::CargoManifestDirectRequirement;
 use crate::review_record::REVIEW_RECORD_SCAFFOLD_MARKER;
 use crate::reviewed_targets::{
     RawReviewedAdvisory, RawReviewedResolvedTarget, RawReviewedRustFamily, RawReviewedTargets,
-    RawRustReviewedTargets, ReviewedTargets, RustSecAdvisoryId, format_iso_date,
+    RawRustReviewedTargets, ReviewedTargets, RustSecAdvisoryId,
 };
 use crate::sha256::Sha256Digest;
 use crate::spec::{ExactCrateSpec, ExactCrateSpecError, VersionMarker, split_crate_version_spec};

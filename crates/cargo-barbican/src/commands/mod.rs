@@ -18,6 +18,7 @@ mod resolve;
 mod review;
 mod scaffold_fs;
 mod scratch_dir;
+mod toolchain;
 mod update;
 mod verify;
 mod workspace;
@@ -50,11 +51,12 @@ pub(crate) use loaders::{
     load_base_manifest_dependencies, load_config, load_current_lockfile,
     load_current_lockfile_text, load_current_lockfile_with_text,
     load_current_manifest_direct_and_workspace_requirements,
-    load_current_manifest_direct_requirements, load_git_base_lockfile, load_lockfile_from_path,
-    load_manifest_dependencies_from_root, load_manifest_patched_crate_names,
-    load_manifest_texts_from_root, load_native_delegated_ignores, load_release_age_context,
-    load_reviewed_targets, parse_manifest_requirements, read_optional_text_no_symlink,
-    release_age_override_note, source_replacement_finding,
+    load_current_manifest_direct_requirements, load_effective_cargo_configs,
+    load_git_base_lockfile, load_lockfile_from_path, load_manifest_dependencies_from_root,
+    load_manifest_patched_crate_names, load_manifest_texts_from_root,
+    load_native_delegated_ignores, load_release_age_context, load_reviewed_targets,
+    parse_manifest_requirements, read_optional_text_no_symlink, release_age_override_note,
+    source_replacement_finding,
 };
 pub(crate) use render::{
     escape_render_field, fail, join_display, render_allowed_policy_exceptions,
@@ -279,7 +281,7 @@ where
         Command::Inventory { enforce } => {
             inventory::run_inventory(current_dir, runner, now, enforce, stdout)
         }
-        Command::Pin { command } => pin::run_pin(command, current_dir, now, stdout, stderr),
+        Command::Pin { command } => pin::run_pin(command, current_dir, runner, now, stdout, stderr),
         Command::Review { base_dir } => {
             review::run_review(base_dir.as_deref(), current_dir, runner, stdout, stderr)
         }

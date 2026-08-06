@@ -51,6 +51,7 @@ fn review_prints_checklist_and_diff_for_policy_files() {
     assert!(recorded_paths.contains(&PathBuf::from("barbican.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("deny.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("reviewed-targets.toml")));
+    assert!(recorded_paths.contains(&PathBuf::from("rust-toolchain.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("docs/dependency-reviews")));
     assert!(recorded_paths.contains(&PathBuf::from("app/Cargo.toml")));
     assert!(recorded_paths.contains(&PathBuf::from("crates/barbican/Cargo.toml")));

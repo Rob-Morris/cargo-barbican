@@ -14,12 +14,17 @@ crates.io publication, positive reviewed policy for external git/path/alternate
 registry dependencies, and hostile-checkout race-free containment remain out
 of scope for this release.
 
+Adoption requires a rustup-managed Rust installation with `rustup`, `cargo`,
+`rustc`, and `rustdoc` on `PATH`. The execution gates fail closed when rustup is absent
+because the active toolchain cannot then be reconciled with native
+`rust-toolchain.toml` policy.
+
 ## 1. Create The Policy Scaffold
 
 From the consumer repository root:
 
 ```bash
-cargo barbican policy init
+cargo barbican policy init --toolchain 1.95.0
 ```
 
 The command creates missing scaffold files:
@@ -29,6 +34,17 @@ The command creates missing scaffold files:
 - `reviewed-targets.toml`
 - `docs/dependency-reviews/`
 - `docs/dependency-reviews/README.md`
+- `rust-toolchain.toml`, when and only when `--toolchain` supplies an exact
+  stable release, numbered beta prerelease such as `1.96.0-beta.2`, or dated
+  nightly; generated files use rustup's `minimal` profile, which the init
+  report states explicitly
+
+Choose the toolchain deliberately for the consumer repo; do not copy `1.95.0`
+blindly. If `rust-toolchain.toml` already exists, omit `--toolchain` or pass the
+same exact channel. Floating `stable`, `beta`, and undated `nightly` channels
+and bare versioned beta channels such as `1.96.0-beta` are not accepted. A
+missing or invalid pin blocks `--ci github`, because the
+generated gate must not start from an unpinned compiler.
 
 Scaffold items are created independently in dependency order. For example,
 dependency-review docs may still be created while a malformed existing
@@ -45,7 +61,7 @@ relying on scaffold path-containment guarantees.
 Review `barbican.toml` before enforcing the policy. It is explicit repo policy,
 not hidden runtime default state.
 
-`cargo barbican policy init --ci github` additionally emits a ready-to-run
+`cargo barbican policy init --toolchain 1.95.0 --ci github` additionally emits a ready-to-run
 `.github/workflows/barbican.yml` enforcement workflow (it fails closed rather
 than overwriting an existing one). See [ci.md](ci.md) for the CI gate and the
 client-side pre-commit hook.
@@ -127,10 +143,16 @@ cargo barbican pin check
 `pin check` is local-only and read-only. It verifies that active reviewed
 families point at real review records and match the current manifests and
 `Cargo.lock`. It also fails closed when a manifest `[patch]` table targets a
-reviewed crate, or when a repo-root `.cargo/config.toml` declares a `[source]`
-table, a config-defined `[patch]` table, or a top-level `paths` override —
-all of these can repoint a reviewed crate at an unreviewed source without
-touching `Cargo.lock`.
+reviewed crate, or when any effective Cargo config from the workspace root,
+its ancestors, or Cargo home includes indirect configuration, declares a
+`[source]` table, a config-defined `[patch]` table, or a top-level `paths`
+override — all of these can or may repoint a reviewed crate at an unreviewed
+source without touching `Cargo.lock`. Repository and ancestor config symlinks
+are refused as policy inputs. A Cargo-home config symlink is followed only
+when both Cargo home and the target resolve outside the workspace and the
+target is a readable regular file; its contents remain subject to the same
+checks. A repo-local
+`CARGO_HOME` retains the repository symlink refusal.
 
 ## 4. Run The Enforcement Gate
 
@@ -151,9 +173,10 @@ pre-release workflow:
 cargo barbican gatehouse pre-release
 ```
 
-`audit` and `verify` stay separate primitives on purpose. `verify`'s verdict is a pure
-function of the repo — the same manifests, lockfile, and reviewed-target
-policy always produce the same result. `audit`'s verdict also depends on the
+`audit` and `verify` stay separate primitives on purpose. After toolchain
+conformance, the reviewed-target portion of `verify` is derived from checked-in
+repo policy; the overall command also observes active compiler and locked
+build/test facts. `audit` additionally depends on the
 advisory landscape at the moment it runs, so a new RustSec advisory can flip
 it from PASS to FAIL with no repo change at all. `verify` fails closed when
 `reviewed-targets.toml` is absent, not a regular file, or configures no active
@@ -163,6 +186,14 @@ ending with `Verify: PASS`. When run standalone, `verify` prints a note
 pointing at `audit` as the separate advisory gate; Gatehouse suppresses that
 note after its audit step has passed. See
 [ci.md](ci.md) for how to schedule both in CI.
+
+The toolchain preflight establishes the identity and agreement of rustup,
+Cargo, rustc, and rustdoc; it does not prove those binaries' provenance or
+sandbox every executable Cargo may invoke. `RUSTUP_HOME` may select the rustup
+installation tree, and target runner/linker, rustflags, and Cargo `[env]`
+settings remain normal build inputs. Treat the subsequent locked build and
+test as ordinary Cargo execution and review the dependency execution surface
+accordingly.
 
 The first Gatehouse step applies the same coverage floor as
 `cargo barbican inventory --enforce`. It fails closed (`Inventory: FAIL`) when

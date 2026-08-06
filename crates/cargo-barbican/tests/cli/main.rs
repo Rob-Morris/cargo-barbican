@@ -15,5 +15,6 @@ mod pin_exception;
 mod policy_init;
 mod resolve;
 mod review;
+mod toolchain;
 mod update;
 mod verify;

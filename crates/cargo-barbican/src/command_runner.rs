@@ -2,7 +2,11 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Output, Stdio};
-use std::{env, ffi::OsStr, thread};
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    thread,
+};
 
 /// A delegated scanner binary cargo-barbican shells out to. Each variant is a
 /// cargo subcommand — an executable named `cargo-<name>` on `PATH` — which is
@@ -34,11 +38,18 @@ impl Delegate {
 
 pub trait CommandRunner {
     fn git_show(&self, current_dir: &Path, object: &str) -> Result<String, RunnerError>;
+    /// Runtime command policy reads environment through this boundary so test
+    /// runners never inherit unrelated toolchain controls from the test host.
+    fn environment_variable(&self, name: &str) -> Option<OsString>;
     /// Whether the delegate binary can be found on `PATH`. `Ok(false)` means a
     /// clean ENOENT (not installed); an `Err` is any other spawn failure and
     /// stays fail-closed. No default impl on purpose: a defaulted `Ok(true)`
     /// would silently fail open if an implementor forgot to override it.
     fn delegate_available(&self, delegate: Delegate) -> Result<bool, RunnerError>;
+    fn rustup_active_toolchain(&self, current_dir: &Path) -> Result<String, RunnerError>;
+    fn cargo_verbose_version(&self, current_dir: &Path) -> Result<String, RunnerError>;
+    fn rustc_verbose_version(&self, current_dir: &Path) -> Result<String, RunnerError>;
+    fn rustdoc_verbose_version(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn cargo_metadata(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn cargo_metadata_frozen(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn cargo_locate_project_workspace(
@@ -141,12 +152,32 @@ impl CommandRunner for RealCommandRunner {
         run_command(current_dir, "git", ["show", object])
     }
 
+    fn environment_variable(&self, name: &str) -> Option<OsString> {
+        env::var_os(name)
+    }
+
     fn delegate_available(&self, delegate: Delegate) -> Result<bool, RunnerError> {
         classify_probe_spawn(
             ProcessCommand::new(delegate.binary())
                 .arg("--version")
                 .output(),
         )
+    }
+
+    fn rustup_active_toolchain(&self, current_dir: &Path) -> Result<String, RunnerError> {
+        run_command(current_dir, "rustup", ["show", "active-toolchain"])
+    }
+
+    fn cargo_verbose_version(&self, current_dir: &Path) -> Result<String, RunnerError> {
+        run_cargo_command(current_dir, ["--version", "--verbose"])
+    }
+
+    fn rustc_verbose_version(&self, current_dir: &Path) -> Result<String, RunnerError> {
+        run_command(current_dir, "rustc", ["--version", "--verbose"])
+    }
+
+    fn rustdoc_verbose_version(&self, current_dir: &Path) -> Result<String, RunnerError> {
+        run_command(current_dir, "rustdoc", ["--version", "--verbose"])
     }
 
     fn cargo_metadata(&self, current_dir: &Path) -> Result<String, RunnerError> {
@@ -495,10 +526,16 @@ fn stdout_from_output(output: Output) -> Result<String, RunnerError> {
     }
 }
 
-fn advisory_database_path() -> PathBuf {
-    env::var_os("CARGO_HOME")
+pub(crate) fn cargo_home_from_environment(
+    mut lookup: impl FnMut(&str) -> Option<OsString>,
+) -> Option<PathBuf> {
+    lookup("CARGO_HOME")
         .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cargo")))
+        .or_else(|| lookup("HOME").map(|home| PathBuf::from(home).join(".cargo")))
+}
+
+fn advisory_database_path() -> PathBuf {
+    cargo_home_from_environment(|name| env::var_os(name))
         .unwrap_or_else(|| PathBuf::from(".cargo"))
         .join("advisory-db")
 }
@@ -512,10 +549,24 @@ mod tests {
     use std::process::{Command as ProcessCommand, Stdio};
 
     use super::{
-        RunnerError, classify_probe_spawn, forward_delegate_stderr,
+        RunnerError, cargo_home_from_environment, classify_probe_spawn, forward_delegate_stderr,
         should_force_serial_nested_tests_with_env, should_strip_from_nested_cargo_env,
         streamed_command_status,
     };
+
+    #[test]
+    fn cargo_home_prefers_cargo_home_then_falls_back_to_home() {
+        let cargo_home = cargo_home_from_environment(|name| match name {
+            "CARGO_HOME" => Some("/cargo-home".into()),
+            "HOME" => Some("/home".into()),
+            _ => None,
+        });
+        assert_eq!(cargo_home, Some("/cargo-home".into()));
+
+        let home_fallback =
+            cargo_home_from_environment(|name| (name == "HOME").then(|| "/home".into()));
+        assert_eq!(home_fallback, Some("/home/.cargo".into()));
+    }
 
     #[test]
     fn probe_treats_missing_binary_as_unavailable_not_an_error() {

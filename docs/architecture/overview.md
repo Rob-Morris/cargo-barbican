@@ -55,9 +55,10 @@ The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
 The current intake layer is:
 
 - `assess` remains the post-add diff classifier
-- `gatehouse pre-release` is the blessed fail-fast composition of
-  the blocking direct-dependency inventory floor, blocking audit, and blocking
-  verify; the base primitives retain their own semantics
+- `gatehouse pre-release` is the blessed fail-fast composition of exact Rust
+  toolchain conformance, the blocking direct-dependency inventory floor,
+  blocking audit, and blocking verify; the base primitives retain their own
+  semantics
 - `pick` is the implemented read-only exact-version discovery surface for
   crates.io semver ranges
 - `inspect` is the implemented first Rust-only, crates.io-only deep-review surface
@@ -68,8 +69,14 @@ The current intake layer is:
   checked-in review record path before it trusts the reviewed-target declaration
 - the first gate trusts exact `Cargo.lock` parity plus optional exact direct
   manifest requirements
-- `verify` now reuses that same reviewed-target gate before `cargo build --locked`
-  and `cargo test --locked`
+- `verify` first requires an exact `rust-toolchain.toml` pin and proves the
+  active rustup, Cargo, rustc, and rustdoc toolchain conforms to it; only then does it
+  reuse the reviewed-target gate before `cargo build --locked` and `cargo test
+  --locked`
+- that preflight is an identity gate for Cargo's Rust toolchain executables,
+  not a binary-provenance proof or a sandbox around Cargo's wider execution
+  surface; build/test still runs with ordinary Cargo runner, linker, flag, and
+  environment semantics after policy review
 - the current reviewed-target gate now supports crates.io reviewed-artefact
   reconciliation: record the reviewed tarball digest in `reviewed-targets.toml`
   and verify it against the resolved `Cargo.lock` checksum chain
@@ -92,10 +99,12 @@ The current intake layer is:
     target remains inside the source workspace and outside skipped `.git` /
     `target` paths; unsupported symlinks fail closed
 - `policy init` creates the explicit adoption scaffold for consumer repos:
-  `barbican.toml`, `reviewed-targets.toml`, and dependency-review conventions
-  without reviewing or certifying existing dependencies; scaffold items are
-  created independently so repairable pieces can be laid down even when another
-  item is blocked
+  `barbican.toml`, `reviewed-targets.toml`, dependency-review conventions, and
+  an absent `rust-toolchain.toml` only from an explicit exact `--toolchain`
+  operator choice, using and reporting rustup's `minimal` profile; it does not
+  review or certify existing dependencies, and
+  scaffold items are created independently so repairable pieces can be laid
+  down even when another item is blocked
 
 ## Deferred / Non-Sequenced Design Work
 

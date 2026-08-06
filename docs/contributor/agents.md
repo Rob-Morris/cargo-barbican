@@ -128,18 +128,22 @@ The current intake layer now includes the first pre-add deep-review slice:
   pre-add deep-review surface
 - `cargo barbican gatehouse candidate` exists as the first workflow
   convenience surface for isolated exact-candidate intake dossiers
-- `cargo barbican gatehouse pre-release` composes the blocking direct-dependency
-  inventory floor, blocking audit, and blocking verify as the blessed
-  whole-repo release gate
+- `cargo barbican gatehouse pre-release` composes exact Rust toolchain
+  conformance, the blocking direct-dependency inventory floor, blocking audit,
+  and blocking verify as the blessed whole-repo release gate
 - `cargo barbican policy init` exists as the deterministic policy scaffold
-  command for consumer adoption; it creates missing explicit policy files but
-  does not review or certify existing dependencies
+  command for consumer adoption; it creates a missing `rust-toolchain.toml`
+  only from an explicit exact `--toolchain` choice, reports its generated
+  rustup `minimal` profile, creates the other missing policy files, and does
+  not review or certify existing dependencies
 - `cargo barbican inventory` exists as the first read-only dependency
   inventory and policy-coverage audit; it now combines offline manifest /
   lockfile facts with read-only frozen cargo metadata for live execution
   surfaces
 - `cargo barbican pin check` now exists as the first reviewed-target
-  enforcement surface over repo-root `reviewed-targets.toml`
+  enforcement surface over repo-root `reviewed-targets.toml`; its Cargo source
+  override check covers effective config at the workspace root, ancestors, and
+  Cargo home
 - `pin check` now validates that every active reviewed family points at a real
   checked-in review record path before it trusts that reviewed-target entry
 - the first gate trusts exact `Cargo.lock` parity plus optional exact direct

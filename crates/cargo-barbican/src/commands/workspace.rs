@@ -13,11 +13,12 @@ use crate::command_runner::{CommandRunner, RunnerError};
 
 use super::CommandError;
 
-pub(crate) const REVIEW_ROOT_FILE_PATHS: [&str; 4] = [
+pub(crate) const REVIEW_ROOT_FILE_PATHS: [&str; 5] = [
     "Cargo.lock",
     "barbican.toml",
     "deny.toml",
     "reviewed-targets.toml",
+    "rust-toolchain.toml",
 ];
 pub(crate) const REVIEW_RECORDS_DIR: &str = "docs/dependency-reviews";
 

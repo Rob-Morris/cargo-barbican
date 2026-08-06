@@ -12,6 +12,7 @@ pub mod crates_io;
 pub mod deny_config;
 pub mod inspect;
 pub mod inventory;
+mod iso_date;
 pub mod lockfile;
 pub mod manifest;
 pub mod metadata;
@@ -23,6 +24,7 @@ pub mod reviewed_targets;
 pub mod scaffold;
 pub mod sha256;
 pub mod spec;
+pub mod toolchain;
 
 pub use advisory::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
@@ -38,7 +40,10 @@ pub use assessment::{
     RustAssessmentFinding, RustAssessmentFindingCategory, RustAssessmentFindingSeverity,
     RustAssessmentReport, assess_rust_update_at,
 };
-pub use cargo_config::{CargoConfigError, cargo_config_source_override_key};
+pub use cargo_config::{
+    CARGO_TOOLCHAIN_EXECUTABLE_CONTROLS, CargoConfigError, CargoToolchainExecutableControl,
+    cargo_config_source_override_key, cargo_config_toolchain_executable_control_key,
+};
 pub use config::{
     AdvisoryDelegatesConfig, BarbicanConfig, CargoDenyCheck, CargoDenyDelegatesConfig,
     CargoDenyLicensesPosture, ConfigLoadError, DEFAULT_CARGO_DENY_CHECKS, DelegatesConfig,
@@ -62,6 +67,7 @@ pub use inventory::{
     InventoryResolvedCrate, InventoryReviewedFamily, InventoryRollup, ReviewRecordFact,
     WorkspacePackageIdentity, build_inventory, build_inventory_graph_facts,
 };
+pub use iso_date::{IsoDateError, format_iso_date, parse_iso_date};
 pub use lockfile::{
     CRATES_IO_SOURCE, LockedChecksumChange, LockedDependency, LockedPackage, Lockfile,
     LockfileError, added_crates_io_specs, changed_crates_io_checksums, parse_lockfile,
@@ -98,10 +104,9 @@ pub use review_record::{
     REVIEW_RECORD_SCAFFOLD_MARKER, ReviewRecordStatus, classify_review_record,
 };
 pub use reviewed_targets::{
-    ExecutionSurfaceKind, IsoDateError, ReviewedAdvisoryException,
-    ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException, ReviewedResolvedTarget,
-    ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError, RustSecAdvisoryId,
-    RustSecAdvisoryIdError, format_iso_date, parse_iso_date, parse_reviewed_targets_toml,
+    ExecutionSurfaceKind, ReviewedAdvisoryException, ReviewedExecutionSurfaceAllowance,
+    ReviewedReleaseAgeException, ReviewedResolvedTarget, ReviewedRustFamily, ReviewedTargets,
+    ReviewedTargetsError, RustSecAdvisoryId, RustSecAdvisoryIdError, parse_reviewed_targets_toml,
 };
 pub use scaffold::{
     PIN_EXCEPTION_DEFAULT_REVIEW_DAYS, PinAddPlan, PinAddRejection, PinAddTarget,
@@ -116,3 +121,7 @@ pub use spec::{
     is_native_sys_execution_surface, parse_exact_version_requirement,
 };
 pub use time::{Date, OffsetDateTime};
+pub use toolchain::{
+    ExactRustToolchainChannel, RustToolchainConformance, RustToolchainError,
+    evaluate_rust_toolchain_conformance, parse_rust_toolchain_toml,
+};

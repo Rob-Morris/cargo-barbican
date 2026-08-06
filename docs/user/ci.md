@@ -8,10 +8,11 @@ reviewed target, and so on) used below.
 
 ## Why pull-request and scheduled runs differ
 
-`cargo barbican pin check` and `cargo barbican verify` are deterministic: for
-a fixed commit, manifests, lockfile, and reviewed-target policy, the result
-never changes. Running them on every pull request is sufficient — nothing
-about them can change between two runs of the same commit.
+`cargo barbican pin check` evaluates checked-in reviewed-target policy.
+`cargo barbican verify` additionally proves that the active Rust toolchain conforms
+to the checked-in exact toolchain pin and runs locked build/test execution.
+Run both on every pull request; use clean, reproducible runners so the machine
+toolchain facts do not drift around the repo policy.
 
 `cargo barbican audit` is not deterministic in that sense. Its verdict also
 depends on the advisory landscape at the moment it runs — a new RustSec
@@ -28,7 +29,7 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.27.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.0
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -66,7 +67,7 @@ treat the above as the constraint to satisfy rather than a drop-in recipe.
 The fastest way to get a working gate is to let cargo-barbican emit it:
 
 ```bash
-cargo barbican policy init --ci github
+cargo barbican policy init --toolchain 1.95.0 --ci github
 ```
 
 This writes `.github/workflows/barbican.yml` — a single fail-closed gate job
@@ -80,6 +81,12 @@ plus `age-lock` and `assess`
 against the pull-request base. If the file already exists it is never
 overwritten: the command fails closed and re-prints the intended contents so
 you can reconcile the difference by hand.
+
+Choose the exact channel for the consumer repo; `1.95.0` is only an example.
+If a valid exact `rust-toolchain.toml` already exists, omit `--toolchain`.
+Workflow generation is blocked while the pin is absent or invalid. At runtime,
+Gatehouse requires `rustup`, Cargo, rustc, and rustdoc on `PATH` and checks
+their conformance before inventory, audit, build, or test work begins.
 
 The generated workflow deliberately has no scheduled job. `audit`'s verdict can
 change with no repo change (see above), so add a nightly `audit` run as shown in
@@ -115,7 +122,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.27.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -147,7 +154,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.27.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -157,9 +164,10 @@ jobs:
 
 Notes on this layout:
 
-- `gatehouse pre-release` enforces the inventory coverage floor, then runs
-  blocking `audit` and blocking `verify`; `verify` includes the reviewed-target
-  `pin check` before its build/test steps. The scheduled job still runs
+- `gatehouse pre-release` proves exact toolchain conformance, enforces the
+  inventory coverage floor, then runs blocking `audit` and blocking `verify`;
+  `verify` includes the reviewed-target `pin check` before its build/test steps.
+  The scheduled job still runs
   standalone `audit` because the advisory landscape can change without a repo
   change.
 - The Gatehouse inventory step fails closed

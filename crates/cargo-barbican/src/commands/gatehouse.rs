@@ -18,8 +18,10 @@ use super::scratch_dir::ScratchDir;
 use super::{
     CommandError, ReviewedReleaseAgeExceptions, audit, escape_diagnostic_for_terminal, fail,
     inventory, load_release_age_context, render_incomplete_release_age_exception_review_record,
-    verify,
+    toolchain, verify,
 };
+
+const PRE_RELEASE_STEP_COUNT: u8 = 4;
 
 pub(super) fn run_gatehouse<C, R>(
     command: GatehouseCommand,
@@ -53,7 +55,19 @@ where
     R: CommandRunner + ?Sized,
 {
     writeln!(stdout, "Gatehouse pre-release:").map_err(CommandError::Io)?;
-    writeln!(stdout, "Step 1/3 — inventory coverage floor (blocking)").map_err(CommandError::Io)?;
+    write_pre_release_step(stdout, 1, "toolchain conformance (blocking)")?;
+    let toolchain_preflight =
+        match toolchain::run_toolchain_check(current_dir, runner, stdout, stderr)? {
+            toolchain::ToolchainCheckOutcome::Passed(preflight) => preflight,
+            toolchain::ToolchainCheckOutcome::Failed(exit_code) => {
+                writeln!(stdout, "Gatehouse pre-release: FAIL (toolchain)")
+                    .map_err(CommandError::Io)?;
+                return Ok(exit_code);
+            }
+        };
+
+    writeln!(stdout).map_err(CommandError::Io)?;
+    write_pre_release_step(stdout, 2, "inventory coverage floor (blocking)")?;
     let inventory_exit = inventory::run_inventory(current_dir, runner, now, true, stdout)?;
     if inventory_exit != ExitCode::SUCCESS {
         writeln!(stdout, "Gatehouse pre-release: FAIL (inventory)").map_err(CommandError::Io)?;
@@ -61,7 +75,7 @@ where
     }
 
     writeln!(stdout).map_err(CommandError::Io)?;
-    writeln!(stdout, "Step 2/3 — audit (blocking)").map_err(CommandError::Io)?;
+    write_pre_release_step(stdout, 3, "audit (blocking)")?;
     let audit_exit = audit::run_audit(
         AuditOutputFormat::Text,
         current_dir,
@@ -77,9 +91,14 @@ where
     }
 
     writeln!(stdout).map_err(CommandError::Io)?;
-    writeln!(stdout, "Step 3/3 — verify (blocking; includes pin check)")
-        .map_err(CommandError::Io)?;
-    let verify_exit = verify::run_verify_after_audit(current_dir, runner, stdout, stderr)?;
+    write_pre_release_step(stdout, 4, "verify (blocking; includes pin check)")?;
+    let verify_exit = verify::run_verify_after_gatehouse_preflights(
+        current_dir,
+        runner,
+        &toolchain_preflight,
+        stdout,
+        stderr,
+    )?;
     if verify_exit != ExitCode::SUCCESS {
         writeln!(stdout, "Gatehouse pre-release: FAIL (verify)").map_err(CommandError::Io)?;
         return Ok(verify_exit);
@@ -87,6 +106,18 @@ where
 
     writeln!(stdout, "Gatehouse pre-release: PASS").map_err(CommandError::Io)?;
     Ok(ExitCode::SUCCESS)
+}
+
+fn write_pre_release_step(
+    stdout: &mut dyn IoWrite,
+    number: u8,
+    description: &str,
+) -> Result<(), CommandError> {
+    writeln!(
+        stdout,
+        "Step {number}/{PRE_RELEASE_STEP_COUNT} — {description}"
+    )
+    .map_err(CommandError::Io)
 }
 
 fn run_candidate<C, R>(

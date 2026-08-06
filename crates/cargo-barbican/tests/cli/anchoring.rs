@@ -251,6 +251,7 @@ fn commands_fail_closed_when_no_workspace_root_can_be_found() {
 fn excluded_child_uses_its_own_policy_for_pin_check_and_verify() {
     let temp_dir = fresh_temp_dir();
     let child_dir = excluded_child_workspace(&temp_dir);
+    write_toolchain_pin(&child_dir);
     let child_manifest = child_dir.join("Cargo.toml");
     let client = FakeCratesIoClient::default();
 

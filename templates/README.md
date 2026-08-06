@@ -24,7 +24,9 @@ documentation that *uses* cargo-barbican.
 
 `barbican.toml`, `deny.toml`, `reviewed-targets.toml`, and the
 `docs/dependency-reviews/` scaffold are also created directly by
-`cargo barbican policy init`. `cargo barbican policy init --ci github`
+`cargo barbican policy init`. Supply `--toolchain <exact-channel>` when the
+consumer lacks `rust-toolchain.toml`; the tool creates that native pin only
+from the explicit operator choice. `cargo barbican policy init --ci github`
 additionally emits a ready-to-run enforcement workflow to
 `.github/workflows/barbican.yml`.
 
@@ -38,7 +40,7 @@ additionally emits a ready-to-run enforcement workflow to
 Each template file shipped to a consumer should include a header comment:
 
 ```
-# Synced from cargo-barbican v0.27.0
+# Synced from cargo-barbican v0.28.0
 ```
 
 Template-specific follow-up comments may differ. Some copied templates, such

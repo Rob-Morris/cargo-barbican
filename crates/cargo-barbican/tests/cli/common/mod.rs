@@ -8,6 +8,7 @@
 pub(crate) use std::cell::RefCell;
 pub(crate) use std::collections::HashMap;
 pub(crate) use std::env;
+pub(crate) use std::ffi::OsString;
 pub(crate) use std::fs;
 pub(crate) use std::io::{self, Read, Write};
 pub(crate) use std::net::TcpListener;
@@ -251,6 +252,7 @@ impl Write for FailAfterWriter {
 
 pub(crate) struct FakeCommandRunner {
     pub(crate) git_show_results: HashMap<String, Result<String, String>>,
+    pub(crate) environment: HashMap<String, OsString>,
     pub(crate) cargo_metadata_result: Result<String, String>,
     pub(crate) cargo_locate_project_result: Option<Result<String, String>>,
     pub(crate) cargo_update_result: Result<(), String>,
@@ -274,6 +276,11 @@ pub(crate) struct FakeCommandRunner {
     /// from the map is available (`Ok(true)`); `Ok(false)` models a clean
     /// ENOENT and `Err` models any other probe failure.
     pub(crate) delegate_availability: HashMap<cargo_barbican::Delegate, Result<bool, String>>,
+    pub(crate) rustup_active_toolchain_result: Result<String, String>,
+    pub(crate) cargo_verbose_version_result: Result<String, String>,
+    pub(crate) rustc_verbose_version_result: Result<String, String>,
+    pub(crate) rustdoc_verbose_version_result: Result<String, String>,
+    pub(crate) rustup_active_toolchain_calls: RefCell<u64>,
     pub(crate) cargo_build_result: Result<(), String>,
     pub(crate) cargo_test_result: Result<(), String>,
     pub(crate) cargo_updates: RefCell<Vec<(String, String)>>,
@@ -300,6 +307,7 @@ impl Default for FakeCommandRunner {
     fn default() -> Self {
         Self {
             git_show_results: HashMap::new(),
+            environment: HashMap::from([("CARGO_HOME".to_owned(), OsString::from(".cargo-home"))]),
             cargo_metadata_result: Ok(metadata_with_packages(&[])),
             cargo_locate_project_result: None,
             cargo_update_result: Ok(()),
@@ -321,6 +329,19 @@ impl Default for FakeCommandRunner {
                 exit_code: Some(0),
             },
             delegate_availability: HashMap::new(),
+            rustup_active_toolchain_result: Ok(
+                "1.95.0-aarch64-apple-darwin (overridden by 'rust-toolchain.toml')\n".to_owned(),
+            ),
+            cargo_verbose_version_result: Ok(
+                "cargo 1.95.0\nrelease: 1.95.0\nhost: aarch64-apple-darwin\n".to_owned(),
+            ),
+            rustc_verbose_version_result: Ok(
+                "rustc 1.95.0\nrelease: 1.95.0\nhost: aarch64-apple-darwin\n".to_owned(),
+            ),
+            rustdoc_verbose_version_result: Ok(
+                "rustdoc 1.95.0\nrelease: 1.95.0\nhost: aarch64-apple-darwin\n".to_owned(),
+            ),
+            rustup_active_toolchain_calls: RefCell::new(0),
             cargo_build_result: Ok(()),
             cargo_test_result: Ok(()),
             cargo_updates: RefCell::new(Vec::new()),
@@ -342,6 +363,61 @@ impl Default for FakeCommandRunner {
 }
 
 impl FakeCommandRunner {
+    pub(crate) fn with_environment(mut self, name: &str, value: &str) -> Self {
+        self.environment
+            .insert(name.to_owned(), OsString::from(value));
+        self
+    }
+
+    pub(crate) fn without_environment(mut self, name: &str) -> Self {
+        self.environment.remove(name);
+        self
+    }
+
+    pub(crate) fn with_active_toolchain(mut self, active: &str) -> Self {
+        self.rustup_active_toolchain_result = Ok(format!("{active}\n"));
+        self
+    }
+
+    pub(crate) fn with_rustup_error(mut self, detail: &str) -> Self {
+        self.rustup_active_toolchain_result = Err(detail.to_owned());
+        self
+    }
+
+    pub(crate) fn with_cargo_verbose_version(mut self, output: &str) -> Self {
+        self.cargo_verbose_version_result = Ok(output.to_owned());
+        self
+    }
+
+    pub(crate) fn with_cargo_verbose_error(mut self, detail: &str) -> Self {
+        self.cargo_verbose_version_result = Err(detail.to_owned());
+        self
+    }
+
+    pub(crate) fn with_rustc_verbose_version(mut self, output: &str) -> Self {
+        self.rustc_verbose_version_result = Ok(output.to_owned());
+        self
+    }
+
+    pub(crate) fn with_rustc_verbose_error(mut self, detail: &str) -> Self {
+        self.rustc_verbose_version_result = Err(detail.to_owned());
+        self
+    }
+
+    pub(crate) fn with_rustdoc_verbose_version(mut self, output: &str) -> Self {
+        self.rustdoc_verbose_version_result = Ok(output.to_owned());
+        self
+    }
+
+    pub(crate) fn with_rustdoc_verbose_error(mut self, detail: &str) -> Self {
+        self.rustdoc_verbose_version_result = Err(detail.to_owned());
+        self
+    }
+
+    pub(crate) fn rustup_active_toolchain_calls(&self) -> u64 {
+        *self.rustup_active_toolchain_calls.borrow()
+    }
+
     pub(crate) fn with_git_show(mut self, object: &str, text: &str) -> Self {
         self.git_show_results
             .insert(object.to_owned(), Ok(text.to_owned()));
@@ -527,6 +603,10 @@ impl FakeCommandRunner {
 }
 
 impl CommandRunner for FakeCommandRunner {
+    fn environment_variable(&self, name: &str) -> Option<OsString> {
+        self.environment.get(name).cloned()
+    }
+
     fn git_show(
         &self,
         _current_dir: &Path,
@@ -550,6 +630,43 @@ impl CommandRunner for FakeCommandRunner {
                 detail.clone(),
             ))),
         }
+    }
+
+    fn rustup_active_toolchain(
+        &self,
+        _current_dir: &Path,
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        *self.rustup_active_toolchain_calls.borrow_mut() += 1;
+        self.rustup_active_toolchain_result
+            .clone()
+            .map_err(runner_exit)
+    }
+
+    fn cargo_verbose_version(
+        &self,
+        _current_dir: &Path,
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        self.cargo_verbose_version_result
+            .clone()
+            .map_err(runner_exit)
+    }
+
+    fn rustc_verbose_version(
+        &self,
+        _current_dir: &Path,
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        self.rustc_verbose_version_result
+            .clone()
+            .map_err(runner_exit)
+    }
+
+    fn rustdoc_verbose_version(
+        &self,
+        _current_dir: &Path,
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        self.rustdoc_verbose_version_result
+            .clone()
+            .map_err(runner_exit)
     }
 
     fn cargo_metadata(&self, _current_dir: &Path) -> Result<String, cargo_barbican::RunnerError> {
@@ -1114,6 +1231,14 @@ pub(crate) fn write_root_manifest(temp_dir: &Path) {
         "[package]\nname = \"fixture\"\nversion = \"0.0.0\"\n",
     )
     .expect("root manifest should write");
+}
+
+pub(crate) fn write_toolchain_pin(temp_dir: &Path) {
+    fs::write(
+        temp_dir.join("rust-toolchain.toml"),
+        "[toolchain]\nchannel = \"1.95.0\"\nprofile = \"minimal\"\n",
+    )
+    .expect("toolchain pin should write");
 }
 
 pub(crate) fn write_review_record(temp_dir: &Path, relative_path: &str) {

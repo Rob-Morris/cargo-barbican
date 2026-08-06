@@ -6,6 +6,7 @@ use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
 use super::pin_check::enforce_reviewed_targets;
+use super::toolchain;
 use super::{CommandError, fail, load_reviewed_targets};
 
 pub(super) fn run_verify<R>(
@@ -17,24 +18,38 @@ pub(super) fn run_verify<R>(
 where
     R: CommandRunner + ?Sized,
 {
-    run_verify_with_audit_status(current_dir, runner, false, stdout, stderr)
+    let preflight = match toolchain::run_toolchain_check(current_dir, runner, stdout, stderr)? {
+        toolchain::ToolchainCheckOutcome::Passed(preflight) => preflight,
+        toolchain::ToolchainCheckOutcome::Failed(exit_code) => return Ok(exit_code),
+    };
+
+    run_reviewed_locked_verification(current_dir, runner, &preflight, false, stdout, stderr)
 }
 
-pub(super) fn run_verify_after_audit<R>(
+pub(super) fn run_verify_after_gatehouse_preflights<R>(
     current_dir: &Path,
     runner: &R,
+    toolchain_preflight: &toolchain::CompletedToolchainPreflight,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<ExitCode, CommandError>
 where
     R: CommandRunner + ?Sized,
 {
-    run_verify_with_audit_status(current_dir, runner, true, stdout, stderr)
+    run_reviewed_locked_verification(
+        current_dir,
+        runner,
+        toolchain_preflight,
+        true,
+        stdout,
+        stderr,
+    )
 }
 
-fn run_verify_with_audit_status<R>(
+fn run_reviewed_locked_verification<R>(
     current_dir: &Path,
     runner: &R,
+    toolchain_preflight: &toolchain::CompletedToolchainPreflight,
     audit_completed: bool,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
@@ -58,8 +73,13 @@ where
         );
     }
 
-    let pin_check_exit =
-        enforce_reviewed_targets(&reviewed_targets, config_path, current_dir, stdout)?;
+    let pin_check_exit = enforce_reviewed_targets(
+        &reviewed_targets,
+        config_path,
+        current_dir,
+        toolchain_preflight.cargo_configs(),
+        stdout,
+    )?;
     if pin_check_exit != ExitCode::SUCCESS {
         return Ok(pin_check_exit);
     }

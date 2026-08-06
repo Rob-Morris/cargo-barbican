@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.27.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.28.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -85,7 +85,7 @@ support is explicitly delivered.
 Install the insiders release candidate from its immutable git tag:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.27.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.0
 ```
 
 The tag is the install identity; do not replace it with a moving branch in
@@ -101,7 +101,7 @@ consumer CI.
 >
 > ```bash
 > CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install --locked \
->   --git https://github.com/Rob-Morris/cargo-barbican --tag v0.27.0
+>   --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.0
 > ```
 >
 > To make it persistent, add this to `~/.cargo/config.toml`:
@@ -118,7 +118,7 @@ consumer CI.
 Set up the minimal policy files in the repository that will use the gate:
 
 ```bash
-cargo barbican policy init
+cargo barbican policy init --toolchain 1.95.0
 ```
 
 Then follow the manual adoption guide to review current dependencies, create
@@ -132,23 +132,28 @@ fails closed with an install hint:
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
+The execution gates also require `rustup` on `PATH`; the native toolchain file
+is rustup policy, and an installation that provides only `cargo`, `rustc`, and `rustdoc`
+cannot establish the active-toolchain fact.
+
 When policy is ready, run the standard pre-release gate:
 
 ```bash
 cargo barbican gatehouse pre-release
 ```
 
-`gatehouse pre-release` first applies the direct-dependency coverage floor,
-blocking uncovered crates.io dependencies and unsupported external direct
-sources. It then runs the blocking advisory/source-policy `audit` and the
-blocking `verify` sequence: reviewed-target policy plus locked build/test
-verification.
+`gatehouse pre-release` first proves that the repo has an exact
+`rust-toolchain.toml` pin and that the active rustup, Cargo, rustc, and rustdoc versions
+conform to it. `policy init` creates that file with rustup's `minimal` profile
+and reports the profile choice. It then applies the direct-dependency coverage floor, runs the
+blocking advisory/source-policy `audit`, and runs the blocking `verify`
+sequence: reviewed-target policy plus locked build/test verification.
 
 `cargo barbican audit` and `cargo barbican verify` together are the
 enforcement gate: they stay two separate commands because their verdicts
-depend on different things. `verify`'s verdict is a pure function of the
-repo — the same manifests, lockfile, and reviewed-target policy always
-produce the same result, so it is deterministic and reproducible. `audit`'s
+depend on different things. `verify` first confirms that the active compiler
+toolchain conforms to the repo's exact pin, then applies deterministic repo
+policy and locked build/test steps. `audit`'s
 verdict also depends on the advisory landscape at the moment it runs — a new
 RustSec advisory can flip `audit` from PASS to FAIL with no repo change at
 all. Keeping them separate as primitives lets CI schedule `audit`
@@ -253,14 +258,19 @@ for the exact flags.
 
 ### Enforce the final gate
 
-The standard pre-release gate composes the blocking inventory coverage floor,
-`audit`, and `verify`:
+The standard pre-release gate composes toolchain conformance, the blocking
+inventory coverage floor, `audit`, and `verify`:
 
 ```bash
 cargo barbican gatehouse pre-release
 ```
 
-The inventory step applies the same direct-dependency floor as standalone
+The toolchain step requires an exact stable release, numbered beta prerelease, or
+dated nightly in `rust-toolchain.toml`; rejects legacy `rust-toolchain`,
+Cargo toolchain-executable controls, and unverifiable tool state; and proves the
+active rustup, Cargo, rustc, and rustdoc releases agree. This is an executable-identity
+gate, not binary-provenance attestation or a sandbox for Cargo's wider build
+execution surface. The inventory step applies the same direct-dependency floor as standalone
 `inventory --enforce`. `audit` runs the delegated advisory and deny checks and owns their combined
 pass/fail verdict. `verify` requires a repo-root `reviewed-targets.toml` with
 at least one active reviewed family, runs the default reviewed-target policy
@@ -282,6 +292,8 @@ The main files, all documented in the
 - [`reviewed-targets.toml`](docs/user/configuration.md) — active reviewed dependency families and exact resolved targets
 - [`docs/dependency-reviews/`](docs/user/configuration.md) — checked-in human review records
 - [`deny.toml`](docs/user/configuration.md) — native `cargo-deny` policy, delegated rather than redefined
+- `rust-toolchain.toml` — exact Rust toolchain input required by `verify` and
+  `gatehouse pre-release`
 
 The current tool is Rust-only. It intentionally stays above specialist Rust
 tools instead of becoming a cross-ecosystem package-management framework.

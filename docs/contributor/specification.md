@@ -190,6 +190,12 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   or generate active reviewed families
 - template-backed: it writes the shipped `barbican.toml`, `deny.toml`,
   `reviewed-targets.toml`, and dependency-review README templates when absent
+- toolchain-explicit: it validates an existing `rust-toolchain.toml`, creates
+  one only from `--toolchain <exact-channel>`, and does not emit CI scaffolding
+  while the exact compiler pin is absent or invalid
+- explicit about generated rustup policy: a created toolchain file uses
+  `profile = "minimal"`, and the init report names that profile rather than
+  silently narrowing the installed component set
 - advisory-owned: the shipped `deny.toml` carries a normal `[advisories]`
   table for direct cargo-deny use plus bans/sources posture; `cargo barbican
   audit` still forces maximum disclosure and never derives authorisation from
@@ -199,6 +205,43 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   closed
 - adoption-guidance oriented: successful output points operators to the manual
   adoption guide before `pin check` / `verify`
+
+`cargo barbican verify` and `gatehouse pre-release` are toolchain-gated:
+
+- `rust-toolchain.toml` is required and must name a full stable release, exact
+  numbered beta prerelease (for example `1.96.0-beta.2`), or dated nightly;
+  bare versioned beta channels, floating channels, custom/path toolchains,
+  legacy `rust-toolchain` shadowing, and symlinked policy files fail closed
+- the gate compares the active rustup toolchain with verbose Cargo, rustc, and
+  rustdoc release/host facts before any dependency-policy or build/test delegate runs
+- the documented Cargo Rust-toolchain executable environment variables
+  (`RUSTC`, `CARGO_BUILD_RUSTC`, `RUSTC_WRAPPER`,
+  `CARGO_BUILD_RUSTC_WRAPPER`, `RUSTC_WORKSPACE_WRAPPER`, and
+  `CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER`, plus `RUSTDOC` and
+  `CARGO_BUILD_RUSTDOC`), effective hierarchical Cargo
+  `[build].rustc`, `[build].rustc-wrapper`,
+  `[build].rustc-workspace-wrapper`, `[build].rustdoc`, and indirect Cargo
+  config includes fail closed because they prevent the pinned toolchain facts
+  from being established
+- inability to resolve the user-level Cargo config location from `CARGO_HOME`
+  or `HOME` also fails closed rather than being treated as verified clean
+- repo and ancestor Cargo config files retain the policy-file symlink refusal;
+  a Cargo-home config may itself be a symlink only when Cargo home and its
+  target both resolve outside the workspace, and the target is a readable
+  regular file; a repo-local `CARGO_HOME` retains the repository refusal
+- a dated nightly's exact date is established from rustup's active-toolchain
+  identity; Cargo, rustc, and rustdoc must then agree on the verbose nightly
+  release and host that those tools actually report
+- Gatehouse performs the toolchain preflight once as its first blocking step;
+  standalone `verify` performs the same preflight itself, and nested verify
+  requires the resulting completed-preflight evidence
+- this gate establishes Rust toolchain executable identity, not binary
+  provenance or a sandbox for every executable Cargo may invoke. `RUSTUP_HOME`
+  remains an allowed installation-location control, and target runners,
+  linkers, rustflags, and Cargo `[env]` configuration remain ordinary
+  build/test inputs. The later Cargo build and test delegates execute under
+  Cargo's normal semantics and must run only after dependency review makes
+  that execution acceptable
 
 `cargo barbican inventory` is currently:
 

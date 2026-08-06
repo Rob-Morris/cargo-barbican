@@ -172,12 +172,15 @@ serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcd
 }
 
 fn run_pin_check(temp_dir: &Path) -> (ExitCode, String) {
+    run_pin_check_with_runner(temp_dir, &FakeCommandRunner::default())
+}
+
+fn run_pin_check_with_runner(temp_dir: &Path, runner: &FakeCommandRunner) -> (ExitCode, String) {
     let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
     let client = FakeCratesIoClient::default();
-    let runner = FakeCommandRunner::default();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    let exit = run_cli_with_runner(cli, temp_dir, &client, &runner, &mut stdout, &mut stderr)
+    let exit = run_cli_with_runner(cli, temp_dir, &client, runner, &mut stdout, &mut stderr)
         .expect("pin check should run");
     (
         exit,
@@ -603,6 +606,146 @@ registry = "https://internal.example/index"
     assert!(rendered.contains("Pin check: FAIL"));
     assert!(rendered.contains("source replacement detected"));
     assert!(rendered.contains(".cargo/config.toml"));
+}
+
+#[test]
+fn pin_check_fails_when_cargo_config_includes_unknown_source_policy() {
+    let temp_dir = fresh_temp_dir();
+    write_serde_reviewed_fixture(&temp_dir);
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+    fs::create_dir(temp_dir.join(".cargo")).expect(".cargo directory should create");
+    fs::write(
+        temp_dir.join(".cargo/config.toml"),
+        "include = ['shared.toml']\n",
+    )
+    .expect("cargo config should write");
+
+    let (exit_code, rendered) = run_pin_check(&temp_dir);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(rendered.contains("source replacement detected"));
+    assert!(rendered.contains("top-level `include` key"));
+}
+
+#[test]
+fn pin_check_fails_on_source_policy_in_an_ancestor_cargo_config() {
+    let temp_dir = fresh_temp_dir();
+    let workspace = temp_dir.join("nested/workspace");
+    fs::create_dir_all(&workspace).expect("workspace should create");
+    write_serde_reviewed_fixture(&workspace);
+    write_review_record(&workspace, "docs/dependency-reviews/2026-05-27-serde.md");
+    fs::create_dir_all(temp_dir.join("nested/.cargo")).expect("cargo config dir should create");
+    fs::write(
+        temp_dir.join("nested/.cargo/config.toml"),
+        "[source.crates-io]\nreplace-with = 'internal'\n",
+    )
+    .expect("ancestor cargo config should write");
+
+    let (exit_code, rendered) = run_pin_check(&workspace);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(rendered.contains("source replacement detected"));
+    assert!(rendered.contains("nested/.cargo/config.toml"));
+}
+
+#[test]
+fn pin_check_fails_on_source_policy_in_cargo_home_config() {
+    let temp_dir = fresh_temp_dir();
+    let cargo_home = temp_dir.join("operator-cargo-home");
+    write_serde_reviewed_fixture(&temp_dir);
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+    fs::create_dir_all(&cargo_home).expect("cargo home should create");
+    fs::write(
+        cargo_home.join("config.toml"),
+        "[source.crates-io]\nreplace-with = 'internal'\n",
+    )
+    .expect("cargo-home config should write");
+    let runner = FakeCommandRunner::default().with_environment(
+        "CARGO_HOME",
+        cargo_home.to_str().expect("test path should be utf8"),
+    );
+
+    let (exit_code, rendered) = run_pin_check_with_runner(&temp_dir, &runner);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(rendered.contains("source replacement detected"));
+    assert!(rendered.contains("operator-cargo-home/config.toml"));
+}
+
+#[cfg(unix)]
+#[test]
+fn pin_check_fails_on_source_policy_through_a_cargo_home_config_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = fresh_temp_dir();
+    let workspace = temp_dir.join("workspace");
+    let cargo_home = temp_dir.join("operator-cargo-home");
+    fs::create_dir_all(&workspace).expect("workspace should create");
+    write_serde_reviewed_fixture(&workspace);
+    write_review_record(&workspace, "docs/dependency-reviews/2026-05-27-serde.md");
+    fs::create_dir_all(&cargo_home).expect("cargo home should create");
+    fs::write(
+        cargo_home.join("shared.toml"),
+        "[source.crates-io]\nreplace-with = 'internal'\n",
+    )
+    .expect("shared cargo-home config should write");
+    symlink("shared.toml", cargo_home.join("config.toml"))
+        .expect("cargo-home config symlink should create");
+    let runner = FakeCommandRunner::default().with_environment(
+        "CARGO_HOME",
+        cargo_home.to_str().expect("test path should be utf8"),
+    );
+
+    let (exit_code, rendered) = run_pin_check_with_runner(&workspace, &runner);
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(rendered.contains("source replacement detected"));
+    assert!(rendered.contains("operator-cargo-home/config.toml"));
+}
+
+#[test]
+fn pin_check_fails_closed_when_cargo_home_cannot_be_established() {
+    let temp_dir = fresh_temp_dir();
+    write_serde_reviewed_fixture(&temp_dir);
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+    let runner = FakeCommandRunner::default()
+        .without_environment("CARGO_HOME")
+        .without_environment("HOME");
+    let cli = Cli::parse_from(["cargo-barbican", "pin", "check"]);
+    let client = FakeCratesIoClient::default();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should report the policy failure");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("unable to establish Cargo home")
+    );
+}
+
+#[test]
+fn pin_check_uses_extensionless_cargo_config_precedence() {
+    let temp_dir = fresh_temp_dir();
+    write_serde_reviewed_fixture(&temp_dir);
+    write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
+    fs::create_dir(temp_dir.join(".cargo")).expect(".cargo directory should create");
+    fs::write(temp_dir.join(".cargo/config"), "[net]\nretry = 2\n")
+        .expect("effective cargo config should write");
+    fs::write(
+        temp_dir.join(".cargo/config.toml"),
+        "[source.crates-io]\nreplace-with = 'ignored'\n",
+    )
+    .expect("shadowed cargo config should write");
+
+    let (exit_code, rendered) = run_pin_check(&temp_dir);
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(rendered.contains("Pin check: PASS"));
+    assert!(!rendered.contains("source replacement detected"));
 }
 
 #[test]

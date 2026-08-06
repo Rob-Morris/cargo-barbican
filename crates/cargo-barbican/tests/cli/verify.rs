@@ -7,6 +7,7 @@ fn verify_fails_when_reviewed_targets_manifest_is_absent() {
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -14,7 +15,11 @@ fn verify_fails_when_reviewed_targets_manifest_is_absent() {
         .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::from(1));
-    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stdout)
+            .expect("stdout should be utf8")
+            .contains("Toolchain check: PASS")
+    );
     assert!(
         String::from_utf8(stderr)
             .expect("stderr should be utf8")
@@ -30,6 +35,7 @@ fn verify_runs_pin_check_before_build_and_test() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -104,6 +110,7 @@ fn verify_fails_closed_when_no_active_reviewed_families_are_configured() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -127,7 +134,11 @@ fn verify_fails_closed_when_no_active_reviewed_families_are_configured() {
         .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::from(1));
-    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stdout)
+            .expect("stdout should be utf8")
+            .contains("Toolchain check: PASS")
+    );
     assert!(String::from_utf8(stderr).expect("stderr should be utf8").contains(
         "FAIL reviewed-targets.toml: no active Rust reviewed families; verify requires at least one"
     ));
@@ -141,6 +152,7 @@ fn verify_stops_before_build_on_reviewed_target_drift() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -189,6 +201,7 @@ fn verify_stops_before_build_on_an_unreviewed_scaffold_record() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -255,6 +268,7 @@ fn verify_stops_before_build_when_a_patch_table_targets_a_reviewed_crate() {
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let checksum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

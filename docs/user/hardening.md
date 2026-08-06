@@ -55,12 +55,12 @@ diff:
   crate fails closed, and the detection resolves the
   `alias = { package = "real-crate", ... }` rename form to the real package
   name, so aliasing the patch does not hide it.
-- **Repo-root `.cargo/config.toml` source overrides.** While any reviewed
-  family is active, the mere presence of a `[source]` table, a config-defined
-  `[patch]` table, or a top-level `paths` override in the repo-root
-  `.cargo/config.toml` (or legacy `.cargo/config`) fails `pin check` — each of
-  these can repoint a reviewed crate away from crates.io, or substitute local
-  source code for it, without any change to `Cargo.toml` or `Cargo.lock`.
+- **Repo-root Cargo-config source controls.** While any reviewed family is
+  active, an `include`, `[source]` table, config-defined `[patch]` table, or
+  top-level `paths` override in the effective repo-root `.cargo/config` or
+  `.cargo/config.toml` fails `pin check` — each can or may repoint a reviewed
+  crate away from crates.io, or substitute local source code for it, without
+  any change to `Cargo.toml` or `Cargo.lock`.
 - **Ungoverned advisory ignores are neutralised during `audit`.** `audit`
   never runs `cargo-deny` against your `deny.toml` directly: it generates a
   runtime config that forces the `[advisories]` section with an empty `ignore`
@@ -126,6 +126,7 @@ to weaken the gate. A worked GitHub example (`.github/CODEOWNERS`):
 /barbican.toml                            @your-org/dependency-policy
 /reviewed-targets.toml                    @your-org/dependency-policy
 /deny.toml                                @your-org/dependency-policy
+/rust-toolchain.toml                      @your-org/dependency-policy
 /docs/dependency-reviews/                 @your-org/dependency-policy
 /.cargo/                                  @your-org/dependency-policy
 /.github/CODEOWNERS                       @your-org/dependency-policy
@@ -137,6 +138,8 @@ Notes on the entries:
 - `/.cargo/` is on the list because a repo-root cargo config can repoint
   sources; `pin check` fails closed on the dangerous keys, but the file's
   diff should still reach a policy owner.
+- `rust-toolchain.toml` is on the list because it selects the Rust toolchain
+  executables that `verify` and Gatehouse prove before execution.
 - The CI workflow file and `CODEOWNERS` itself are on the list because
   weakening either is equivalent to weakening the gate.
 - `Cargo.toml` and `Cargo.lock` are deliberately absent: they change with
@@ -159,7 +162,7 @@ a workflow that merely runs is advisory.
 
 `cargo barbican review` renders exactly the policy-relevant diff — root and
 member `Cargo.toml` files, `Cargo.lock`, `barbican.toml`, `deny.toml`,
-`reviewed-targets.toml`, and the review records — with a checklist above it.
+`reviewed-targets.toml`, `rust-toolchain.toml`, and the review records — with a checklist above it.
 Use it as the reviewer's lens on any pull request that touches the policy
 surface, so a one-line change to `reviewed-targets.toml` buried in a large
 diff is not missed.

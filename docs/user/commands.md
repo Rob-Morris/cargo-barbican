@@ -23,7 +23,7 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican resolve` | Base action | Generate `Cargo.lock` for current manifests under release-age policy. |
 | `cargo barbican update` | Base action | Update existing locked dependencies to exact versions. |
 | `cargo barbican assess` | Base assessment | Classify a dependency diff. |
-| `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption; `--ci github` also emits the CI workflow. |
+| `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption; `--toolchain` creates an absent exact native pin and `--ci github` also emits the CI workflow. |
 | `cargo barbican inventory` | Base audit / gate | Report dependency inventory and reviewed-policy coverage; `--enforce` gates direct-dependency coverage. |
 | `cargo barbican pin add` | Policy management | Scaffold a reviewed family and review-record stub from `Cargo.lock`. |
 | `cargo barbican pin exception` | Policy management | Scaffold a governed, checksum-bound acceptance of a RustSec advisory finding. |
@@ -54,7 +54,8 @@ For exact parser rules and behaviour contracts, see
   in this sense, even where they also exit non-zero on failure.
 - **Gatehouse** — the workflow namespace. `gatehouse candidate` assembles a
   pre-add dossier for an exact crates.io release; `gatehouse pre-release`
-  composes the standard whole-repo inventory, audit, and verify sequence.
+  composes the standard whole-repo toolchain, inventory, audit, and verify
+  sequence.
 - **Surface** — an execution surface a dependency's code runs through:
   `build-rs` (build scripts), `proc-macro`, or `native-sys` (native linking
   and FFI). Declared per crate under a family's `allowed_surfaces`.
@@ -74,7 +75,7 @@ For exact parser rules and behaviour contracts, see
 Create the minimal policy scaffold:
 
 ```bash
-cargo barbican policy init
+cargo barbican policy init --toolchain 1.95.0
 ```
 
 Then follow [adoption.md](adoption.md) to manually review current
@@ -401,12 +402,14 @@ Runs the standard whole-repo pre-release supply-chain gate:
 cargo barbican gatehouse pre-release
 ```
 
-It runs blocking `inventory --enforce`, then blocking `audit`, then blocking
-`verify`. Uncovered transitive packages and undeclared execution surfaces stay
-visible as observational backlog, while a direct coverage-floor failure stops
-before audit. `verify` already includes the default `pin check`, so Gatehouse
-does not run it twice. The workflow fails fast, names the failed primitive,
-and ends with `Gatehouse pre-release: PASS` only when all three gates pass.
+It first proves exact toolchain conformance, then runs blocking `inventory
+--enforce`, blocking `audit`, and blocking `verify`. A missing, floating, or
+non-conforming compiler pin stops before dependency inventory. Uncovered
+transitive packages and undeclared execution surfaces stay visible as
+observational backlog, while a direct coverage-floor failure stops before
+audit. `verify` already includes the default `pin check`, so Gatehouse does not
+run it twice. The workflow fails fast, names the failed primitive, and ends
+with `Gatehouse pre-release: PASS` only when all four gates pass.
 
 ### `candidate`
 
@@ -594,7 +597,7 @@ separate policy semantics.
 
 Currently supported workflows:
 
-- `pre-release` - whole-repo inventory, audit, and verify workflow
+- `pre-release` - whole-repo toolchain, inventory, audit, and verify workflow
 - `candidate` - pre-add intake dossier for one exact crates.io candidate
 
 ### `cargo barbican resolve`
@@ -706,7 +709,7 @@ It is not a permanent policy exception.
 Creates the explicit policy scaffold for adopting cargo-barbican.
 
 ```bash
-cargo barbican policy init [--ci <system>]
+cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>]
 ```
 
 The command creates missing files:
@@ -716,6 +719,8 @@ The command creates missing files:
 - `reviewed-targets.toml`
 - `docs/dependency-reviews/`
 - `docs/dependency-reviews/README.md`
+- `rust-toolchain.toml` only when it is absent and an exact `--toolchain`
+  value is supplied
 
 It preserves existing regular files, validates existing `barbican.toml`, and
 fails closed on wrong-type scaffold paths or ancestors such as directories in
@@ -723,6 +728,15 @@ file positions and symlinks that would otherwise be followed. The generated
 `deny.toml` carries the non-advisory `cargo-deny` bans/sources posture only;
 it does not contain `[advisories]`, because `cargo barbican audit` forces the
 advisory section at runtime.
+
+An existing `rust-toolchain.toml` is validated and preserved. Without an
+existing valid pin, init reports the item blocked until the operator supplies
+a full stable release, numbered beta prerelease such as `1.96.0-beta.2`, or
+dated nightly. A created file uses rustup's `minimal` profile and the action
+report states that choice. Bare versioned beta channels remain moving inputs
+and are rejected. Conflicting
+requested and existing pins are never reconciled automatically. `--ci` output
+is also blocked until the toolchain pin is valid.
 
 The output reports each scaffold item as created, already present, or blocked.
 On success it points to the manual adoption guide. Init is intentionally not a
@@ -733,15 +747,16 @@ certify existing dependencies.
 only supported value is `github`:
 
 ```bash
-cargo barbican policy init --ci github
+cargo barbican policy init --toolchain 1.95.0 --ci github
 ```
 
 This writes `.github/workflows/barbican.yml`: a single fail-closed gate job (on
 pull requests and pushes to `main`) that installs the tooling with `--locked`,
 pins its third-party actions by commit SHA, and runs `gatehouse pre-release`
-plus `age-lock` and `assess` against the pull-request base. Gatehouse owns the
-blocking inventory coverage floor. The flag is independent of the base
-scaffold and of `barbican.toml` validity. Unlike the idempotent base scaffold, an existing
+plus `age-lock` and `assess` against the pull-request base. Gatehouse owns
+toolchain conformance and the blocking inventory coverage floor. The flag is
+independent of `barbican.toml` validity but requires a valid exact toolchain
+pin. Unlike the idempotent base scaffold, an existing
 `.github/workflows/barbican.yml` is never overwritten: the command fails closed
 (exit `1`), reports the path as blocked, and re-prints the intended workflow so
 the difference can be reconciled by hand.
@@ -975,8 +990,9 @@ Checks include:
   and require structured `checksum_sha256` entries
 - no workspace manifest `[patch]` table (any registry key) targets a crate
   covered by an active reviewed family
-- no repo-root `.cargo/config.toml` / `.cargo/config` declares a `[source]`,
-  `[patch]`, or top-level `paths` table while a reviewed family is active
+- no effective `.cargo/config.toml` / `.cargo/config` from the workspace root,
+  its ancestors, or Cargo home declares an indirect include, `[source]`,
+  `[patch]`, or top-level `paths` key while a reviewed family is active
 
 Standalone `pin check` skips successfully when no reviewed-target manifest is
 present or no active Rust families are configured. `verify` is stricter and
@@ -1078,13 +1094,9 @@ cargo barbican verify
 
 Use this before commit and in local CI-equivalent checks.
 
-It runs, in order:
-
-```bash
-cargo barbican pin check
-cargo build --locked
-cargo test --locked
-```
+It first proves exact `rust-toolchain.toml`, rustup, Cargo, rustc, and rustdoc
+conformance. It then runs, in order, the default `pin check`, `cargo build
+--locked`, and `cargo test --locked`.
 
 `verify` requires explicit reviewed-target policy. Unlike standalone
 `pin check`, it fails closed when `reviewed-targets.toml` is absent, not a
@@ -1108,14 +1120,15 @@ enforcement gate a repo runs before trusting its dependency state. They are
 kept as two separate commands rather than merged into one because their
 verdicts depend on different things:
 
-- `verify`'s verdict is a pure function of the repo: the same manifests,
-  lockfile, and reviewed-target policy always produce the same result. It is
-  deterministic and reproducible.
+- after the active Rust toolchain conforms to the exact native pin, `verify`'s
+  reviewed-target verdict is a function of the repo. The overall command also
+  fails when machine toolchain facts or locked build/test execution diverge.
 - `audit`'s verdict also depends on the advisory landscape at the moment it
   runs. A new RustSec advisory against an already-locked crate can flip
   `audit` from PASS to FAIL with no repo change at all.
 
 Run them directly when you need independent scheduling or diagnostics. For the
 standard release path, `cargo barbican gatehouse pre-release` composes them
-without merging their semantics and applies the blocking inventory coverage
-floor first. See [ci.md](ci.md) for the scheduled-audit pattern.
+without merging their semantics and applies toolchain conformance plus the
+blocking inventory coverage floor first. See [ci.md](ci.md) for the
+scheduled-audit pattern.

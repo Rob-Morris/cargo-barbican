@@ -1,8 +1,93 @@
 use super::common::*;
 
 #[test]
+fn policy_init_requires_an_explicit_toolchain_decision() {
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--ci", "github"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(temp_dir.join("barbican.toml").exists());
+    assert!(!temp_dir.join("rust-toolchain.toml").exists());
+    assert!(!temp_dir.join(".github/workflows/barbican.yml").exists());
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains(
+        "- rust-toolchain.toml: blocked (missing; rerun with --toolchain <exact-channel>"
+    ));
+    assert!(rendered.contains(
+        "- .github/workflows/barbican.yml: blocked (requires a valid exact rust-toolchain.toml pin)"
+    ));
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn policy_init_uses_an_existing_valid_pin_for_ci_without_requiring_the_flag_again() {
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--ci", "github"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    write_toolchain_pin(&temp_dir);
+    let original_pin = fs::read_to_string(temp_dir.join("rust-toolchain.toml"))
+        .expect("toolchain pin should exist");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(temp_dir.join(".github/workflows/barbican.yml").exists());
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("rust-toolchain.toml"))
+            .expect("toolchain pin should remain"),
+        original_pin
+    );
+    assert!(
+        String::from_utf8(stdout)
+            .unwrap()
+            .contains("rust-toolchain.toml: already present")
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn policy_init_refuses_to_replace_a_conflicting_toolchain_pin() {
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.96.0"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default();
+    let temp_dir = fresh_temp_dir();
+    write_root_manifest(&temp_dir);
+    write_toolchain_pin(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    assert!(
+        String::from_utf8(stdout)
+            .expect("stdout should be utf8")
+            .contains("pins 1.95.0; refusing requested conflicting pin 1.96.0")
+    );
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("rust-toolchain.toml")).expect("toolchain should remain"),
+        "[toolchain]\nchannel = \"1.95.0\"\nprofile = \"minimal\"\n"
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
 fn policy_init_creates_minimal_scaffold_and_next_steps() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -14,6 +99,11 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
         .expect("command should run");
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert_eq!(
+        fs::read_to_string(temp_dir.join("rust-toolchain.toml"))
+            .expect("toolchain pin should exist"),
+        "[toolchain]\nchannel = \"1.95.0\"\nprofile = \"minimal\"\n"
+    );
     assert_eq!(
         fs::read_to_string(temp_dir.join("barbican.toml")).expect("config should exist"),
         include_str!("../../../../templates/barbican.toml")
@@ -35,6 +125,9 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
 
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("- barbican.toml: created\n"));
+    assert!(rendered.contains(
+        "- rust-toolchain.toml: created (exact channel 1.95.0; rustup profile minimal)\n"
+    ));
     assert!(rendered.contains("- deny.toml: created\n"));
     assert!(rendered.contains("- reviewed-targets.toml: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews: created\n"));
@@ -48,7 +141,7 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
 
 #[test]
 fn policy_init_without_ci_does_not_emit_workflow() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -69,7 +162,15 @@ fn policy_init_without_ci_does_not_emit_workflow() {
 
 #[test]
 fn policy_init_ci_github_emits_enforcement_workflow() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--ci", "github"]);
+    let cli = Cli::parse_from([
+        "cargo-barbican",
+        "policy",
+        "init",
+        "--toolchain",
+        "1.95.0",
+        "--ci",
+        "github",
+    ]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -109,7 +210,7 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     );
     assert!(!workflow.contains("cargo barbican inventory --enforce"));
     assert!(workflow.contains("cargo install --locked"));
-    assert!(workflow.contains("--tag v0.27.0"));
+    assert!(workflow.contains("--tag v0.28.0"));
     assert!(workflow.contains("cargo-deny@0.19.6"));
     assert!(workflow.contains("cargo-audit@0.22.1"));
     assert!(
@@ -135,7 +236,15 @@ fn policy_init_ci_github_fails_closed_on_existing_workflow() {
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
 
-    let first = Cli::parse_from(["cargo-barbican", "policy", "init", "--ci", "github"]);
+    let first = Cli::parse_from([
+        "cargo-barbican",
+        "policy",
+        "init",
+        "--toolchain",
+        "1.95.0",
+        "--ci",
+        "github",
+    ]);
     let mut first_stdout = Vec::new();
     let mut first_stderr = Vec::new();
     let first_exit = run_cli_with_runner(
@@ -153,7 +262,15 @@ fn policy_init_ci_github_fails_closed_on_existing_workflow() {
     let created =
         fs::read_to_string(&workflow_path).expect("workflow should exist after first run");
 
-    let second = Cli::parse_from(["cargo-barbican", "policy", "init", "--ci", "github"]);
+    let second = Cli::parse_from([
+        "cargo-barbican",
+        "policy",
+        "init",
+        "--toolchain",
+        "1.95.0",
+        "--ci",
+        "github",
+    ]);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let second_exit = run_cli_with_runner(
@@ -192,7 +309,7 @@ fn policy_init_is_idempotent_for_existing_regular_scaffold() {
     write_root_manifest(&temp_dir);
 
     for _ in 0..2 {
-        let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+        let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let exit_code =
@@ -203,7 +320,7 @@ fn policy_init_is_idempotent_for_existing_regular_scaffold() {
         assert!(stderr.is_empty());
     }
 
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
@@ -221,7 +338,7 @@ fn policy_init_is_idempotent_for_existing_regular_scaffold() {
 
 #[test]
 fn policy_init_preserves_existing_regular_deny_toml() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -246,7 +363,7 @@ fn policy_init_preserves_existing_regular_deny_toml() {
 
 #[test]
 fn policy_init_validates_existing_reviewed_targets_policy() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -267,7 +384,7 @@ fn policy_init_validates_existing_reviewed_targets_policy() {
 
 #[test]
 fn policy_init_reports_malformed_existing_reviewed_targets_policy() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -291,7 +408,7 @@ fn policy_init_reports_malformed_existing_reviewed_targets_policy() {
 
 #[test]
 fn policy_init_escapes_malformed_reviewed_targets_parse_diagnostics() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -318,7 +435,7 @@ fn policy_init_escapes_malformed_reviewed_targets_parse_diagnostics() {
 
 #[test]
 fn policy_init_reports_malformed_config_without_creating_dependent_scaffold() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -345,7 +462,7 @@ fn policy_init_reports_malformed_config_without_creating_dependent_scaffold() {
 
 #[test]
 fn policy_init_escapes_malformed_config_parse_diagnostics() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -374,7 +491,7 @@ fn policy_init_escapes_malformed_config_parse_diagnostics() {
 
 #[test]
 fn policy_init_escapes_unicode_line_separators_in_parse_diagnostics() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -400,7 +517,7 @@ fn policy_init_escapes_unicode_line_separators_in_parse_diagnostics() {
 
 #[test]
 fn policy_init_fails_closed_on_wrong_type_scaffold_paths() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -426,7 +543,7 @@ fn policy_init_fails_closed_on_wrong_type_scaffold_paths() {
 #[cfg(unix)]
 #[test]
 fn policy_init_fails_closed_on_symlinked_policy_paths() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -457,7 +574,7 @@ fn policy_init_fails_closed_on_symlinked_policy_paths() {
 #[cfg(unix)]
 #[test]
 fn policy_init_does_not_write_through_symlinked_review_directory() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
@@ -488,7 +605,7 @@ fn policy_init_does_not_write_through_symlinked_review_directory() {
 #[cfg(unix)]
 #[test]
 fn policy_init_does_not_write_through_symlinked_scaffold_ancestors() {
-    let cli = Cli::parse_from(["cargo-barbican", "policy", "init"]);
+    let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--toolchain", "1.95.0"]);
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();

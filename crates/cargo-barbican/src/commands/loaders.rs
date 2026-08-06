@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use barbican::{
     BarbicanConfig, ExactCrateSpec, ReviewRecordFact, ReviewRecordStatus,
@@ -19,7 +19,7 @@ use crate::crates_io_http::{CRATES_IO_BASE_URL_ENV, DEFAULT_CRATES_IO_BASE_URL};
 use super::CommandError;
 
 const CONFIG_FILE_NAME: &str = "barbican.toml";
-const CARGO_CONFIG_CANDIDATE_PATHS: [&str; 2] = [".cargo/config.toml", ".cargo/config"];
+const CARGO_CONFIG_FILE_NAMES: [&str; 2] = ["config", "config.toml"];
 
 pub(crate) fn load_config(current_dir: &Path) -> Result<BarbicanConfig, CommandError> {
     match read_optional_text_no_symlink(current_dir, Path::new(CONFIG_FILE_NAME)) {
@@ -36,20 +36,132 @@ pub(crate) fn read_optional_text_no_symlink(
     root_dir: &Path,
     relative_path: &Path,
 ) -> io::Result<Option<String>> {
-    let path = root_dir.join(relative_path);
-    match fs::symlink_metadata(&path) {
+    read_optional_text_path_no_symlink(&root_dir.join(relative_path))
+}
+
+pub(crate) fn read_optional_text_path_no_symlink(path: &Path) -> io::Result<Option<String>> {
+    match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(io::Error::other(format!(
             "{} is a symlink; refusing to read optional policy text",
-            relative_path.display()
+            path.display()
         ))),
         Ok(metadata) if metadata.is_file() => fs::read_to_string(path).map(Some),
         Ok(_) => Err(io::Error::other(format!(
             "{} is not a regular file",
-            relative_path.display()
+            path.display()
         ))),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+pub(crate) fn effective_cargo_config_path(config_dir: &Path) -> io::Result<Option<PathBuf>> {
+    for file_name in CARGO_CONFIG_FILE_NAMES {
+        let path = config_dir.join(file_name);
+        match fs::symlink_metadata(&path) {
+            Ok(_) => return Ok(Some(path)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Debug)]
+pub(crate) struct EffectiveCargoConfig {
+    pub(crate) display_path: String,
+    pub(crate) text: String,
+}
+
+/// Loads the same effective hierarchical config files Cargo sees from the
+/// workspace root through its ancestors, followed by Cargo home. Repository
+/// policy files retain the no-symlink rule; a Cargo-home file may be a symlink
+/// only when Cargo home and the resolved file both stay outside the workspace
+/// trust boundary.
+pub(crate) fn load_effective_cargo_configs(
+    current_dir: &Path,
+    cargo_home: &Path,
+) -> Result<Vec<EffectiveCargoConfig>, CommandError> {
+    let mut config_dirs = current_dir
+        .ancestors()
+        .map(|ancestor| ancestor.join(".cargo"))
+        .collect::<Vec<_>>();
+    let cargo_home = if cargo_home.is_absolute() {
+        cargo_home.to_path_buf()
+    } else {
+        current_dir.join(cargo_home)
+    };
+    if !config_dirs.contains(&cargo_home) {
+        config_dirs.push(cargo_home.clone());
+    }
+
+    let mut configs = Vec::new();
+    for config_dir in config_dirs {
+        let Some(path) = effective_cargo_config_path(&config_dir).map_err(|source| {
+            CommandError::CargoConfigRead {
+                path: config_dir.display().to_string(),
+                source,
+            }
+        })?
+        else {
+            continue;
+        };
+        let display_path = path
+            .strip_prefix(current_dir)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        let is_operator_owned_cargo_home = config_dir == cargo_home
+            && cargo_home_is_outside_workspace(current_dir, &config_dir).map_err(|source| {
+                CommandError::CargoConfigRead {
+                    path: display_path.clone(),
+                    source,
+                }
+            })?;
+        let text_result = if is_operator_owned_cargo_home {
+            read_external_cargo_home_config_text(current_dir, &path)
+        } else {
+            read_optional_text_path_no_symlink(&path).and_then(|text| {
+                text.ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "effective Cargo config disappeared",
+                    )
+                })
+            })
+        };
+        let text = text_result.map_err(|source| CommandError::CargoConfigRead {
+            path: display_path.clone(),
+            source,
+        })?;
+        configs.push(EffectiveCargoConfig { display_path, text });
+    }
+    Ok(configs)
+}
+
+fn cargo_home_is_outside_workspace(current_dir: &Path, cargo_home: &Path) -> io::Result<bool> {
+    let workspace = fs::canonicalize(current_dir)?;
+    let cargo_home = fs::canonicalize(cargo_home)?;
+    Ok(!cargo_home.starts_with(workspace))
+}
+
+fn read_external_cargo_home_config_text(current_dir: &Path, path: &Path) -> io::Result<String> {
+    let workspace = fs::canonicalize(current_dir)?;
+    let resolved_path = fs::canonicalize(path)?;
+    if resolved_path.starts_with(workspace) {
+        return Err(io::Error::other(format!(
+            "{} resolves inside the workspace; refusing to follow Cargo-home config symlink",
+            path.display()
+        )));
+    }
+    let metadata = fs::metadata(&resolved_path)?;
+    if !metadata.is_file() {
+        return Err(io::Error::other(format!(
+            "{} does not resolve to a regular file",
+            path.display()
+        )));
+    }
+    fs::read_to_string(resolved_path)
 }
 
 pub(crate) fn crates_io_base_url() -> Result<String, CommandError> {
@@ -390,39 +502,29 @@ pub(crate) fn load_manifest_patched_crate_names(
     Ok(patched)
 }
 
-/// Detects repo-root `.cargo/config.toml` (or legacy `.cargo/config`)
-/// top-level `source`, `patch`, or `paths` keys. Cargo source replacement,
+/// Detects `include`, `source`, `patch`, or `paths` keys across Cargo's
+/// already-loaded effective hierarchical configuration. Cargo source replacement,
 /// config-defined patching, and path overrides can each silently repoint a
 /// reviewed crate name at a non-crates.io source without touching
-/// `Cargo.toml` or `Cargo.lock`, so the mere presence of any of these keys
-/// is reported as a fail-closed finding while any reviewed family is
-/// active. This only inspects the repo-root file; hierarchical cargo config
-/// in parent directories or `CARGO_HOME` is a documented residual boundary.
+/// `Cargo.toml` or `Cargo.lock`; an include makes that source effect unknown.
+/// The mere presence of any of these keys is reported as a fail-closed finding
+/// while any reviewed family is active.
 pub(crate) fn source_replacement_finding(
-    current_dir: &Path,
+    configs: &[EffectiveCargoConfig],
 ) -> Result<Option<String>, CommandError> {
-    for candidate in CARGO_CONFIG_CANDIDATE_PATHS {
-        let path = Path::new(candidate);
-        let text = read_optional_text_no_symlink(current_dir, path).map_err(|source| {
-            CommandError::CargoConfigRead {
-                path: candidate.to_owned(),
-                source,
-            }
-        })?;
-        let Some(text) = text else {
-            continue;
-        };
-
-        let override_key = barbican::cargo_config_source_override_key(&text).map_err(|source| {
-            CommandError::CargoConfigRead {
-                path: candidate.to_owned(),
-                source: io::Error::other(source),
-            }
-        })?;
+    for config in configs {
+        let override_key =
+            barbican::cargo_config_source_override_key(&config.text).map_err(|source| {
+                CommandError::CargoConfigRead {
+                    path: config.display_path.clone(),
+                    source: io::Error::other(source),
+                }
+            })?;
 
         if let Some(override_key) = override_key {
             return Ok(Some(format!(
-                "{candidate} declares a top-level `{override_key}` key; this can repoint reviewed crates away from crates.io undetected"
+                "{} declares a top-level `{override_key}` key; this can repoint reviewed crates away from crates.io undetected",
+                config.display_path
             )));
         }
     }
@@ -651,7 +753,38 @@ mod tests {
     use std::fs;
 
     use super::super::scratch_dir::ScratchDir;
-    use super::{release_age_override_note, review_record_status, validate_crates_io_base_url};
+    use super::{
+        load_effective_cargo_configs, release_age_override_note, review_record_status,
+        source_replacement_finding, validate_crates_io_base_url,
+    };
+
+    #[test]
+    fn effective_cargo_config_evidence_is_an_invocation_snapshot() {
+        let scratch = ScratchDir::create("cargo-barbican-config-snapshot-test", false)
+            .expect("scratch dir should create");
+        let workspace = scratch.path().join("workspace");
+        let config_dir = workspace.join(".cargo");
+        fs::create_dir_all(&config_dir).expect("config dir should create");
+        let config_path = config_dir.join("config.toml");
+        fs::write(
+            &config_path,
+            "[source.crates-io]\nreplace-with = 'internal'\n",
+        )
+        .expect("source config should write");
+
+        let configs = load_effective_cargo_configs(&workspace, &scratch.path().join("cargo-home"))
+            .expect("effective config should load");
+        fs::write(&config_path, "[build]\njobs = 2\n").expect("config mutation should write");
+
+        let finding = source_replacement_finding(&configs)
+            .expect("captured source policy should remain parseable");
+        assert!(
+            finding
+                .as_deref()
+                .is_some_and(|detail| detail.contains("top-level `source` key")),
+            "downstream checks must consume the preflight snapshot, not reread mutable config"
+        );
+    }
 
     #[test]
     fn release_age_override_note_flags_only_a_real_override() {

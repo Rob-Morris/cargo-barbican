@@ -1,6 +1,36 @@
 use super::common::*;
 
 #[test]
+fn gatehouse_pre_release_stops_before_inventory_without_a_toolchain_pin() {
+    let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "pre-release"]);
+    let client = FakeCratesIoClient::default();
+    let runner = FakeCommandRunner::default()
+        .with_frozen_metadata(declared_crates_io_direct_metadata_json("serde", "1.0.228"));
+    let temp_dir = fresh_temp_dir();
+    write_covered_enforce_fixture(&temp_dir);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
+
+    assert_eq!(exit_code, ExitCode::from(1));
+    let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
+    assert!(rendered.contains("Step 1/4 — toolchain conformance (blocking)"));
+    assert!(rendered.contains("Toolchain check: FAIL"));
+    assert!(rendered.contains("Gatehouse pre-release: FAIL (toolchain)"));
+    assert_eq!(runner.rustup_active_toolchain_calls(), 0);
+    assert_eq!(runner.frozen_metadata_calls(), 0);
+    assert!(runner.recorded_deny_json_calls().is_empty());
+    assert_eq!(*runner.build_calls.borrow(), 0);
+    assert!(
+        String::from_utf8(stderr)
+            .expect("stderr should be utf8")
+            .contains("exact Rust toolchain policy required")
+    );
+}
+
+#[test]
 fn gatehouse_pre_release_composes_inventory_audit_and_verify() {
     let cli = Cli::parse_from(["cargo-barbican", "gatehouse", "pre-release"]);
     let client = FakeCratesIoClient::default();
@@ -8,6 +38,7 @@ fn gatehouse_pre_release_composes_inventory_audit_and_verify() {
         .with_frozen_metadata(declared_crates_io_direct_metadata_json("serde", "1.0.228"));
     let temp_dir = fresh_temp_dir();
     write_covered_enforce_fixture(&temp_dir);
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -23,21 +54,25 @@ fn gatehouse_pre_release_composes_inventory_audit_and_verify() {
     );
     assert!(stderr.is_empty());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
-    assert!(rendered.contains("Step 1/3 — inventory coverage floor (blocking)"));
+    assert!(rendered.contains("Step 1/4 — toolchain conformance (blocking)"));
+    assert!(rendered.contains("Toolchain check: PASS"));
+    assert!(rendered.contains("Step 2/4 — inventory coverage floor (blocking)"));
     assert!(rendered.contains("direct-dependency coverage floor: PASS (enforced in this run)"));
     assert!(rendered.contains("Dependency inventory:"));
     assert!(rendered.contains("Inventory: PASS (direct-dependency coverage floor)"));
-    assert!(rendered.contains("Step 2/3 — audit (blocking)"));
+    assert!(rendered.contains("Step 3/4 — audit (blocking)"));
     assert!(rendered.contains("Audit: PASS"));
-    assert!(rendered.contains("Step 3/3 — verify (blocking; includes pin check)"));
+    assert!(rendered.contains("Step 4/4 — verify (blocking; includes pin check)"));
     assert!(rendered.contains("Pin check: PASS"));
     assert!(rendered.contains("Verify: PASS"));
     assert!(rendered.contains("Gatehouse pre-release: PASS"));
     assert!(!rendered.contains("advisory audit is a separate gate"));
     assert!(
-        rendered.find("Step 1/3").unwrap() < rendered.find("Step 2/3").unwrap()
-            && rendered.find("Step 2/3").unwrap() < rendered.find("Step 3/3").unwrap()
+        rendered.find("Step 1/4").unwrap() < rendered.find("Step 2/4").unwrap()
+            && rendered.find("Step 2/4").unwrap() < rendered.find("Step 3/4").unwrap()
+            && rendered.find("Step 3/4").unwrap() < rendered.find("Step 4/4").unwrap()
     );
+    assert_eq!(runner.rustup_active_toolchain_calls(), 1);
     assert_eq!(runner.frozen_metadata_calls(), 1);
     assert_eq!(runner.recorded_deny_json_calls().len(), 1);
     assert_eq!(*runner.build_calls.borrow(), 1);
@@ -53,6 +88,7 @@ fn gatehouse_pre_release_stops_after_inventory_failure() {
     );
     let temp_dir = fresh_temp_dir();
     write_uncovered_direct_enforce_fixture(&temp_dir);
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -64,7 +100,7 @@ fn gatehouse_pre_release_stops_after_inventory_failure() {
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("Inventory: FAIL (direct-dependency coverage floor)"));
     assert!(rendered.contains("Gatehouse pre-release: FAIL (inventory)"));
-    assert!(!rendered.contains("Step 2/3"));
+    assert!(!rendered.contains("Step 3/4"));
     assert!(runner.recorded_deny_json_calls().is_empty());
     assert_eq!(*runner.build_calls.borrow(), 0);
     assert_eq!(*runner.test_calls.borrow(), 0);
@@ -104,6 +140,7 @@ fn gatehouse_pre_release_stops_after_audit_failure() {
         .with_frozen_metadata(declared_crates_io_direct_metadata_json("serde", "1.0.228"));
     let temp_dir = fresh_temp_dir();
     write_covered_enforce_fixture(&temp_dir);
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -115,7 +152,7 @@ fn gatehouse_pre_release_stops_after_audit_failure() {
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("Audit: FAIL"));
     assert!(rendered.contains("Gatehouse pre-release: FAIL (audit)"));
-    assert!(!rendered.contains("Step 3/3"));
+    assert!(!rendered.contains("Step 4/4"));
     assert_eq!(*runner.build_calls.borrow(), 0);
     assert_eq!(*runner.test_calls.borrow(), 0);
 }
@@ -131,6 +168,7 @@ fn gatehouse_pre_release_names_verify_as_the_failed_gate() {
     .with_frozen_metadata(declared_crates_io_direct_metadata_json("serde", "1.0.228"));
     let temp_dir = fresh_temp_dir();
     write_covered_enforce_fixture(&temp_dir);
+    write_toolchain_pin(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 

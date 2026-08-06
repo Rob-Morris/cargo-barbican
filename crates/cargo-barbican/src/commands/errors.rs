@@ -10,6 +10,7 @@ use crate::crates_io_http::CRATES_IO_BASE_URL_ENV;
 
 #[derive(Debug)]
 pub enum CommandError {
+    CargoHomeUnresolved,
     CargoConfigRead {
         path: String,
         source: io::Error,
@@ -86,6 +87,10 @@ pub enum CommandError {
 impl fmt::Display for CommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CargoHomeUnresolved => write!(
+                formatter,
+                "unable to establish Cargo home: neither CARGO_HOME nor HOME is set; set one so user-level Cargo source policy can be inspected"
+            ),
             Self::CargoConfigRead { path, source } => {
                 write!(
                     formatter,
@@ -282,6 +287,7 @@ pub(crate) fn escape_diagnostic_for_terminal(value: &str) -> String {
 impl std::error::Error for CommandError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::CargoHomeUnresolved => None,
             Self::CargoConfigRead { source, .. } => Some(source),
             Self::Config(error) => Some(error),
             Self::ConfigRead { source, .. } => Some(source),

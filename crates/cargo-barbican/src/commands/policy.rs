@@ -3,11 +3,15 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use barbican::{BarbicanConfig, parse_reviewed_targets_toml};
+use barbican::{BarbicanConfig, ExactRustToolchainChannel, parse_reviewed_targets_toml};
 
 use crate::cli::{CiSystem, PolicyCommand, REVIEWED_TARGETS_CONFIG_FILE};
 
 use super::scaffold_fs::{ScaffoldState, confined_scaffold_state, create_dir_all, write_new_file};
+use super::toolchain::{
+    GENERATED_RUSTUP_PROFILE, RUST_TOOLCHAIN_TOML, ToolchainPinState, inspect_toolchain_pin,
+    render_toolchain_toml,
+};
 use super::{
     CommandError, REVIEW_RECORDS_DIR, escape_diagnostic_for_terminal,
     exit_code_from_policy_failures,
@@ -33,7 +37,7 @@ const GITHUB_WORKFLOW_PATH: &str = ".github/workflows/barbican.yml";
 /// so the workflow's own `${{ ... }}` expressions pass through verbatim rather
 /// than colliding with Rust's format braces. Third-party actions are pinned by
 /// full commit SHA to match the repo's own dogfooded `ci.yml`.
-const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.27.0
+const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.28.0
 #
 # cargo-barbican enforcement gate (server-side, authoritative).
 #
@@ -77,7 +81,7 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Install cargo-barbican, cargo-deny, and cargo-audit
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.27.0 cargo-barbican
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.0 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
       - name: Fetch dependencies for every target platform
@@ -103,11 +107,14 @@ pub(super) fn run_policy(
     stdout: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
     match command {
-        PolicyCommand::Init { ci } => run_policy_init(ci, current_dir, stdout),
+        PolicyCommand::Init { toolchain, ci } => {
+            run_policy_init(toolchain.as_ref(), ci, current_dir, stdout)
+        }
     }
 }
 
 fn run_policy_init(
+    requested_toolchain: Option<&ExactRustToolchainChannel>,
     ci: Option<CiSystem>,
     current_dir: &Path,
     stdout: &mut dyn Write,
@@ -116,6 +123,7 @@ fn run_policy_init(
 
     let config_path = Path::new("barbican.toml");
     let config_ok = ensure_config(current_dir, config_path, &mut report)?;
+    let toolchain_ok = ensure_toolchain_pin(current_dir, requested_toolchain, &mut report)?;
 
     if config_ok {
         ensure_file(
@@ -144,8 +152,15 @@ fn run_policy_init(
     // The CI workflow is a self-contained artefact that does not depend on
     // barbican.toml parsing, so it is emitted independently of `config_ok`.
     let workflow_blocked_by_existing = match ci {
-        Some(CiSystem::Github) => {
+        Some(CiSystem::Github) if toolchain_ok => {
             ensure_ci_workflow(current_dir, Path::new(GITHUB_WORKFLOW_PATH), &mut report)?
+        }
+        Some(CiSystem::Github) => {
+            report.blocked(
+                Path::new(GITHUB_WORKFLOW_PATH),
+                format!("requires a valid exact {RUST_TOOLCHAIN_TOML} pin"),
+            );
+            false
         }
         None => false,
     };
@@ -161,6 +176,53 @@ fn run_policy_init(
     }
 
     Ok(exit_code_from_policy_failures(report.has_blocked()))
+}
+
+fn ensure_toolchain_pin(
+    current_dir: &Path,
+    requested: Option<&ExactRustToolchainChannel>,
+    report: &mut InitReport,
+) -> Result<bool, CommandError> {
+    let path = Path::new(RUST_TOOLCHAIN_TOML);
+    match inspect_toolchain_pin(current_dir) {
+        ToolchainPinState::Missing => match requested {
+            Some(pin) => {
+                write_new_file(current_dir, path, &render_toolchain_toml(pin))?;
+                report.created_with_detail(
+                    path,
+                    format!(
+                        "exact channel {}; rustup profile {GENERATED_RUSTUP_PROFILE}",
+                        pin.as_str()
+                    ),
+                );
+                Ok(true)
+            }
+            None => {
+                report.blocked(
+                    path,
+                    "missing; rerun with --toolchain <exact-channel> to make the compiler pin an explicit operator decision",
+                );
+                Ok(false)
+            }
+        },
+        ToolchainPinState::Valid(existing) => {
+            if let Some(requested) = requested
+                && requested != &existing
+            {
+                report.blocked(
+                    path,
+                    format!("pins {existing}; refusing requested conflicting pin {requested}"),
+                );
+                return Ok(false);
+            }
+            report.already_present(path);
+            Ok(true)
+        }
+        ToolchainPinState::Invalid(detail) => {
+            report.blocked(path, detail);
+            Ok(false)
+        }
+    }
 }
 
 /// Emits the CI enforcement workflow, failing closed rather than overwriting.
@@ -342,6 +404,13 @@ impl InitReport {
         });
     }
 
+    fn created_with_detail(&mut self, path: &Path, detail: impl Into<String>) {
+        self.items.push(InitReportItem {
+            path: path.to_path_buf(),
+            status: InitStatus::CreatedWithDetail(detail.into()),
+        });
+    }
+
     fn already_present(&mut self, path: &Path) {
         self.items.push(InitReportItem {
             path: path.to_path_buf(),
@@ -366,7 +435,7 @@ impl InitReport {
         writeln!(stdout, "Policy init:").map_err(CommandError::Io)?;
         for item in &self.items {
             match &item.status {
-                InitStatus::Blocked(detail) => writeln!(
+                InitStatus::Blocked(detail) | InitStatus::CreatedWithDetail(detail) => writeln!(
                     stdout,
                     "- {}: {} ({})",
                     item.path.display(),
@@ -417,6 +486,7 @@ struct InitReportItem {
 
 enum InitStatus {
     Created,
+    CreatedWithDetail(String),
     AlreadyPresent,
     Blocked(String),
 }
@@ -425,6 +495,7 @@ impl InitStatus {
     fn as_str(&self) -> &'static str {
         match self {
             Self::Created => "created",
+            Self::CreatedWithDetail(_) => "created",
             Self::AlreadyPresent => "already present",
             Self::Blocked(_) => "blocked",
         }
@@ -459,7 +530,7 @@ mod tests {
         );
         assert!(!GITHUB_CI_WORKFLOW.contains("cargo barbican inventory --enforce"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo install --locked"));
-        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.27.0"));
+        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.28.0"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-deny@0.19.6"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-audit@0.22.1"));
         // Third-party actions must stay pinned by full commit SHA with a
