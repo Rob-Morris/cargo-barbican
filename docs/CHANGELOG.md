@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.28.1](changelog/v0.28.1.md) | 2026-09-16 | Harden public distribution and remediate rustls |
 | [v0.28.0](changelog/v0.28.0.md) | 2026-08-06 | Pin Rust toolchains before execution gates |
 | [v0.27.0](changelog/v0.27.0.md) | 2026-08-03 | Let native advisory ignores coexist with governed exceptions |
 | [v0.26.0](changelog/v0.26.0.md) | 2026-08-03 | Stream verify's build and test delegate output live |

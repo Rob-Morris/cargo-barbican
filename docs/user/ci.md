@@ -29,38 +29,13 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.1
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
 See [integration.md](integration.md#prerequisites) for the review-then-pin
 rationale for `cargo-deny` and `cargo-audit`, and what it looks like when
 `audit` cannot find them.
-
-### Installing from a private cargo-barbican repository
-
-While the cargo-barbican repository is private, a consumer workflow cannot
-install it with the snippet above unmodified, and the failure is not obvious
-from the error. Two things are missing in CI:
-
-- **Credentials with read access.** A job's default `GITHUB_TOKEN` is scoped to
-  its own repository, so it cannot read cargo-barbican. Supply a token or
-  deploy key that can, via a repository secret.
-- **A fetch path that uses those credentials.** Cargo's built-in git fetcher
-  cannot invoke a shell-command `credential.helper`, so set
-  `CARGO_NET_GIT_FETCH_WITH_CLI=true` (or `[net] git-fetch-with-cli = true`)
-  to make cargo fetch through the `git` CLI, which honours the credential
-  configuration the runner already has.
-
-Without both, the install step fails with
-`failed to authenticate when downloading repository` before any cargo-barbican
-code runs.
-
-Both requirements are artefacts of the repository being private during the
-insiders window. Once it is public the clone is anonymous, no token is needed,
-and the snippet above works as written. The local install path is verified;
-the private-repository CI path depends on how you provision the token, so
-treat the above as the constraint to satisfy rather than a drop-in recipe.
 
 ## Generating the workflow
 
@@ -122,7 +97,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.1
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -154,7 +129,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.28.1
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1

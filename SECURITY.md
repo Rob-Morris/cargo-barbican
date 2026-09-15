@@ -11,7 +11,7 @@ Report privately via either channel:
 
 - Email: [r@underware.gg](mailto:r@underware.gg)
 - GitHub private vulnerability reporting (the **Report a vulnerability**
-  button under the repository's Security tab), once the repository is public.
+  button under the repository's Security tab).
 
 Include what you can: affected version or commit, reproduction steps, and your
 assessment of impact. Partial reports are still welcome.

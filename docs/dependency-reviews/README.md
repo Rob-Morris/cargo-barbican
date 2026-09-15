@@ -30,6 +30,8 @@ For later checked-pin enforcement, the machine-readable companion file is
 - optional `allowed_surfaces` — reviewed `build-rs`, `proc-macro`, or
   `native-sys` execution surfaces for crates already present in the same
   `resolved` map
+- optional `allowed_age_exceptions` — reviewed release-age exceptions for
+  exact crates already present in the same `resolved` map with a checksum
 - optional `allowed_advisories` — reviewed advisory exceptions for crates
   already present in the same `resolved` map, recorded as `{ id, review_by }`
   entries with a `RUSTSEC-*` id and a re-review deadline
@@ -42,6 +44,11 @@ When a reviewed family carries `allowed_surfaces`, `assess` can suppress the
 matching execution-surface elevated-risk signal while still rendering the
 reviewed exception in an `Allowed policy exceptions:` section. The family
 `review_record` is the evidence path for those allowances.
+
+When a reviewed family carries `allowed_age_exceptions`, release-age-aware
+commands can accept that exact version while its checksum still matches the
+reviewed target. The exception becomes inert once the release reaches the
+configured minimum age.
 
 When a reviewed family carries `allowed_advisories`, `audit` can accept the
 matching advisory finding only while the resolved crate/version/checksum still
@@ -118,6 +125,9 @@ YYYY-MM-DD-short-subject.md
 - Allowed execution surfaces:
   List any reviewed `build-rs`, `proc-macro`, or `native-sys` allowances added
   under `[rust.families.allowed_surfaces]`.
+- Allowed release-age exceptions:
+  List exact versions added under `[rust.families.allowed_age_exceptions]` and
+  why accepting the fresh release is safer than waiting for quarantine.
 - Allowed advisory exceptions:
   List any reviewed advisory acceptances added under
   `[rust.families.allowed_advisories]`, including the `RUSTSEC-*` id, the

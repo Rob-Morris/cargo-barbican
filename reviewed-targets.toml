@@ -37,6 +37,20 @@ ureq = "=3.3.0"
 ureq = { version = "3.3.0", checksum_sha256 = "dea7109cdcd5864d4eeb1b58a1648dc9bf520360d7af16ec26d0a9354bafcfc0" }
 
 [[rust.families]]
+name = "rustls-advisory-remediation-2026-09-15"
+review_record = "docs/dependency-reviews/2026-09-15-rustls-advisory-remediation.md"
+
+[rust.families.resolved]
+rustls = { version = "0.23.45", checksum_sha256 = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634" }
+rustls-webpki = { version = "0.103.15", checksum_sha256 = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2" }
+
+[rust.families.allowed_surfaces]
+rustls = ["build-rs"]
+
+[rust.families.allowed_age_exceptions]
+rustls = "0.23.45"
+
+[[rust.families]]
 name = "time-boundary-2026-05-26"
 review_record = "docs/dependency-reviews/2026-05-26-time-0.3.47.md"
 
