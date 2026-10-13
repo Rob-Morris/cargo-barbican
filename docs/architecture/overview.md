@@ -179,6 +179,25 @@ matches. The likely direction is either to require checksums by default for
 crates.io artefacts or to add an explicit reviewed source kind for legacy
 version-only entries.
 
+## Verification runner boundary
+
+Checked-in `[verify]` policy selects cargo-test (default) or an exact-version
+cargo-nextest delegate. The library owns runner/version validation and pure
+Cargo metadata scope selection; the binary owns prepared-Cargo invocation and
+streamed execution. This is a closed branch in the existing gate, with no
+runner framework, installation engine or new product dependency. Gatehouse
+passes the selected config into nested verify and retains one preflight.
+That preflight rejects nextest-specific environment/config aliases when the
+runner is selected, because Cargo aliases can shadow external subcommands.
+
+Nextest isolates unit/integration test processes, while Cargo runs doctests.
+Doctest commands include every default member so binary roots keep their
+feature activation. Mixed enabled/disabled doctest libraries fail closed,
+rather than reproduce Cargo's resolver or execute disabled tests. Consumers
+own native harness configuration, binary provenance and external resource
+isolation. See [functional contract](../functional/cli.md) and
+[user configuration](../user/configuration.md#verify).
+
 ## Architectural boundary
 
 The codebase is split into a library crate and a Cargo-subcommand binary from

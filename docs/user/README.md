@@ -6,7 +6,7 @@ hardening.
 
 - [Command Guide](commands.md) — workflows and per-command usage reference
 - [Adoption](adoption.md) — manual onboarding after policy scaffolding
-- [Configuration](configuration.md) — `barbican.toml` and `reviewed-targets.toml` reference
+- [Configuration](configuration.md) — `barbican.toml`, verification runner and `reviewed-targets.toml` reference
 - [Integration](integration.md) — install, template, and re-sync model
 - [CI](ci.md) — GitHub Actions workflow example and pre-commit-hook guidance
 - [Operations](operations.md) — day-2 lifecycle: failing audits, routine updates, family lifecycle

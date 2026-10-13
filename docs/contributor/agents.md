@@ -230,3 +230,18 @@ gate. Off `main`, use `--vanilla` or `--skip REASON` only for a known
 intermediate state, and record the reason in `.canary--pre-commit`.
 `VERIFY_BRANCH_OVERRIDE` exists only for tests and controlled local validation
 of the branch guard; do not use it for normal commit verification.
+
+## Verification test runner
+
+The optional `[verify]` section selects the closed cargo-test/nextest runner.
+Nextest requires an exact stable `nextest_version`; policy validation and
+metadata-to-doctest scope selection remain pure library logic. Subprocesses
+stay in the binary's existing CommandRunner/prepared-Cargo boundary. The
+functional CLI contract and user configuration describe coverage and mixed
+library doctest limitations. Default scaffolds and self-hosting retain
+cargo-test. No gate installs or updates a runner.
+
+For runner changes, also run `sh scripts/verify-nextest.sh` with the reviewed
+minimal-feature cargo-nextest 0.9.146 on PATH. This required real-process proof
+fails if the tool is absent or wrong; CI runs it on macOS and Linux. Keep
+`scripts/verify.sh` as the ordinary dogfooded gate.

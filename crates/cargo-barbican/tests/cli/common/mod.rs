@@ -283,6 +283,11 @@ pub(crate) struct FakeCommandRunner {
     pub(crate) rustup_active_toolchain_calls: RefCell<u64>,
     pub(crate) cargo_build_result: Result<(), String>,
     pub(crate) cargo_test_result: Result<(), String>,
+    pub(crate) nextest_version_result: Result<String, String>,
+    pub(crate) nextest_result: Result<(), String>,
+    pub(crate) doctest_result: Result<(), String>,
+    pub(crate) verification_calls: RefCell<Vec<&'static str>>,
+    pub(crate) doctest_packages: RefCell<Vec<String>>,
     pub(crate) cargo_updates: RefCell<Vec<(String, String)>>,
     pub(crate) generate_lockfile_calls: RefCell<Vec<PathBuf>>,
     pub(crate) cargo_tree_calls: RefCell<Vec<PathBuf>>,
@@ -344,6 +349,11 @@ impl Default for FakeCommandRunner {
             rustup_active_toolchain_calls: RefCell::new(0),
             cargo_build_result: Ok(()),
             cargo_test_result: Ok(()),
+            nextest_version_result: Ok("cargo-nextest 0.9.146 (test)\n".to_owned()),
+            nextest_result: Ok(()),
+            doctest_result: Ok(()),
+            verification_calls: RefCell::new(Vec::new()),
+            doctest_packages: RefCell::new(Vec::new()),
             cargo_updates: RefCell::new(Vec::new()),
             generate_lockfile_calls: RefCell::new(Vec::new()),
             cargo_tree_calls: RefCell::new(Vec::new()),
@@ -677,6 +687,7 @@ impl CommandRunner for FakeCommandRunner {
         &self,
         _current_dir: &Path,
     ) -> Result<String, cargo_barbican::RunnerError> {
+        self.verification_calls.borrow_mut().push("metadata");
         *self.cargo_metadata_frozen_calls.borrow_mut() += 1;
         self.cargo_metadata_frozen_result
             .clone()
@@ -811,13 +822,41 @@ impl CommandRunner for FakeCommandRunner {
     }
 
     fn cargo_build_locked(&self, _current_dir: &Path) -> Result<(), cargo_barbican::RunnerError> {
+        self.verification_calls.borrow_mut().push("build");
         *self.build_calls.borrow_mut() += 1;
         self.cargo_build_result.clone().map_err(runner_exit)
     }
 
     fn cargo_test_locked(&self, _current_dir: &Path) -> Result<(), cargo_barbican::RunnerError> {
+        self.verification_calls.borrow_mut().push("cargo-test");
         *self.test_calls.borrow_mut() += 1;
         self.cargo_test_result.clone().map_err(runner_exit)
+    }
+
+    fn cargo_nextest_version(
+        &self,
+        _current_dir: &Path,
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        self.verification_calls.borrow_mut().push("nextest-version");
+        self.nextest_version_result.clone().map_err(runner_exit)
+    }
+
+    fn cargo_nextest_run_locked(
+        &self,
+        _current_dir: &Path,
+    ) -> Result<(), cargo_barbican::RunnerError> {
+        self.verification_calls.borrow_mut().push("nextest");
+        self.nextest_result.clone().map_err(runner_exit)
+    }
+
+    fn cargo_doctest_locked(
+        &self,
+        _current_dir: &Path,
+        packages: &[String],
+    ) -> Result<(), cargo_barbican::RunnerError> {
+        self.verification_calls.borrow_mut().push("doctests");
+        *self.doctest_packages.borrow_mut() = packages.to_vec();
+        self.doctest_result.clone().map_err(runner_exit)
     }
 }
 

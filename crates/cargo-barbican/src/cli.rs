@@ -260,9 +260,12 @@ pub(crate) enum Command {
     },
     #[command(
         about = "Run the final local execution gate",
-        long_about = "Runs pin check with the default reviewed-targets.toml, then cargo build \
-            --locked, then cargo test --locked, in order. Fails closed when reviewed-targets.toml \
-            is absent or configures no active reviewed family. Ends with Verify: PASS on success."
+        long_about = "Validates barbican.toml, proves exact Rust toolchain conformance, then runs \
+            pin check with reviewed-targets.toml and cargo build --locked. Tests default to cargo \
+            test --locked. Checked-in [verify] policy may select an exactly pinned cargo-nextest \
+            with retries disabled, followed by Cargo doctests. Mixed enabled/disabled doctest \
+            libraries in the default package scope fail closed. Reviewed-targets.toml must \
+            configure an active reviewed family. Ends with Verify: PASS on success."
     )]
     Verify,
 }

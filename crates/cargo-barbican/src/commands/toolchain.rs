@@ -5,9 +5,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CARGO_TOOLCHAIN_EXECUTABLE_CONTROLS, ExactRustToolchainChannel,
-    cargo_config_toolchain_executable_control_key, evaluate_rust_toolchain_conformance,
-    parse_rust_toolchain_toml,
+    CARGO_TOOLCHAIN_EXECUTABLE_CONTROLS, ExactRustToolchainChannel, TestRunner,
+    cargo_config_has_nextest_alias, cargo_config_toolchain_executable_control_key,
+    evaluate_rust_toolchain_conformance, parse_rust_toolchain_toml,
 };
 
 use crate::command_runner::{CommandRunner, cargo_home_from_environment};
@@ -85,6 +85,7 @@ pub(super) fn render_toolchain_toml(pin: &ExactRustToolchainChannel) -> String {
 pub(super) fn run_toolchain_check<R>(
     current_dir: &Path,
     runner: &R,
+    test_runner: TestRunner,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<ToolchainCheckOutcome, CommandError>
@@ -92,6 +93,16 @@ where
     R: CommandRunner + ?Sized,
 {
     writeln!(stdout, "Toolchain check:").map_err(CommandError::Io)?;
+
+    if test_runner == TestRunner::Nextest
+        && runner.environment_variable("CARGO_ALIAS_NEXTEST").is_some()
+    {
+        return toolchain_failure(
+            stdout,
+            stderr,
+            "CARGO_ALIAS_NEXTEST can replace the pinned nextest delegate; unset it before verification".to_owned(),
+        );
+    }
 
     let pin = match inspect_toolchain_pin(current_dir) {
         ToolchainPinState::Missing => {
@@ -127,6 +138,30 @@ where
         Ok(configs) => configs,
         Err(detail) => return toolchain_failure(stdout, stderr, detail),
     };
+    if test_runner == TestRunner::Nextest {
+        for config in &cargo_configs {
+            match cargo_config_has_nextest_alias(&config.text) {
+                Ok(true) => {
+                    return toolchain_failure(
+                        stdout,
+                        stderr,
+                        format!(
+                            "{} alias.nextest can replace the pinned nextest delegate; remove it before verification",
+                            config.display_path
+                        ),
+                    );
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    return toolchain_failure(
+                        stdout,
+                        stderr,
+                        format!("{}: {error}", config.display_path),
+                    );
+                }
+            }
+        }
+    }
 
     let active = match runner.rustup_active_toolchain(current_dir) {
         Ok(output) => output,

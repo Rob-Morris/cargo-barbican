@@ -397,3 +397,21 @@ Contract notes:
 - `review_record` paths must be relative repo paths with no `..` traversal
 - the current implementation does not claim stronger installed-tree or broader
   non-crates.io artefact parity beyond this gate
+
+## Verification test runner
+
+The optional `[verify]` section selects the closed cargo-test/nextest runner.
+Nextest requires an exact stable `nextest_version`; policy validation and
+metadata-to-doctest scope selection remain pure library logic. Subprocesses
+stay in the binary's existing CommandRunner/prepared-Cargo boundary. The
+functional CLI contract and user configuration describe coverage and mixed
+library doctest limitations. Default scaffolds and self-hosting retain
+cargo-test. No gate installs or updates a runner.
+
+For runner changes, also run `sh scripts/verify-nextest.sh` with the reviewed
+minimal-feature cargo-nextest 0.9.146 on PATH. This required real-process proof
+fails if the tool is absent or wrong; CI runs it on macOS and Linux. Keep
+`scripts/verify.sh` as the ordinary dogfooded gate.
+
+Nextest selection also rejects effective `alias.nextest` and
+`CARGO_ALIAS_NEXTEST` at the toolchain preflight, before any delegate can run.

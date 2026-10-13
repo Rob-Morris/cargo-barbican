@@ -612,11 +612,31 @@ cargo barbican audit [--format text|json]
     per-finding remediation objects when a read-only suggestion is available.
 
 cargo barbican verify
-    Run the local execution gates in order:
+    Validate barbican.toml before the local execution gates, then:
     1. exact `rust-toolchain.toml` and active toolchain conformance
     2. `pin check` with the default repo-root `reviewed-targets.toml`
     3. `cargo build --locked`
-    4. `cargo test --locked`
+    4. default: `cargo test --locked`; opt-in `[verify] test_runner = "nextest"`
+       requires an exact `nextest_version` (stable X.Y.Z, >= 0.9.128), checks
+       `cargo nextest --version`, then runs
+       `cargo nextest run --locked --retries 0 --profile default
+       --ignore-default-filter --no-tests pass --fail-fast`
+    5. nextest only: frozen Cargo metadata selects the default-member doctest
+       scope. When libraries enable docs, `cargo test --doc --locked` receives
+       every default member via exact --package IDs, retaining feature
+       activation. If no libraries enable docs, report the skip explicitly.
+       Mixed enabled/disabled doctest libraries fail closed: --doc overrides
+       doctest=false, and removing members can drop feature-dependent tests.
+       Missing or inconsistent scope metadata also fails closed.
+    Unknown/contradictory runner policy fails before toolchain preflight;
+    workspace discovery may already have invoked Cargo. Missing, malformed,
+    failing or mismatching nextest blocks before tests with install guidance.
+    With nextest selected, CARGO_ALIAS_NEXTEST or alias.nextest in effective
+    Cargo config fails toolchain preflight before builds or delegate probes;
+    an alias can otherwise replace an installed external subcommand.
+    No tool install/update or cargo-test fallback occurs. Native harness
+    configuration is trusted; custom harnesses require nextest compatibility.
+    Ignored tests stay ignored, and empty nextest suites succeed.
     The standalone `pin check` command skips successfully when no
     reviewed-target manifest is present or no active Rust families are
     configured. `verify` fails closed in both cases: build/test execution
@@ -628,7 +648,9 @@ cargo barbican verify
     linkers, rustflags, and Cargo `[env]` settings remain ordinary inputs to
     the subsequent build/test delegates.
     On success, `verify` confirms each executed step explicitly
-    (`OK   cargo build --locked`, `OK   cargo test --locked`) and ends with
+    (`OK   cargo build --locked`, `OK   cargo test --locked` by default;
+    `OK   cargo nextest run --locked` and `OK   cargo test --doc --locked`
+    for executed nextest/doctest steps) and ends with
     `Verify: PASS`, so a passing gate is distinguishable from a skipped one.
     The build and test delegates stream their output to the terminal while
     they run, with stdout inherited directly and each stderr line carrying a
@@ -733,9 +755,14 @@ contract, not a routine rewording.
   `Gatehouse pre-release: FAIL (audit)` / `Gatehouse pre-release: FAIL (verify)` — printed by `gatehouse pre-release`
   after its blocking primitives pass or fail. Operational errors that prevent
   a primitive from producing a verdict use the ordinary stderr `FAIL` contract.
+- `OK   cargo build --locked`, `OK   cargo test --locked`,
+  `OK   cargo nextest run --locked`, `OK   cargo test --doc --locked` — confirm
+  the corresponding verification delegate succeeded. Doctest success represents
+  the full default-member scope; a no-eligible-library note is not an OK token.
 - `Verify: PASS` — printed by `verify` on success; there is no matching
   `Verify: FAIL` token. A failing `verify` run stops at the failing step
-  (`pin check`, `cargo build --locked`, or `cargo test --locked`), reports the
+  (policy load, toolchain, pins, build, runner conformance, tests or doctest
+  scope/execution), reports the
   failure through that step's own output — `Toolchain check: FAIL` or `Pin
   check: FAIL` on stdout for a
   reviewed-target failure, or a build/test error on stderr — and exits `1`
@@ -771,7 +798,7 @@ Every command follows one rule for where output goes:
   remediation context notes — so a missing enrichment stays visible without
   entering the stdout report body or changing the verdict.
 - **Streaming delegates are the one exception to captured execution:**
-  `verify`'s `cargo build --locked` and `cargo test --locked` steps inherit
+  `verify`'s build, cargo-test, nextest and doctest steps inherit
   terminal stdout and relay each stderr line with a `delegate stderr: `
   prefix while they run. Stdin is closed so a delegate cannot block on or
   consume operator input. Streamed output is non-stable delegate evidence;

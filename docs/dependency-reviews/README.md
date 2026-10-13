@@ -60,6 +60,12 @@ requires re-review.
 `inspect` can supply evidence for a review record, but it does not by itself
 activate an entry in `reviewed-targets.toml`.
 
+## Verification runner tool
+
+- [cargo-nextest 0.9.146](2026-10-14-cargo-nextest-0.9.146.md) — external CI
+  test tool, installed with `--locked --no-default-features`; scoped advisory
+  and execution-surface review, with no product manifest dependency.
+
 ## When to add a record
 
 - Adding any direct dependency to a workspace `Cargo.toml`.

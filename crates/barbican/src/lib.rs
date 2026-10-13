@@ -42,13 +42,14 @@ pub use assessment::{
 };
 pub use cargo_config::{
     CARGO_TOOLCHAIN_EXECUTABLE_CONTROLS, CargoConfigError, CargoToolchainExecutableControl,
-    cargo_config_source_override_key, cargo_config_toolchain_executable_control_key,
+    cargo_config_has_nextest_alias, cargo_config_source_override_key,
+    cargo_config_toolchain_executable_control_key,
 };
 pub use config::{
     AdvisoryDelegatesConfig, BarbicanConfig, CargoDenyCheck, CargoDenyDelegatesConfig,
     CargoDenyLicensesPosture, ConfigLoadError, DEFAULT_CARGO_DENY_CHECKS, DelegatesConfig,
-    HighScrutinyConfig, LockfileAdvisoryScanner, MAXIMUM_RELEASE_AGE_MINIMUM_DAYS,
-    ReleaseAgeConfig, UnmanagedDelegatedPolicyMode,
+    HighScrutinyConfig, LockfileAdvisoryScanner, MAXIMUM_RELEASE_AGE_MINIMUM_DAYS, NextestVersion,
+    ReleaseAgeConfig, TestRunner, UnmanagedDelegatedPolicyMode, VerifyConfig,
 };
 pub use crates_io::{
     CrateRelease, CratesIoClient, CratesIoClientError, VersionInfo, parse_version_response_body,
@@ -83,9 +84,9 @@ pub use manifest::{
 };
 pub use metadata::{
     CargoMetadata, CargoMetadataError, MetadataDependencyPath, MetadataDirectDependency,
-    MetadataPackageSurfaces, MetadataRequirementEdge, package_surfaces, parse_cargo_metadata,
-    requirement_edges_onto, select_package_id, shortest_workspace_dependency_path,
-    workspace_direct_dependencies,
+    MetadataPackageSurfaces, MetadataRequirementEdge, default_member_doctest_packages,
+    package_surfaces, parse_cargo_metadata, requirement_edges_onto, select_package_id,
+    shortest_workspace_dependency_path, workspace_direct_dependencies,
 };
 pub use pick::{
     PickError, PickExcludedVersion, PickExclusionReason, PickSelection, PickSpec, PickSpecError,

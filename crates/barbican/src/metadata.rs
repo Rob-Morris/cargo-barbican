@@ -14,6 +14,7 @@ use crate::{
 pub struct CargoMetadata {
     packages: Vec<MetadataPackage>,
     workspace_members: Vec<String>,
+    workspace_default_members: Option<Vec<String>>,
     resolve: Option<MetadataResolve>,
 }
 
@@ -47,7 +48,10 @@ pub fn parse_cargo_metadata(text: &str) -> Result<CargoMetadata, CargoMetadataEr
                 targets: package
                     .targets
                     .into_iter()
-                    .map(|target| MetadataTarget { kind: target.kind })
+                    .map(|target| MetadataTarget {
+                        kind: target.kind,
+                        doctest: target.doctest,
+                    })
                     .collect(),
                 dependencies: package
                     .dependencies
@@ -63,6 +67,7 @@ pub fn parse_cargo_metadata(text: &str) -> Result<CargoMetadata, CargoMetadataEr
             })
             .collect(),
         workspace_members: raw.workspace_members,
+        workspace_default_members: raw.workspace_default_members,
         resolve: raw.resolve.map(|resolve| MetadataResolve {
             nodes: resolve
                 .nodes
@@ -80,6 +85,72 @@ pub fn parse_cargo_metadata(text: &str) -> Result<CargoMetadata, CargoMetadataEr
                 })
                 .collect(),
         }),
+    })
+}
+
+pub fn default_member_doctest_packages(
+    metadata: &CargoMetadata,
+) -> Result<Vec<String>, CargoMetadataError> {
+    let defaults = metadata.workspace_default_members.as_ref().ok_or_else(|| {
+        CargoMetadataError::IncompleteDoctestScope("missing workspace_default_members".to_owned())
+    })?;
+    if defaults.is_empty() {
+        return Err(CargoMetadataError::IncompleteDoctestScope(
+            "empty default package scope".to_owned(),
+        ));
+    }
+    let members = metadata.workspace_member_ids();
+    let mut enabled = false;
+    let mut disabled = Vec::new();
+    let mut seen = HashSet::new();
+    for id in defaults {
+        if !seen.insert(id) || !members.contains(id.as_str()) {
+            return Err(CargoMetadataError::IncompleteDoctestScope(format!(
+                "invalid default member {id:?}"
+            )));
+        }
+        let mut packages = metadata.packages.iter().filter(|package| package.id == *id);
+        let package = packages
+            .next()
+            .ok_or_else(|| CargoMetadataError::UnknownPackageId {
+                package_id: id.clone(),
+            })?;
+        if packages.next().is_some() || package.targets.is_empty() {
+            return Err(CargoMetadataError::IncompleteDoctestScope(format!(
+                "missing targets or duplicate package {id:?}"
+            )));
+        }
+        for target in &package.targets {
+            if target.kind.is_empty() {
+                return Err(CargoMetadataError::IncompleteDoctestScope(format!(
+                    "missing target kind for {id:?}"
+                )));
+            }
+            if target.kind.iter().any(|kind| {
+                matches!(
+                    kind.as_str(),
+                    "lib" | "rlib" | "dylib" | "cdylib" | "staticlib" | "proc-macro"
+                )
+            }) {
+                match target.doctest {
+                    Some(true) => enabled = true,
+                    Some(false) => disabled.push(package.name.clone()),
+                    None => {
+                        return Err(CargoMetadataError::IncompleteDoctestScope(format!(
+                            "missing doctest flag for {id:?}"
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    if enabled && !disabled.is_empty() {
+        return Err(CargoMetadataError::MixedDoctestScope { disabled });
+    }
+    Ok(if enabled {
+        defaults.clone()
+    } else {
+        Vec::new()
     })
 }
 
@@ -601,6 +672,12 @@ fn dependency_name_matches_package(dependency_name: &str, package_name: &str) ->
 
 #[derive(Debug, Error)]
 pub enum CargoMetadataError {
+    #[error("incomplete Cargo doctest scope: {0}")]
+    IncompleteDoctestScope(String),
+    #[error(
+        "mixed enabled/disabled doctest libraries in default package scope are unsupported (disabled: {disabled:?}); align library doctest settings or use cargo-test"
+    )]
+    MixedDoctestScope { disabled: Vec<String> },
     #[error("unable to parse cargo metadata JSON: {0}")]
     Parse(#[source] serde_json::Error),
     #[error("cargo metadata did not include a resolve graph")]
@@ -766,6 +843,7 @@ struct MetadataDependency {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MetadataTarget {
     kind: Vec<String>,
+    doctest: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -774,6 +852,7 @@ struct RawCargoMetadata {
     packages: Vec<RawMetadataPackage>,
     #[serde(default)]
     workspace_members: Vec<String>,
+    workspace_default_members: Option<Vec<String>>,
     resolve: Option<RawMetadataResolve>,
 }
 
@@ -805,6 +884,7 @@ struct RawMetadataDependencyDeclaration {
 struct RawMetadataTarget {
     #[serde(default)]
     kind: Vec<String>,
+    doctest: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -828,6 +908,88 @@ struct RawMetadataDependency {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn doctest_scope_preserves_all_default_members_and_rejects_mixed_libraries() {
+        fn scope(a: serde_json::Value, b: serde_json::Value) -> String {
+            serde_json::json!({"workspace_members":["a", "b", "excluded"], "workspace_default_members":["a","b"],
+                "packages":[
+                    {"name":"a", "id":"a", "version":"0.1.0", "targets":[a]},
+                    {"name":"b", "id":"b", "version":"0.1.0", "targets":[b]},
+                    {"name":"excluded", "id":"excluded", "version":"0.1.0", "targets":[{"kind":["lib"],"doctest":false}]}
+                ]}).to_string()
+        }
+        let library = serde_json::json!({"kind":["lib"],"doctest":true});
+        let binary = serde_json::json!({"kind":["bin"],"doctest":false});
+        let disabled = serde_json::json!({"kind":["lib"],"doctest":false});
+        let select = |s: &str| {
+            super::default_member_doctest_packages(&super::parse_cargo_metadata(s).unwrap())
+        };
+        assert_eq!(
+            select(&scope(library.clone(), binary.clone())).unwrap(),
+            ["a", "b"]
+        );
+        assert!(
+            select(&scope(binary.clone(), disabled.clone()))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            select(&scope(library.clone(), disabled))
+                .unwrap_err()
+                .to_string()
+                .contains("mixed enabled/disabled")
+        );
+        for kind in ["rlib", "proc-macro"] {
+            let target = serde_json::json!({"kind":[kind], "doctest":true});
+            assert_eq!(select(&scope(target, binary.clone())).unwrap(), ["a", "b"]);
+        }
+        let valid = scope(library, binary);
+        let baseline: serde_json::Value = serde_json::from_str(&valid).unwrap();
+        let mut cases = Vec::new();
+        let mut missing = baseline.clone();
+        missing
+            .as_object_mut()
+            .unwrap()
+            .remove("workspace_default_members");
+        cases.push(missing);
+        for ids in [
+            serde_json::json!([]),
+            serde_json::json!(["missing"]),
+            serde_json::json!(["a", "a"]),
+        ] {
+            let mut invalid = baseline.clone();
+            invalid["workspace_default_members"] = ids;
+            cases.push(invalid);
+        }
+        let mut invalid = baseline.clone();
+        invalid["workspace_members"] = serde_json::json!(["b"]);
+        cases.push(invalid);
+        let mut invalid = baseline.clone();
+        invalid["packages"][0]["targets"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("doctest");
+        cases.push(invalid);
+        let mut invalid = baseline.clone();
+        invalid["packages"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("targets");
+        cases.push(invalid);
+        let mut invalid = baseline.clone();
+        invalid["packages"][0]["targets"][0]["kind"] = serde_json::json!([]);
+        cases.push(invalid);
+        let mut invalid = baseline.clone();
+        invalid["packages"]
+            .as_array_mut()
+            .unwrap()
+            .push(baseline["packages"][0].clone());
+        cases.push(invalid);
+        for case in cases {
+            assert!(select(&case.to_string()).is_err(), "{case}");
+        }
+    }
+
     use crate::{ExactCrateSpec, parse_lockfile};
 
     use super::{

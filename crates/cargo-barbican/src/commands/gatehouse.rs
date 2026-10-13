@@ -17,8 +17,8 @@ use super::inspect::{InspectRenderContext, render_inspect_report};
 use super::scratch_dir::ScratchDir;
 use super::{
     CommandError, ReviewedReleaseAgeExceptions, audit, escape_diagnostic_for_terminal, fail,
-    inventory, load_release_age_context, render_incomplete_release_age_exception_review_record,
-    toolchain, verify,
+    inventory, load_config, load_release_age_context,
+    render_incomplete_release_age_exception_review_record, toolchain, verify,
 };
 
 const PRE_RELEASE_STEP_COUNT: u8 = 4;
@@ -54,17 +54,23 @@ fn run_pre_release<R>(
 where
     R: CommandRunner + ?Sized,
 {
+    let verify_config = load_config(current_dir)?.verify;
     writeln!(stdout, "Gatehouse pre-release:").map_err(CommandError::Io)?;
     write_pre_release_step(stdout, 1, "toolchain conformance (blocking)")?;
-    let toolchain_preflight =
-        match toolchain::run_toolchain_check(current_dir, runner, stdout, stderr)? {
-            toolchain::ToolchainCheckOutcome::Passed(preflight) => preflight,
-            toolchain::ToolchainCheckOutcome::Failed(exit_code) => {
-                writeln!(stdout, "Gatehouse pre-release: FAIL (toolchain)")
-                    .map_err(CommandError::Io)?;
-                return Ok(exit_code);
-            }
-        };
+    let toolchain_preflight = match toolchain::run_toolchain_check(
+        current_dir,
+        runner,
+        verify_config.test_runner,
+        stdout,
+        stderr,
+    )? {
+        toolchain::ToolchainCheckOutcome::Passed(preflight) => preflight,
+        toolchain::ToolchainCheckOutcome::Failed(exit_code) => {
+            writeln!(stdout, "Gatehouse pre-release: FAIL (toolchain)")
+                .map_err(CommandError::Io)?;
+            return Ok(exit_code);
+        }
+    };
 
     writeln!(stdout).map_err(CommandError::Io)?;
     write_pre_release_step(stdout, 2, "inventory coverage floor (blocking)")?;
@@ -96,6 +102,7 @@ where
         current_dir,
         runner,
         &toolchain_preflight,
+        &verify_config,
         stdout,
         stderr,
     )?;

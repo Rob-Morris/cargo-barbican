@@ -169,6 +169,19 @@ Reason:
 - that is the wrong launcher contract for commands such as `resolve` and
   `update` that are supposed to mutate `Cargo.lock`
 
+For changes to runner selection or execution, additionally run:
+
+```bash
+sh scripts/verify-nextest.sh
+```
+
+This mandatory real-tool check uses the reviewed minimal-feature nextest pin
+from [the tool review](../dependency-reviews/2026-10-14-cargo-nextest-0.9.146.md).
+It does not change the ordinary self-hosted runner. The default Cargo suite
+labels these external-tool tests as ignored; the explicit entry point runs
+all of them and fails if the tool is absent or the pin differs. CI executes
+both paths on macOS and Linux.
+
 Normal pre-commit expectations still include checked-in dependency review
 records for direct dependency and `deny.toml` changes.
 

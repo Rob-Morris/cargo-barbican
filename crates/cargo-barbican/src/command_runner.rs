@@ -81,6 +81,13 @@ pub trait CommandRunner {
     ) -> Result<CommandOutput, RunnerError>;
     fn cargo_build_locked(&self, current_dir: &Path) -> Result<(), RunnerError>;
     fn cargo_test_locked(&self, current_dir: &Path) -> Result<(), RunnerError>;
+    fn cargo_nextest_version(&self, current_dir: &Path) -> Result<String, RunnerError>;
+    fn cargo_nextest_run_locked(&self, current_dir: &Path) -> Result<(), RunnerError>;
+    fn cargo_doctest_locked(
+        &self,
+        current_dir: &Path,
+        packages: &[String],
+    ) -> Result<(), RunnerError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,6 +313,41 @@ impl CommandRunner for RealCommandRunner {
 
     fn cargo_test_locked(&self, current_dir: &Path) -> Result<(), RunnerError> {
         run_cargo_test_locked(current_dir)
+    }
+
+    fn cargo_nextest_version(&self, current_dir: &Path) -> Result<String, RunnerError> {
+        run_cargo_command(current_dir, ["nextest", "--version"])
+    }
+
+    fn cargo_nextest_run_locked(&self, current_dir: &Path) -> Result<(), RunnerError> {
+        let mut command = prepared_cargo_command(current_dir);
+        command.args([
+            "nextest",
+            "run",
+            "--locked",
+            "--retries",
+            "0",
+            "--profile",
+            "default",
+            "--ignore-default-filter",
+            "--no-tests",
+            "pass",
+            "--fail-fast",
+        ]);
+        streamed_command_status(command)
+    }
+
+    fn cargo_doctest_locked(
+        &self,
+        current_dir: &Path,
+        packages: &[String],
+    ) -> Result<(), RunnerError> {
+        let mut command = prepared_cargo_command(current_dir);
+        command.args(["test", "--doc", "--locked"]);
+        for package in packages {
+            command.args(["--package", package]);
+        }
+        streamed_command_status(command)
     }
 }
 

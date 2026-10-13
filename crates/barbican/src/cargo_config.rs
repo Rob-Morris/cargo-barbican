@@ -59,6 +59,14 @@ fn has_indirect_configuration(table: &toml::Table) -> bool {
     table.contains_key("include")
 }
 
+pub fn cargo_config_has_nextest_alias(text: &str) -> Result<bool, CargoConfigError> {
+    let table = parse_cargo_config(text)?;
+    Ok(table
+        .get("alias")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|aliases| aliases.contains_key("nextest")))
+}
+
 /// Returns the first cargo config key from [`SOURCE_OVERRIDE_KEYS`] present
 /// in the given `.cargo/config.toml` text, if any.
 pub fn cargo_config_source_override_key(
@@ -109,6 +117,21 @@ pub enum CargoConfigError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn detects_only_the_nextest_alias_regardless_of_value() {
+        for text in [
+            "[alias]\nnextest='redirect'",
+            "[alias]\nnextest=['redirect']",
+            "[alias]\nnextest=''",
+        ] {
+            assert!(super::cargo_config_has_nextest_alias(text).unwrap());
+        }
+        assert!(
+            !super::cargo_config_has_nextest_alias("[alias]\ncheck-all='check --workspace'")
+                .unwrap()
+        );
+        assert!(super::cargo_config_has_nextest_alias("[invalid").is_err());
+    }
     use super::{
         CargoConfigError, cargo_config_source_override_key,
         cargo_config_toolchain_executable_control_key,

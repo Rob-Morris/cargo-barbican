@@ -14,7 +14,8 @@ contracts, see [../functional/cli.md](../functional/cli.md).
 ## `barbican.toml`
 
 `barbican.toml` configures release-age policy, elevated-risk assessment
-toggles, and delegated-tool behaviour. Every key has a built-in default, so
+toggles, delegated-tool behaviour and the verification test runner. Defaults apply
+unless an optional runner requires an explicit version, so
 the file is optional in the strict sense — but `policy init` creates it
 deliberately, because explicit checked-in policy is easier to review than
 implicit defaults.
@@ -102,6 +103,64 @@ build_rs_changes = true
 proc_macro_changes = true
 native_sys_crates = true
 ```
+
+### `[verify]`
+
+| Key | Default | Valid values |
+| --- | --- | --- |
+| `test_runner` | `"cargo-test"` | `"cargo-test"`, `"nextest"` |
+| `nextest_version` | unset | Required only for nextest: canonical stable `X.Y.Z`, at least `0.9.128` |
+
+```toml
+[verify]
+test_runner = "nextest"
+nextest_version = "0.9.146"
+```
+
+Review and pin the consumer's exact nextest installation before adopting it.
+The example is the tool version reviewed for Barbican's CI; `0.9.128` is the
+supported CLI floor, not a fresh-install recommendation. Ranges, `=` or `v`
+prefixes, prereleases, build metadata and a version with cargo-test are errors.
+Nextest selection without a version is also an error.
+When nextest is selected, `CARGO_ALIAS_NEXTEST` and `alias.nextest` in effective
+workspace, ancestor or Cargo-home config fail the toolchain preflight: Cargo
+can redirect an external subcommand through an alias. Unrelated aliases remain
+ordinary inputs, and cargo-test retains its previous alias behaviour. There is no CLI or
+environment override for the Barbican runner choice. `policy init` leaves the
+section absent, retaining cargo-test.
+
+`verify` keeps toolchain conformance, reviewed-target pin check and locked
+build, then checks the nextest banner against the exact pin. It runs:
+
+```bash
+cargo nextest run --locked --retries 0 --profile default --ignore-default-filter --no-tests pass --fail-fast
+```
+
+This overrides native profile selection, default filters, retries (including
+per-test retries) and fail-fast settings. Ignored tests stay ignored; empty
+suites succeed. Scheduling, test groups and timeouts remain native nextest
+settings. Native custom harnesses and `run-extra-args` remain trusted test
+infrastructure; Barbican does not attest their enumeration or execution.
+Custom `harness = false` targets must implement nextest's list/exact-run
+protocol. Failed discovery/execution blocks the gate, with no fallback.
+
+Nextest does not run doctests. Barbican reads frozen Cargo metadata and, when
+eligible libraries exist, runs `cargo test --doc --locked` with every default
+member's exact package ID. Including binary members preserves feature
+activation. No enabled libraries means an explicit doctest skip note.
+**Mixed enabled/disabled doctest libraries in the default package scope are
+unsupported and fail closed.** Cargo's explicit `--doc` overrides
+`doctest=false`, while removing disabled packages can reduce feature-dependent
+coverage. Align library doctest settings deliberately, or retain cargo-test.
+Cargo metadata failure also blocks verification. Package/default-feature scope
+stays the same as the existing workspace-root invocation; no `--workspace` or
+`--all-targets` is added.
+
+Nextest isolates unit/integration test processes, but not shared files, ports,
+services or a test's own threads/children. Doctests keep Cargo/rustdoc's native
+model. Fix product concurrency races independently. The banner check proves
+version agreement; consumers still own binary provenance and reviewed tool
+installation. Gatehouse inherits this same policy and reuses its preflight.
 
 ### `[delegates]`
 

@@ -386,7 +386,7 @@ Prints the shipped cargo-barbican version.
 | `pin check` | No | Local-only reviewed-target enforcement. |
 | `review` | No | Prints review-focused diffs. |
 | `audit` | No intended repo mutation | Delegated tools may update their own caches. |
-| `verify` | Yes, through Cargo build output | Runs `cargo build --locked` and `cargo test --locked`; Cargo writes build artefacts under `target/`. |
+| `verify` | Yes, through Cargo build output | Runs locked build and the policy-selected test runner; Cargo writes build artefacts under `target/`. |
 
 ## Supported Gatehouse Workflows
 
@@ -1094,16 +1094,17 @@ cargo barbican verify
 
 Use this before commit and in local CI-equivalent checks.
 
-It first proves exact `rust-toolchain.toml`, rustup, Cargo, rustc, and rustdoc
-conformance. It then runs, in order, the default `pin check`, `cargo build
---locked`, and `cargo test --locked`.
+It validates policy and proves exact `rust-toolchain.toml`, rustup, Cargo,
+rustc and rustdoc conformance. It then runs, in order, the default `pin check`,
+`cargo build --locked`, and the policy-selected test runner (cargo-test by
+default).
 
 `verify` requires explicit reviewed-target policy. Unlike standalone
 `pin check`, it fails closed when `reviewed-targets.toml` is absent, not a
 regular file, or configures no active reviewed family.
 
 On success, `verify` confirms each executed step explicitly (`OK   cargo build
---locked`, `OK   cargo test --locked`), then prints a scope-honesty note —
+--locked`, plus the executed cargo-test, nextest and doctest steps), then prints a scope-honesty note —
 `note: advisory audit is a separate gate; run cargo barbican audit` —
 immediately before the final `Verify: PASS` line, so a passing run is
 distinguishable from a skipped one and does not read as an advisory-clean
@@ -1112,6 +1113,14 @@ verdict on its own.
 This command executes normal Cargo build and test behaviour. That can run build
 scripts, proc macros, and tests from the dependency graph. Run it after the
 policy and review steps have made that execution acceptable.
+
+Checked-in `[verify]` policy can select an exactly pinned nextest runner.
+It forces zero retries, the default profile, default-filter bypass and
+fail-fast, followed by Cargo doctests in the existing default-member scope.
+Binary-only/all-disabled-doc scopes skip doctests; mixed enabled/disabled
+library scopes fail closed. Nextest is consumer-installed and version checked,
+with no fallback. See [runner configuration](configuration.md#verify) for the
+complete contract, trusted harness inputs and adoption limits.
 
 #### `audit` and `verify` stay separate primitives
 

@@ -9,6 +9,65 @@ pub struct BarbicanConfig {
     pub release_age: ReleaseAgeConfig,
     pub high_scrutiny: HighScrutinyConfig,
     pub delegates: DelegatesConfig,
+    pub verify: VerifyConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct VerifyConfig {
+    pub test_runner: TestRunner,
+    pub nextest_version: Option<NextestVersion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TestRunner {
+    #[default]
+    CargoTest,
+    Nextest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct NextestVersion(String);
+
+impl TryFrom<String> for NextestVersion {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let version = semver::Version::parse(&value)
+            .map_err(|_| "nextest_version must be a canonical stable X.Y.Z version".to_owned())?;
+        if !version.pre.is_empty() || !version.build.is_empty() || version.to_string() != value {
+            return Err("nextest_version must be a canonical stable X.Y.Z version".to_owned());
+        }
+        if version < semver::Version::new(0, 9, 128) {
+            return Err("nextest_version must be at least 0.9.128".to_owned());
+        }
+        Ok(Self(value))
+    }
+}
+
+impl NextestVersion {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn check_banner(&self, output: &str) -> Result<(), String> {
+        let mut words = output.lines().next().unwrap_or_default().split_whitespace();
+        if words.next() != Some("cargo-nextest") {
+            return Err("unrecognised cargo-nextest version banner".to_owned());
+        }
+        let observed = words.next().ok_or("missing cargo-nextest version")?;
+        let observed = Self::try_from(observed.to_owned())?;
+        if observed != *self {
+            return Err(format!(
+                "expected cargo-nextest {}, found {}",
+                self.as_str(),
+                observed.as_str()
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl BarbicanConfig {
@@ -189,6 +248,10 @@ pub enum CargoDenyCheck {
 
 #[derive(Debug, Error)]
 pub enum ConfigLoadError {
+    #[error("barbican.toml verify.nextest_version is required when test_runner is nextest")]
+    MissingNextestVersion,
+    #[error("barbican.toml verify.nextest_version requires test_runner = nextest")]
+    UnexpectedNextestVersion,
     #[error("unable to parse barbican.toml: {0}")]
     Parse(#[source] toml::de::Error),
     #[error(
@@ -207,6 +270,14 @@ pub enum ConfigLoadError {
 
 impl BarbicanConfig {
     fn validate(self) -> Result<Self, ConfigLoadError> {
+        match (
+            self.verify.test_runner,
+            self.verify.nextest_version.is_some(),
+        ) {
+            (TestRunner::Nextest, false) => return Err(ConfigLoadError::MissingNextestVersion),
+            (TestRunner::CargoTest, true) => return Err(ConfigLoadError::UnexpectedNextestVersion),
+            _ => {}
+        }
         if self.release_age.minimum_days > MAXIMUM_RELEASE_AGE_MINIMUM_DAYS {
             return Err(ConfigLoadError::InvalidMinimumDays {
                 actual: self.release_age.minimum_days,
@@ -277,6 +348,64 @@ impl LockfileAdvisoryScanner {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn verify_policy_defaults_and_closed_runner_contract() {
+        use super::{BarbicanConfig, TestRunner};
+        for input in ["", "[verify]", "[verify]\ntest_runner = 'cargo-test'"] {
+            let config = BarbicanConfig::from_toml_str(input).unwrap();
+            assert_eq!(config.verify.test_runner, TestRunner::CargoTest);
+            assert!(config.verify.nextest_version.is_none());
+        }
+        let config = BarbicanConfig::from_toml_str(
+            "[verify]\ntest_runner='nextest'\nnextest_version='0.9.146'",
+        )
+        .unwrap();
+        assert_eq!(config.verify.test_runner, TestRunner::Nextest);
+        assert_eq!(config.verify.nextest_version.unwrap().as_str(), "0.9.146");
+        for input in [
+            "[verify]\ntest_runner='unknown'",
+            "[verify]\ntest_runner='nextest'",
+            "[verify]\nnextest_version='0.9.146'",
+            "[verify]\ntest_runner='cargo-test'\nnextest_version='0.9.146'",
+            "[verify]\nprofile='ci'",
+        ] {
+            assert!(BarbicanConfig::from_toml_str(input).is_err(), "{input}");
+        }
+        for version in [
+            "",
+            "0.9",
+            "=0.9.146",
+            "v0.9.146",
+            "0.9.127",
+            "0.9.146-beta.1",
+            "0.9.146+custom",
+            " 0.9.146",
+            "0.09.146",
+        ] {
+            let input = format!("[verify]\ntest_runner='nextest'\nnextest_version='{version}'");
+            assert!(BarbicanConfig::from_toml_str(&input).is_err(), "{version}");
+        }
+    }
+
+    #[test]
+    fn nextest_version_banner_requires_the_exact_recognised_version() {
+        let pin = super::NextestVersion::try_from("0.9.146".to_owned()).unwrap();
+        assert!(
+            pin.check_banner("cargo-nextest 0.9.146 (abc)\nrelease: 0.9.146\n")
+                .is_ok()
+        );
+        for output in [
+            "",
+            "nextest 0.9.146",
+            "cargo-nextest",
+            "cargo-nextest unknown",
+            "cargo-nextest 0.9.145",
+            "cargo-nextest 0.9.146-custom",
+            "cargo-nextest 0.9.146+custom",
+        ] {
+            assert!(pin.check_banner(output).is_err(), "{output}");
+        }
+    }
     use super::{
         BarbicanConfig, CargoDenyCheck, CargoDenyLicensesPosture, ConfigLoadError,
         LockfileAdvisoryScanner, UnmanagedDelegatedPolicyMode,
