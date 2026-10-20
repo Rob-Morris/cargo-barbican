@@ -62,6 +62,9 @@ activate an entry in `reviewed-targets.toml`.
 
 ## Recent security remediation
 
+- [WebPKI distrust remediation](2026-10-21-webpki-distrust-remediation.md) —
+  transitive certificate validation/root store; fixes RUSTSEC-2026-0381/0382.
+
 - [rustls 0.23.46](2026-10-20-rustls-advisory-remediation.md) — transitive
   HTTPS dependency; remediates four October 2026 advisories.
 

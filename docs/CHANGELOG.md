@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.31.1](changelog/v0.31.1.md) | 2026-10-21 | Reject distrusted TLS certificate paths |
 | [v0.31.0](changelog/v0.31.0.md) | 2026-10-21 | Refresh reviewed registry pins without approving review |
 | [v0.30.1](changelog/v0.30.1.md) | 2026-10-20 | Separate Git identities in direct-pin diagnostics |
 | [v0.30.0](changelog/v0.30.0.md) | 2026-10-20 | Admit explicitly reviewed exact Git sources |
