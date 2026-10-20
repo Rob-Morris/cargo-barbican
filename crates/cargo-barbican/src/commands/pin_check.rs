@@ -202,9 +202,13 @@ fn render_pin_check_report(
         for check in family.direct_checks() {
             let crate_name = escape_render_field(check.crate_name());
             if check.is_success() {
+                let separator = match check.expected_target() {
+                    barbican::ReviewedDirectTarget::Registry(_) => "",
+                    barbican::ReviewedDirectTarget::Git(_) => ": ",
+                };
                 writeln!(
                     stdout,
-                    "  - {}: direct spec ok for {}{}",
+                    "  - {}: direct spec ok for {}{separator}{}",
                     family_name,
                     crate_name,
                     escape_render_field(check.expected_requirement())

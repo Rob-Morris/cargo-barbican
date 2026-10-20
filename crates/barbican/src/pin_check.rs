@@ -223,6 +223,10 @@ impl ReviewedDirectDependencyCheck {
         &self.expected_requirement
     }
 
+    pub fn expected_target(&self) -> &ReviewedDirectTarget {
+        &self.expected_target
+    }
+
     pub fn observed(&self) -> &[ObservedDirectDependency] {
         &self.observed
     }

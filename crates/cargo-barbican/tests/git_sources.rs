@@ -205,7 +205,11 @@ fn real_cargo_graph_requires_explicit_child_review_before_execution() {
     fixture.complete_reviews();
     let inventory = assert_success(fixture.cli(&["inventory", "--enforce"]));
     assert!(inventory.contains("reviewed Git"));
-    assert_success(fixture.cli(&["pin", "check"]));
+    let pin_check = assert_success(fixture.cli(&["pin", "check"]));
+    assert!(pin_check.contains(&format!(
+        "direct spec ok for wrapper: {URL} rev {}",
+        fixture.rev
+    )));
     assert_success(fixture.cli(&["verify"]));
     assert!(fixture.root.join("executed").exists());
     fs::remove_file(fixture.root.join("executed")).unwrap();

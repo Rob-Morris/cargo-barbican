@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.30.1](changelog/v0.30.1.md) | 2026-10-20 | Separate Git identities in direct-pin diagnostics |
 | [v0.30.0](changelog/v0.30.0.md) | 2026-10-20 | Admit explicitly reviewed exact Git sources |
 | [v0.29.0](changelog/v0.29.0.md) | 2026-10-14 | Add pinned process-isolated verification tests |
 | [v0.28.1](changelog/v0.28.1.md) | 2026-09-16 | Harden public distribution and remediate rustls |
