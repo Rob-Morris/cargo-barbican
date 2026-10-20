@@ -5,6 +5,7 @@ mod assess;
 mod audit;
 mod common;
 mod gatehouse;
+mod git_policy;
 mod inspect;
 mod inventory;
 mod misc;

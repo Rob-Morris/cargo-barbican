@@ -210,7 +210,7 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     );
     assert!(!workflow.contains("cargo barbican inventory --enforce"));
     assert!(workflow.contains("cargo install --locked"));
-    assert!(workflow.contains("--tag v0.29.0"));
+    assert!(workflow.contains("--tag v0.30.0"));
     assert!(workflow.contains("cargo-deny@0.19.6"));
     assert!(workflow.contains("cargo-audit@0.22.1"));
     assert!(
@@ -428,8 +428,8 @@ fn policy_init_escapes_malformed_reviewed_targets_parse_diagnostics() {
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("- reviewed-targets.toml: blocked (invalid policy:"));
     assert!(!rendered.contains('\u{001b}'));
-    assert!(rendered.contains("\\x1b"));
-    assert!(rendered.contains("2 | \\x1b = \"pwned\"\n  | ^"));
+    assert!(rendered.contains("source text omitted"));
+    assert!(!rendered.contains("pwned"));
     assert!(stderr.is_empty());
 }
 
@@ -511,7 +511,7 @@ fn policy_init_escapes_unicode_line_separators_in_parse_diagnostics() {
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("- reviewed-targets.toml: blocked (invalid policy:"));
     assert!(!rendered.contains('\u{2028}'));
-    assert!(rendered.contains("\\x2028"));
+    assert!(rendered.contains("source text omitted"));
     assert!(stderr.is_empty());
 }
 

@@ -4,8 +4,8 @@ use thiserror::Error;
 use time::OffsetDateTime;
 
 use crate::{
-    CargoDenyCheck, CargoDependencySourceKind, CargoManifestDirectRequirement, ExactCrateSpec,
-    ExactCrateSpecError, LockfileAdvisoryScanner, MetadataDependencyPath, MetadataRequirementEdge,
+    CargoDenyCheck, CargoManifestDirectRequirement, ExactCrateSpec, ExactCrateSpecError,
+    LockfileAdvisoryScanner, MetadataDependencyPath, MetadataRequirementEdge,
     ReviewedAdvisoryException, RustSecAdvisoryId, parse_exact_version_requirement,
 };
 
@@ -14,6 +14,26 @@ pub struct AdvisoryFinding {
     advisory_id: AdvisoryFindingId,
     package: ExactCrateSpec,
     details: AdvisoryFindingDetails,
+    source: Option<String>,
+    source_candidates: Vec<Option<String>>,
+    source_status: AdvisorySourceStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AdvisorySourceStatus {
+    Resolved,
+    Ambiguous,
+    Unavailable,
+}
+
+impl AdvisorySourceStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Resolved => "resolved",
+            Self::Ambiguous => "ambiguous",
+            Self::Unavailable => "unavailable",
+        }
+    }
 }
 
 impl AdvisoryFinding {
@@ -22,6 +42,63 @@ impl AdvisoryFinding {
             advisory_id,
             package,
             details: AdvisoryFindingDetails::default(),
+            source: None,
+            source_candidates: Vec::new(),
+            source_status: AdvisorySourceStatus::Unavailable,
+        }
+    }
+
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
+    }
+    pub fn source_candidates(&self) -> &[Option<String>] {
+        &self.source_candidates
+    }
+    pub fn source_status(&self) -> AdvisorySourceStatus {
+        self.source_status
+    }
+    pub fn is_registry_finding(&self) -> bool {
+        self.source_status == AdvisorySourceStatus::Resolved
+            && self.source.as_deref() == Some(crate::CRATES_IO_SOURCE)
+    }
+
+    pub fn attribute_source(&mut self, lockfile: &crate::Lockfile) {
+        let candidates = lockfile
+            .packages()
+            .iter()
+            .filter(|package| package.exact_spec() == &self.package)
+            .collect::<Vec<_>>();
+        self.source_candidates = candidates
+            .iter()
+            .map(|package| package.source.clone())
+            .collect();
+        self.source_candidates.sort();
+        self.source_candidates.dedup();
+        let selected = if let Some(source) = self.source.as_deref() {
+            let mut matching = candidates
+                .iter()
+                .copied()
+                .filter(|package| package.source.as_deref() == Some(source));
+            let first = matching.next();
+            if matching.next().is_some() {
+                None
+            } else {
+                first
+            }
+        } else if candidates.len() == 1 {
+            candidates.first().copied()
+        } else {
+            None
+        };
+        if let Some(package) = selected {
+            self.source = package.source.clone();
+            self.source_status = AdvisorySourceStatus::Resolved;
+        } else {
+            self.source_status = if candidates.len() > 1 {
+                AdvisorySourceStatus::Ambiguous
+            } else {
+                AdvisorySourceStatus::Unavailable
+            };
         }
     }
 
@@ -101,6 +178,8 @@ impl AdvisoryFindingDetails {
 struct AdvisoryFindingKey {
     advisory_id: AdvisoryFindingId,
     package: ExactCrateSpec,
+    source: Option<String>,
+    source_status: AdvisorySourceStatus,
 }
 
 impl From<&AdvisoryFinding> for AdvisoryFindingKey {
@@ -108,6 +187,8 @@ impl From<&AdvisoryFinding> for AdvisoryFindingKey {
         Self {
             advisory_id: finding.advisory_id.clone(),
             package: finding.package.clone(),
+            source: finding.source.clone(),
+            source_status: finding.source_status,
         }
     }
 }
@@ -146,6 +227,12 @@ pub struct CargoDenyAdvisoryReport {
 }
 
 impl CargoDenyAdvisoryReport {
+    pub fn attribute_sources(&mut self, lockfile: &crate::Lockfile) {
+        for finding in &mut self.findings {
+            finding.attribute_source(lockfile);
+        }
+    }
+
     pub fn findings(&self) -> &[AdvisoryFinding] {
         &self.findings
     }
@@ -233,6 +320,12 @@ pub struct CargoAuditAdvisoryReport {
 }
 
 impl CargoAuditAdvisoryReport {
+    pub fn attribute_sources(&mut self, lockfile: &crate::Lockfile) {
+        for finding in &mut self.findings {
+            finding.attribute_source(lockfile);
+        }
+    }
+
     pub fn findings(&self) -> &[AdvisoryFinding] {
         &self.findings
     }
@@ -802,14 +895,13 @@ fn direct_requirement_summary(
     let resolved_version = semver::Version::parse(package.version()).ok()?;
     let matching = manifest_requirements
         .iter()
+        .filter_map(|requirement| requirement.effective(workspace_requirements))
         .filter(|requirement| requirement.name() == package.crate_name());
 
     let mut found = false;
     let mut exact_pinned = false;
     for requirement in matching {
-        let Some(version_requirement) =
-            effective_direct_requirement(requirement, workspace_requirements)
-        else {
+        let Some(version_requirement) = requirement.version_requirement() else {
             continue;
         };
         let Ok(parsed_requirement) = semver::VersionReq::parse(version_requirement) else {
@@ -825,21 +917,6 @@ fn direct_requirement_summary(
     }
 
     found.then_some(DirectRequirementSummary { exact_pinned })
-}
-
-fn effective_direct_requirement<'a>(
-    requirement: &'a CargoManifestDirectRequirement,
-    workspace_requirements: &'a [CargoManifestDirectRequirement],
-) -> Option<&'a str> {
-    if requirement.source_kind() == CargoDependencySourceKind::Workspace {
-        workspace_requirements
-            .iter()
-            .find(|workspace| workspace.name() == requirement.name())
-            .and_then(CargoManifestDirectRequirement::version_requirement)
-            .or_else(|| requirement.version_requirement())
-    } else {
-        requirement.version_requirement()
-    }
 }
 
 fn nearest_parent_crate<'a>(
@@ -1008,7 +1085,9 @@ fn collect_cargo_deny_diagnostic(
                 reason: format!("diagnostic line {line} Krate missing version"),
             })?;
 
-        insert_finding(findings, finding_from_parts(advisory_id, name, version)?);
+        let mut finding = finding_from_parts(advisory_id, name, version)?;
+        finding.source = scanner_package_source(krate.get("source"))?;
+        insert_finding(findings, finding);
     }
 
     Ok(())
@@ -1152,8 +1231,21 @@ fn cargo_audit_finding(
 
     let mut finding = finding_from_parts(advisory_id, name, version)?;
     finding.details = details;
+    finding.source = scanner_package_source(package.get("source"))?;
 
     Ok(Some(finding))
+}
+
+fn scanner_package_source(
+    value: Option<&serde_json::Value>,
+) -> Result<Option<String>, AdvisoryParseError> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(source)) => Ok(Some(source.clone())),
+        Some(_) => Err(AdvisoryParseError::CargoAuditShape {
+            reason: "package source is not a string".to_owned(),
+        }),
+    }
 }
 
 fn cargo_audit_finding_details(
@@ -1235,6 +1327,9 @@ fn finding_from_parts(
         package: ExactCrateSpec::from_parts(crate_name, version)
             .map_err(AdvisoryParseError::InvalidPackageSpec)?,
         details: AdvisoryFindingDetails::default(),
+        source: None,
+        source_candidates: Vec::new(),
+        source_status: AdvisorySourceStatus::Unavailable,
     })
 }
 
@@ -1317,9 +1412,10 @@ pub fn reconcile_advisory_findings(
             // First-match is deterministic because reviewed-targets parsing
             // rejects duplicate (RustSec advisory id, exact crate spec) bindings.
             let exception = exceptions.iter().find(|exception| {
-                finding
-                    .advisory_id()
-                    .matches_reviewed(exception.advisory_id())
+                finding.is_registry_finding()
+                    && finding
+                        .advisory_id()
+                        .matches_reviewed(exception.advisory_id())
                     && finding.package() == exception.spec()
             });
 
@@ -1418,6 +1514,7 @@ pub enum AdvisoryAuditCompletenessFailure {
     MissingCargoAuditReport,
     MissingCargoDenySummaryCheck { check: CargoDenyCheck },
     CargoDenyAdvisoryErrorsUnenumerated,
+    FindingSourceUnavailable { package: ExactCrateSpec },
 }
 
 pub fn evaluate_advisory_audit(
@@ -1488,6 +1585,15 @@ pub fn evaluate_advisory_audit(
     }
 
     let findings = findings.into_values().collect::<Vec<_>>();
+    for finding in &findings {
+        if finding.source_status != AdvisorySourceStatus::Resolved {
+            completeness_failures.push(
+                AdvisoryAuditCompletenessFailure::FindingSourceUnavailable {
+                    package: finding.package.clone(),
+                },
+            );
+        }
+    }
     AdvisoryAuditOutcome {
         reconciliation: reconcile_advisory_findings(&findings, exceptions, now),
         completeness_failures,
@@ -1523,8 +1629,8 @@ mod tests {
     use super::{
         AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition,
         AdvisoryFinding, AdvisoryFindingId, AdvisoryRemediationKind, advisory_remediation,
-        evaluate_advisory_audit, parse_cargo_audit_json, parse_cargo_deny_json_lines,
-        reconcile_advisory_findings,
+        evaluate_advisory_audit, parse_cargo_audit_json as parse_raw_audit,
+        parse_cargo_deny_json_lines as parse_raw_deny, reconcile_advisory_findings,
     };
     use crate::{
         CargoAuditAdvisoryReport, CargoDenyAdvisoryReport, CargoDenyCheck, ExactCrateSpec,
@@ -1533,6 +1639,28 @@ mod tests {
         parse_workspace_dependency_requirements, shortest_workspace_dependency_path,
     };
     use time::{Date, Month, OffsetDateTime};
+
+    fn registry_fixture_sources(findings: &mut [AdvisoryFinding]) {
+        for finding in findings {
+            finding.source = Some(crate::CRATES_IO_SOURCE.to_owned());
+            finding.source_candidates = vec![finding.source.clone()];
+            finding.source_status = super::AdvisorySourceStatus::Resolved;
+        }
+    }
+    fn parse_registry_deny_fixture(
+        text: &str,
+    ) -> Result<CargoDenyAdvisoryReport, super::AdvisoryParseError> {
+        let mut report = parse_raw_deny(text)?;
+        registry_fixture_sources(&mut report.findings);
+        Ok(report)
+    }
+    fn parse_registry_audit_fixture(
+        text: &str,
+    ) -> Result<CargoAuditAdvisoryReport, super::AdvisoryParseError> {
+        let mut report = parse_raw_audit(text)?;
+        registry_fixture_sources(&mut report.findings);
+        Ok(report)
+    }
 
     const CHECKSUM: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const CARGO_AUDIT_CLEAN: &str =
@@ -1600,9 +1728,10 @@ mod tests {
     fn remediation_treats_workspace_inherited_exact_pins_as_pinned() {
         let finding = remediation_finding_for("tauri", "2.11.2", ">=2.11.5");
         let manifest_requirements =
-            direct_requirements("[dependencies]\ntauri = { workspace = true }\n");
-        let workspace_requirements =
-            workspace_requirements("[workspace.dependencies]\ntauri = \"=2.11.2\"\n");
+            direct_requirements("[dependencies]\nalias = { workspace = true }\n");
+        let workspace_requirements = workspace_requirements(
+            "[workspace.dependencies]\nalias = { package = \"tauri\", version = \"=2.11.2\" }\n",
+        );
 
         let remediation = advisory_remediation(
             &finding,
@@ -1613,6 +1742,7 @@ mod tests {
         )
         .expect("patched direct finding should have remediation");
 
+        assert_eq!(remediation.target_crate(), "tauri");
         assert_eq!(
             remediation.kind(),
             AdvisoryRemediationKind::DirectPinnedEdit
@@ -1925,7 +2055,7 @@ mod tests {
 
     #[test]
     fn parses_cargo_deny_json_advisory_diagnostics() {
-        let report = parse_cargo_deny_json_lines(
+        let report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#
@@ -1946,7 +2076,7 @@ mod tests {
     #[test]
     fn parses_cargo_audit_cvss_from_string_and_number_and_uses_it_as_risk_fallback() {
         for cvss_json in [r#""9.8""#, "9.8"] {
-            let report = parse_cargo_audit_json(&format!(
+            let report = parse_registry_audit_fixture(&format!(
                 r#"{{
   "vulnerabilities": {{
     "found": true,
@@ -1978,7 +2108,7 @@ mod tests {
 
     #[test]
     fn parses_cargo_audit_json_advisories_and_settings_ignore() {
-        let report = parse_cargo_audit_json(
+        let report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": {
     "found": true,
@@ -2021,7 +2151,7 @@ mod tests {
 
     #[test]
     fn cargo_audit_merges_duplicate_findings_without_dropping_remediation_details() {
-        let report = parse_cargo_audit_json(
+        let report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": {
     "found": true,
@@ -2071,7 +2201,7 @@ mod tests {
 
     #[test]
     fn cargo_deny_requires_terminal_summary_record() {
-        let error = parse_cargo_deny_json_lines(
+        let error = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}"#,
         )
         .expect_err("truncated cargo-deny output should fail");
@@ -2081,7 +2211,7 @@ mod tests {
 
     #[test]
     fn cargo_deny_requires_summary_to_be_terminal_record() {
-        let error = parse_cargo_deny_json_lines(
+        let error = parse_registry_deny_fixture(
             r#"{"type":"summary","fields":{}}
 {"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 "#,
@@ -2093,9 +2223,9 @@ mod tests {
 
     #[test]
     fn parses_clean_empty_scanner_outputs_as_empty_findings() {
-        let deny_report = parse_cargo_deny_json_lines(r#"{"type":"summary","fields":{}}"#)
+        let deny_report = parse_registry_deny_fixture(r#"{"type":"summary","fields":{}}"#)
             .expect("cargo-deny summary-only output is a complete clean report");
-        let audit_report = parse_cargo_audit_json(
+        let audit_report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": { "found": false, "count": 0, "list": [] },
   "settings": {
@@ -2117,10 +2247,10 @@ mod tests {
 
     #[test]
     fn parses_real_clean_scanner_fixtures() {
-        let deny_report = parse_cargo_deny_json_lines(CARGO_DENY_CLEAN)
+        let deny_report = parse_registry_deny_fixture(CARGO_DENY_CLEAN)
             .expect("real cargo-deny clean fixture should parse");
-        let audit_report =
-            parse_cargo_audit_json(CARGO_AUDIT_CLEAN).expect("real cargo-audit clean fixture");
+        let audit_report = parse_registry_audit_fixture(CARGO_AUDIT_CLEAN)
+            .expect("real cargo-audit clean fixture");
 
         assert!(deny_report.findings().is_empty());
         assert!(audit_report.findings().is_empty());
@@ -2129,9 +2259,9 @@ mod tests {
 
     #[test]
     fn parses_real_advisory_scanner_fixtures() {
-        let deny_report = parse_cargo_deny_json_lines(CARGO_DENY_WITH_FINDINGS)
+        let deny_report = parse_registry_deny_fixture(CARGO_DENY_WITH_FINDINGS)
             .expect("real cargo-deny advisory fixture should parse");
-        let audit_report = parse_cargo_audit_json(CARGO_AUDIT_WITH_FINDINGS)
+        let audit_report = parse_registry_audit_fixture(CARGO_AUDIT_WITH_FINDINGS)
             .expect("real cargo-audit advisory fixture should parse");
 
         assert_eq!(deny_report.findings().len(), 2);
@@ -2173,7 +2303,7 @@ mod tests {
 
     #[test]
     fn parses_real_cargo_deny_non_advisory_summary_errors() {
-        let report = parse_cargo_deny_json_lines(CARGO_DENY_BANS_FINDING)
+        let report = parse_registry_deny_fixture(CARGO_DENY_BANS_FINDING)
             .expect("real cargo-deny bans fixture should parse");
 
         assert!(report.findings().is_empty());
@@ -2197,7 +2327,7 @@ mod tests {
 
     #[test]
     fn cargo_audit_requires_complete_top_level_object() {
-        let error = parse_cargo_audit_json(r#"{"vulnerabilities":{"list":[]}}"#)
+        let error = parse_registry_audit_fixture(r#"{"vulnerabilities":{"list":[]}}"#)
             .expect_err("truncated cargo-audit output should fail");
 
         assert!(error.to_string().contains("unsupported shape"));
@@ -2206,7 +2336,7 @@ mod tests {
 
     #[test]
     fn cargo_audit_rejects_non_string_settings_ignore_entries() {
-        let error = parse_cargo_audit_json(
+        let error = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": { "found": false, "count": 0, "list": [] },
   "settings": { "ignore": [42] },
@@ -2220,7 +2350,7 @@ mod tests {
 
     #[test]
     fn cargo_audit_warning_advisories_are_findings() {
-        let report = parse_cargo_audit_json(
+        let report = parse_registry_audit_fixture(
             r#"{
   "database": { "advisory-count": 1138 },
   "lockfile": { "dependency-count": 2 },
@@ -2279,7 +2409,7 @@ mod tests {
     #[test]
     fn cargo_audit_malformed_advisory_warnings_fail_closed() {
         for advisory in [r#"{}"#, r#"{"id": 123}"#] {
-            let error = parse_cargo_audit_json(&format!(
+            let error = parse_registry_audit_fixture(&format!(
                 r#"{{
   "vulnerabilities": {{ "found": false, "count": 0, "list": [] }},
   "settings": {{ "ignore": [] }},
@@ -2302,7 +2432,7 @@ mod tests {
 
     #[test]
     fn cargo_deny_unrecognised_advisory_shape_fails_closed() {
-        let error = parse_cargo_deny_json_lines(
+        let error = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde"}}]}}
 {"type":"summary","fields":{}}
 "#,
@@ -2314,7 +2444,7 @@ mod tests {
 
     #[test]
     fn cargo_deny_rejects_advisory_diagnostics_with_empty_graphs() {
-        let error = parse_cargo_deny_json_lines(
+        let error = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[]}}
 {"type":"summary","fields":{}}
 "#,
@@ -2326,7 +2456,7 @@ mod tests {
 
     #[test]
     fn cargo_deny_skips_non_advisory_diagnostics_and_keeps_advisories() {
-        let report = parse_cargo_deny_json_lines(
+        let report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"source-not-allowed","message":"source policy finding"}}
 {"type":"diagnostic","fields":{"code":"unmaintained","advisory":{"id":"RUSTSEC-2024-0375"},"graphs":[{"Krate":{"name":"atty","version":"0.2.14"}}]}}
 {"type":"summary","fields":{}}
@@ -2344,7 +2474,7 @@ mod tests {
 
     #[test]
     fn cargo_deny_collects_multiple_graphs_and_deduplicates_findings() {
-        let report = parse_cargo_deny_json_lines(
+        let report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}},{"Krate":{"name":"serde","version":"1.0.228"}},{"Krate":{"name":"toml","version":"0.8.0"}}]}}
 {"type":"summary","fields":{}}
 "#,
@@ -2358,7 +2488,7 @@ mod tests {
 
     #[test]
     fn unparseable_advisory_ids_are_not_dropped_and_reconcile_unreviewed() {
-        let report = parse_cargo_deny_json_lines(
+        let report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"GHSA-0000"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{}}
 "#,
@@ -2382,7 +2512,7 @@ mod tests {
         let targets = reviewed_targets_with_advisories();
         let exceptions = targets.advisory_exceptions();
         let exception_refs = exceptions.iter().collect::<Vec<_>>();
-        let findings = parse_cargo_deny_json_lines(
+        let findings = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0002"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0003"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
@@ -2413,7 +2543,7 @@ mod tests {
         let targets = reviewed_targets_with_advisories();
         let exceptions = targets.advisory_exceptions();
         let exception_refs = exceptions.iter().collect::<Vec<_>>();
-        let findings = parse_cargo_deny_json_lines(
+        let findings = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{}}
 "#,
@@ -2438,7 +2568,7 @@ mod tests {
         let targets = reviewed_targets_with_advisories();
         let exceptions = targets.advisory_exceptions();
         let exception_refs = exceptions.iter().collect::<Vec<_>>();
-        let findings = parse_cargo_deny_json_lines(
+        let findings = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{}}
 "#,
@@ -2459,13 +2589,13 @@ mod tests {
         let targets = reviewed_targets_with_advisories();
         let exceptions = targets.advisory_exceptions();
         let exception_refs = exceptions.iter().collect::<Vec<_>>();
-        let accepted_finding = parse_cargo_deny_json_lines(
+        let accepted_finding = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{}}
 "#,
         )
         .expect("findings should parse");
-        let mixed_findings = parse_cargo_deny_json_lines(
+        let mixed_findings = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0003"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{}}
@@ -2488,7 +2618,7 @@ mod tests {
         let targets = reviewed_targets_with_advisories();
         let exceptions = targets.advisory_exceptions();
         let exception_refs = exceptions.iter().collect::<Vec<_>>();
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#,
@@ -2504,7 +2634,7 @@ mod tests {
 
     #[test]
     fn audit_outcome_fails_on_unreviewed_findings() {
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0003"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#,
@@ -2525,13 +2655,13 @@ mod tests {
         let targets = reviewed_targets_with_advisories();
         let exceptions = targets.advisory_exceptions();
         let exception_refs = exceptions.iter().collect::<Vec<_>>();
-        let accepted = parse_cargo_deny_json_lines(
+        let accepted = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#,
         )
         .expect("finding should parse");
-        let expired = parse_cargo_deny_json_lines(
+        let expired = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0002"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#,
@@ -2557,7 +2687,7 @@ mod tests {
         let targets = reviewed_targets_with_advisories();
         let exceptions = targets.advisory_exceptions();
         let exception_refs = exceptions.iter().collect::<Vec<_>>();
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0},"bans":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#,
@@ -2590,7 +2720,7 @@ mod tests {
         let targets = reviewed_targets_with_advisories();
         let exceptions = targets.advisory_exceptions();
         let exception_refs = exceptions.iter().collect::<Vec<_>>();
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"diagnostic","fields":{"code":"yanked","message":"crate is yanked","severity":"error"}}
 {"type":"summary","fields":{"advisories":{"errors":2,"warnings":0,"helps":0,"notes":0}}}
@@ -2611,7 +2741,7 @@ mod tests {
 
     #[test]
     fn audit_outcome_allows_known_benign_cargo_deny_diagnostics_without_advisory_id() {
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"context","message":"warning only","severity":"warning"}}
 {"type":"diagnostic","fields":{"code":"context","message":"note only","severity":"note"}}
 {"type":"diagnostic","fields":{"code":"context","message":"help only","severity":"help"}}
@@ -2649,7 +2779,7 @@ mod tests {
 
     #[test]
     fn audit_outcome_fails_when_configured_cargo_deny_check_is_missing_from_summary() {
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"summary","fields":{"advisories":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
 "#,
         )
@@ -2677,7 +2807,7 @@ mod tests {
 
     #[test]
     fn audit_outcome_fails_when_cargo_deny_advisory_errors_are_unenumerated() {
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#,
         )
@@ -2701,13 +2831,13 @@ mod tests {
 
     #[test]
     fn audit_outcome_still_fails_cargo_deny_bans_when_cargo_audit_scans_advisories() {
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"banned","message":"crate is banned","severity":"error"}}
 {"type":"summary","fields":{"bans":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#,
         )
         .expect("cargo-deny output should parse");
-        let audit_report = parse_cargo_audit_json(
+        let audit_report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": { "found": false, "count": 0, "list": [] },
   "settings": { "ignore": [] },
@@ -2739,12 +2869,12 @@ mod tests {
 
     #[test]
     fn audit_outcome_uses_cargo_audit_findings_when_cargo_deny_is_clean() {
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"summary","fields":{"bans":{"errors":0,"warnings":0,"helps":0,"notes":0}}}
 "#,
         )
         .expect("cargo-deny output should parse");
-        let audit_report = parse_cargo_audit_json(
+        let audit_report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": {
     "found": true,
@@ -2782,7 +2912,7 @@ mod tests {
 
     #[test]
     fn audit_outcome_fails_on_cargo_audit_ignored_settings() {
-        let audit_report = parse_cargo_audit_json(
+        let audit_report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": { "found": false, "count": 0, "list": [] },
   "settings": { "ignore": ["RUSTSEC-2026-0001"] },
@@ -2802,7 +2932,7 @@ mod tests {
 
     #[test]
     fn audit_outcome_fails_on_cargo_audit_idless_warnings() {
-        let audit_report = parse_cargo_audit_json(
+        let audit_report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": { "found": false, "count": 0, "list": [] },
   "settings": { "ignore": [] },
@@ -2823,7 +2953,7 @@ mod tests {
 
     #[test]
     fn audit_outcome_fails_on_non_yanked_cargo_audit_idless_warnings() {
-        let audit_report = parse_cargo_audit_json(
+        let audit_report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": { "found": false, "count": 0, "list": [] },
   "settings": { "ignore": [] },
@@ -2844,7 +2974,7 @@ mod tests {
 
     #[test]
     fn audit_outcome_counts_null_advisory_warnings_as_idless() {
-        let audit_report = parse_cargo_audit_json(
+        let audit_report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": { "found": false, "count": 0, "list": [] },
   "settings": { "ignore": [] },
@@ -2868,13 +2998,13 @@ mod tests {
         let targets = reviewed_targets_with_advisories();
         let exceptions = targets.advisory_exceptions();
         let exception_refs = exceptions.iter().collect::<Vec<_>>();
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0001"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#,
         )
         .expect("cargo-deny output should parse");
-        let audit_report = parse_cargo_audit_json(
+        let audit_report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": {
     "found": true,
@@ -2907,13 +3037,13 @@ mod tests {
 
     #[test]
     fn audit_outcome_keeps_cargo_audit_details_when_cargo_deny_reports_same_finding_first() {
-        let deny_report = parse_cargo_deny_json_lines(
+        let deny_report = parse_registry_deny_fixture(
             r#"{"type":"diagnostic","fields":{"code":"advisory","advisory":{"id":"RUSTSEC-2026-0003"},"graphs":[{"Krate":{"name":"serde","version":"1.0.228"}}]}}
 {"type":"summary","fields":{"advisories":{"errors":1,"warnings":0,"helps":0,"notes":0}}}
 "#,
         )
         .expect("cargo-deny output should parse");
-        let audit_report = parse_cargo_audit_json(
+        let audit_report = parse_registry_audit_fixture(
             r#"{
   "vulnerabilities": {
     "found": true,
@@ -3093,7 +3223,7 @@ serde = [
         version: &str,
         patched_range: &str,
     ) -> AdvisoryFinding {
-        let report = parse_cargo_audit_json(&format!(
+        let report = parse_registry_audit_fixture(&format!(
             r#"{{
   "database": {{ "advisory-count": 1 }},
   "lockfile": {{ "dependency-count": 1 }},

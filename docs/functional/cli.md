@@ -343,14 +343,14 @@ cargo barbican inventory [--enforce]
     - exact direct-package facts could not be collected;
     - a crates.io direct dependency has entered the graph without an active
       reviewed family covering its exact resolved crate;
-    - a direct dependency resolves through a non-crates.io source a crates.io
-      reviewed family can never cover — a git dependency, an alternate
-      registry, or a path outside the workspace. First-party workspace-member
-      path dependencies are not flagged.
+    - a direct dependency resolves through an unreviewed/unsupported external
+      source. Exact reviewed Git targets can cover their matching Git package;
+      alternate registries and external paths remain unsupported. First-party
+      workspace-member path dependencies are not flagged.
     On a failure the appended coverage-floor section names each offending crate:
     an uncovered crates.io crate points at `cargo barbican pin add <crate>`; a
-    non-crates.io direct dependency is named with its source and must be
-    reviewed and pinned to crates.io or removed.
+    external direct dependency is named with a safe source diagnostic and
+    points to exact Git review/scaffolding, crates.io adoption or removal.
     Cargo's parsed declarations plus exact lockfile edges make this
     version-precise and immune to manifest renames: optional dependencies and
     normal, development, build, and target-specific declarations are gated,
@@ -716,7 +716,7 @@ contract, not a routine rewording.
 - `cargo barbican audit --format json` emits a stable JSON report on stdout.
   Its top-level `schema_version` identifies the JSON contract version. Adding,
   removing, or renaming fields, changing field meaning, or changing existing
-  field types requires a new `schema_version`. In schema version `5`,
+  field types requires a new `schema_version`. In schema version `6`,
   consumers may rely on the top-level `schema_version`, `status` (`"pass"` or
   `"fail"`), `success`, `dependency_paths_available`,
   `remediations_available`, `findings`, `completeness_failures`,
@@ -840,3 +840,58 @@ changes the exit code: a propagated error still exits `1`.
 - The current reviewed-target hardening step includes crates.io
   artefact-digest reconciliation in `reviewed-targets.toml`, not a direct port
   of the JS installed-tree gate.
+
+## Exact Git reviewed-source admission
+
+The [Git source guide](../user/git-sources.md) defines the supported URL/revision
+profile, review workflow and limits. `resolved` accepts the strict tagged form
+`{ source = "git", version = "0.1.0", url = "https://example.org/repo.git", rev = "0123456789abcdef0123456789abcdef01234567" }`.
+Optional `direct` entries accept the same source/URL/revision fields without
+`version`. Every effective direct Git declaration requires full immutable
+intent even when the optional direct table is absent. Each locked Git package,
+including an in-repository path child, requires its own matching reviewed entry
+before verification executes. Same-name sources/revisions cannot coexist.
+Existing registry string/checksum forms and release-age rules remain supported.
+
+`pin add` remains offline and one package per invocation. It refuses ambiguous
+same-version sources and unsupported/floating identities, emits a pending
+source-aware review and never grants cargo-deny permissions. `pin check` stays
+local/offline; `inventory --enforce` additionally requires exact frozen Cargo
+graph facts and retains its direct-only floor. Review completion and transitive
+Git coverage belong to pin/verify. Source changes remain visible elevated-risk
+assessment findings. Surface allowances match the full resolved source.
+Git advisory and release-age exceptions are rejected explicitly.
+
+Registry-only `update` checks locked and selected metadata source before
+mutation, in both normal and dry-run modes. Other registry pre-add commands
+reject recognisable Git URL input with manual-review guidance. No new command
+namespace or Git resolution/inspection engine is introduced.
+
+### Audit schema 6 source fields
+
+Schema 6 retains schema 5 fields and adds `source_context_available` (boolean),
+`source_policy_context` (object), and `git_sources` (array). Source-policy
+context has `status` (`clear`, `overrides-detected`, or `unavailable`) and a
+safe `diagnostic` (string or null). Detected overrides or unavailable evidence
+disable reviewed advisory exceptions; they remain distinguishable in text
+and JSON output. Each Git entry has `spec`, `name`, `version`,
+`source_identity`, a safe `diagnostic` string, and
+`advisory_visibility: "not-established-for-git"`. Git context appears even with
+zero findings or no reviewed family. Unavailable context cannot authorise an
+exception.
+
+Each finding's `package` additionally has `source_identity` (object or null),
+`source_candidates` (array of objects/null), and `source_status` (`resolved`,
+`ambiguous`, `unavailable`). Identity objects use either
+`{ source: "crates-io", source_string: <Cargo crates.io source> }`,
+`{ source: "git", url: <canonical URL>, rev: <full commit> }`, or
+`{ source: "unsupported", diagnostic: <safe label> }`.
+Only a resolved, unambiguous registry occurrence with matching checksum,
+completed review and live expiry can inherit registry advisory governance.
+Source-ambiguous/unavailable findings remain unaccepted and produce a
+completeness failure. Git/ambiguous findings have null `remediation` and
+`governed_exception`; registry patched ranges do not certify a Git fix.
+
+Source text in rejected/unsupported URLs, malformed policy/lock/manifest
+syntax and source-bearing delegate failures is omitted rather than echoed.
+Ordinary terminal control escaping still applies to safe diagnostic text.

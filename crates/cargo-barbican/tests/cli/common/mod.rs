@@ -915,7 +915,7 @@ pub(crate) fn run_allowed_surface_assess(
   "packages": [
     {{
       "name": "native-sys",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#native-sys@{current_version}",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#native-sys@{current_version}", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "{current_version}",
       "targets": [
         {{"kind": ["custom-build"]}},
@@ -1018,7 +1018,7 @@ pub(crate) fn run_elevated_risk_assess(args: &[&str]) -> (ExitCode, String, Stri
   "packages": [
     {
       "name": "native-sys",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#native-sys@1.2.3",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#native-sys@1.2.3", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.3",
       "targets": [
         {"kind": ["custom-build"]},
@@ -1027,7 +1027,7 @@ pub(crate) fn run_elevated_risk_assess(args: &[&str]) -> (ExitCode, String, Stri
     },
     {
       "name": "forked",
-      "id": "git+https://example.com/forked.git#forked@0.1.0",
+      "id": "git+https://example.com/forked.git#forked@0.1.0", "source": "git+https://example.com/forked.git#deadbeef",
       "version": "0.1.0",
       "targets": []
     }
@@ -1423,7 +1423,11 @@ pub(crate) fn metadata_with_packages(packages: &[(&str, &str, &str)]) -> String 
     let packages_json = packages
         .iter()
         .map(|(name, version, id)| {
-            format!(r#"{{"name":"{name}","id":"{id}","version":"{version}","targets":[]}}"#)
+            let source = id
+                .strip_prefix("registry+")
+                .map(|_| id.split('#').next().unwrap());
+            serde_json::json!({"name":name,"id":id,"version":version,"source":source,"targets":[]})
+                .to_string()
         })
         .collect::<Vec<_>>()
         .join(",");
@@ -2102,13 +2106,13 @@ pub(crate) fn surface_metadata_json() -> &'static str {
     },
     {
       "name": "serde",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.0.228",
       "targets": [{"kind": ["proc-macro"]}]
     },
     {
       "name": "loose",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#loose@0.1.0",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#loose@0.1.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "0.1.0",
       "targets": [{"kind": ["custom-build"]}]
     },

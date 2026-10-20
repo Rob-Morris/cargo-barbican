@@ -220,3 +220,12 @@ cp templates/dependency-reviews/README.md /path/to/consumer/docs/dependency-revi
 If the consumer repo already has a `deny.toml`, keep it and review the diff
 against `templates/deny.toml` manually. `policy init` follows the same
 create-if-missing rule and never overwrites an existing regular file.
+
+## Exact Git sources
+
+Exact reviewed Git dependencies use the existing `pin add` / `pin check`,
+inventory, audit and verification workflow. See the
+[Git source guide](git-sources.md) for the tagged policy
+schema, full-commit requirement, per-package review, source-bound allowances,
+manual intake and advisory/build-input limitations. Registry age/advisory
+exceptions never authorise Git targets; cargo-deny permission remains separate.

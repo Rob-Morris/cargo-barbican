@@ -23,13 +23,14 @@ pub mod review_record;
 pub mod reviewed_targets;
 pub mod scaffold;
 pub mod sha256;
+pub mod source_identity;
 pub mod spec;
 pub mod toolchain;
 
 pub use advisory::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,
     AdvisoryFindingDetails, AdvisoryFindingId, AdvisoryParseError, AdvisoryReconciliationReport,
-    AdvisoryRemediation, AdvisoryRemediationBlocker, AdvisoryRemediationKind,
+    AdvisoryRemediation, AdvisoryRemediationBlocker, AdvisoryRemediationKind, AdvisorySourceStatus,
     CargoAuditAdvisoryReport, CargoDenyAdvisoryReport, CargoDenyNoAdvisoryDiagnostic,
     CargoDenySummaryCount, advisory_remediation, evaluate_advisory_audit, parse_cargo_audit_json,
     parse_cargo_deny_json_lines, reconcile_advisory_findings,
@@ -81,12 +82,13 @@ pub use manifest::{
     parse_manifest_patched_crate_names, parse_workspace_dependency_requirements,
     parse_workspace_member_glob_roots, parse_workspace_member_manifest_paths,
     parse_workspace_package_version, parse_workspace_root_directive,
+    resolve_workspace_requirements,
 };
 pub use metadata::{
     CargoMetadata, CargoMetadataError, MetadataDependencyPath, MetadataDirectDependency,
     MetadataPackageSurfaces, MetadataRequirementEdge, default_member_doctest_packages,
-    package_surfaces, parse_cargo_metadata, requirement_edges_onto, select_package_id,
-    shortest_workspace_dependency_path, workspace_direct_dependencies,
+    package_surfaces, package_surfaces_for_identity, parse_cargo_metadata, requirement_edges_onto,
+    select_package_id, shortest_workspace_dependency_path, workspace_direct_dependencies,
 };
 pub use pick::{
     PickError, PickExcludedVersion, PickExclusionReason, PickSelection, PickSpec, PickSpecError,
@@ -94,8 +96,9 @@ pub use pick::{
 };
 pub use pin_check::{
     ObservedDirectDependency, PatchedReviewedCrate, ReviewedAdvisoryExceptionBinding,
-    ReviewedDirectDependencyCheck, ReviewedResolvedDependencyCheck, RustReviewedFamilyReport,
-    RustReviewedTargetsReport, check_reviewed_rust_targets, patched_reviewed_crates,
+    ReviewedDirectDependencyCheck, ReviewedGitIssue, ReviewedResolvedDependencyCheck,
+    RustReviewedFamilyReport, RustReviewedTargetsReport, check_reviewed_rust_targets,
+    patched_reviewed_crates,
 };
 pub use release_age::{
     ReleaseAgeGateVerdict, ReleaseAgeOutcome, ReleaseAgeReport, check_release_age_at,
@@ -105,9 +108,10 @@ pub use review_record::{
     REVIEW_RECORD_SCAFFOLD_MARKER, ReviewRecordStatus, classify_review_record,
 };
 pub use reviewed_targets::{
-    ExecutionSurfaceKind, ReviewedAdvisoryException, ReviewedExecutionSurfaceAllowance,
-    ReviewedReleaseAgeException, ReviewedResolvedTarget, ReviewedRustFamily, ReviewedTargets,
-    ReviewedTargetsError, RustSecAdvisoryId, RustSecAdvisoryIdError, parse_reviewed_targets_toml,
+    ExecutionSurfaceKind, ReviewedAdvisoryException, ReviewedDirectTarget,
+    ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException, ReviewedResolvedSource,
+    ReviewedResolvedTarget, ReviewedRustFamily, ReviewedTargets, ReviewedTargetsError,
+    RustSecAdvisoryId, RustSecAdvisoryIdError, parse_reviewed_targets_toml,
 };
 pub use scaffold::{
     PIN_EXCEPTION_DEFAULT_REVIEW_DAYS, PinAddPlan, PinAddRejection, PinAddTarget,
@@ -117,6 +121,10 @@ pub use scaffold::{
     plan_pin_exception,
 };
 pub use sha256::{Sha256Digest, Sha256DigestError};
+pub use source_identity::{
+    GitSourceError, GitSourceIdentity, ResolvedPackageIdentity, is_source_spec_input,
+    source_diagnostic,
+};
 pub use spec::{
     ExactCrateSpec, ExactCrateSpecError, ExactVersionRequirementError,
     is_native_sys_execution_surface, parse_exact_version_requirement,

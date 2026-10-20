@@ -538,3 +538,12 @@ the authoritative enhanced verdict in either case.
 configured scanner, checks, unmanaged-ignore policy, any native advisory
 ignores found, and whether non-advisory posture would come from a
 checked-in `deny.toml` or the generated default base.
+
+## Exact Git sources
+
+Exact reviewed Git dependencies use the existing `pin add` / `pin check`,
+inventory, audit and verification workflow. See the
+[Git source guide](git-sources.md) for the tagged policy
+schema, full-commit requirement, per-package review, source-bound allowances,
+manual intake and advisory/build-input limitations. Registry age/advisory
+exceptions never authorise Git targets; cargo-deny permission remains separate.

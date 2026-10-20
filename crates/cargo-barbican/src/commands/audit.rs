@@ -19,6 +19,35 @@ use barbican::{
 };
 use serde_json::json;
 
+#[derive(Clone, Copy)]
+enum SourcePolicyContext {
+    Clear,
+    OverridesDetected,
+    Unavailable,
+}
+
+impl SourcePolicyContext {
+    fn status(self) -> &'static str {
+        match self {
+            Self::Clear => "clear",
+            Self::OverridesDetected => "overrides-detected",
+            Self::Unavailable => "unavailable",
+        }
+    }
+
+    fn diagnostic(self) -> Option<&'static str> {
+        match self {
+            Self::Clear => None,
+            Self::OverridesDetected => {
+                Some("Cargo source overrides detected; reviewed advisory exceptions disabled")
+            }
+            Self::Unavailable => Some(
+                "Cargo source-policy context unavailable: effective Cargo configuration or manifest patch evidence could not be established; reviewed advisory exceptions disabled",
+            ),
+        }
+    }
+}
+
 use crate::cli::AuditOutputFormat;
 use crate::command_runner::{CommandOutput, CommandRunner, Delegate};
 
@@ -53,7 +82,32 @@ where
     } else {
         load_review_evidence(current_dir, reviewed_targets.as_ref())?
     };
-    let bound_exceptions = bound_advisory_exceptions(&pin_report, &review_record_checks);
+    let source_context = load_current_lockfile(current_dir, Path::new("Cargo.lock"));
+    let source_lockfile = source_context.as_ref().ok();
+    let source_policy_context = match (|| {
+        let home = crate::command_runner::cargo_home_from_environment(|name| {
+            runner.environment_variable(name)
+        })
+        .ok_or(CommandError::CargoHomeUnresolved)?;
+        let configs = super::load_effective_cargo_configs(current_dir, &home)?;
+        let config_override = super::source_replacement_finding(&configs)?.is_some();
+        let patched = super::load_manifest_patched_crate_names(current_dir)?;
+        let manifest_override = reviewed_targets.as_ref().is_some_and(|targets| {
+            !barbican::patched_reviewed_crates(targets, &patched).is_empty()
+        });
+        Ok::<_, CommandError>(!config_override && !manifest_override)
+    })() {
+        Ok(true) => SourcePolicyContext::Clear,
+        Ok(false) => SourcePolicyContext::OverridesDetected,
+        Err(_) => SourcePolicyContext::Unavailable,
+    };
+    let bound_exceptions = if matches!(source_policy_context, SourcePolicyContext::Clear)
+        && source_lockfile.is_some()
+    {
+        bound_advisory_exceptions(&pin_report, &review_record_checks)
+    } else {
+        Vec::new()
+    };
 
     let user_deny_toml = read_optional_text_no_symlink(current_dir, Path::new("deny.toml"))
         .map_err(CommandError::Io)?;
@@ -84,7 +138,7 @@ where
     let generated_config_path = scratch.path().join("deny.toml");
     fs::write(&generated_config_path, generated_config).map_err(CommandError::Io)?;
 
-    let cargo_deny_report =
+    let mut cargo_deny_report =
         match runner.cargo_deny_json(current_dir, &generated_config_path, &cargo_deny_checks) {
             Ok(output) => match parse_cargo_deny_json_lines(&output.stderr) {
                 Ok(report) => report,
@@ -100,7 +154,7 @@ where
             }
         };
 
-    let cargo_audit_report = if matches!(
+    let mut cargo_audit_report = if matches!(
         config.delegates.advisories.lockfile_scanner,
         LockfileAdvisoryScanner::CargoAudit | LockfileAdvisoryScanner::Both
     ) {
@@ -130,6 +184,12 @@ where
         None
     };
 
+    if let Some(lockfile) = source_lockfile {
+        cargo_deny_report.attribute_sources(lockfile);
+        if let Some(report) = &mut cargo_audit_report {
+            report.attribute_sources(lockfile);
+        }
+    }
     let outcome = evaluate_advisory_audit(
         config.delegates.advisories.lockfile_scanner,
         &cargo_deny_checks,
@@ -182,6 +242,8 @@ where
                 &reconciled_native_ignores,
                 config.delegates.unmanaged_delegated_policy,
                 licenses_posture,
+                source_lockfile,
+                source_policy_context,
             )?;
         }
         AuditOutputFormat::Json => render_audit_json_report(
@@ -193,6 +255,8 @@ where
             &reconciled_native_ignores,
             config.delegates.unmanaged_delegated_policy,
             licenses_posture,
+            source_lockfile,
+            source_policy_context,
         )?,
     }
 
@@ -269,6 +333,9 @@ fn delegate_output_failure(
 }
 
 fn delegate_stderr_excerpt(stderr: &str) -> String {
+    if stderr.contains("://") || stderr.contains("git+") {
+        return "; source-bearing delegate output omitted".to_owned();
+    }
     let trimmed = stderr.trim();
     if trimmed.is_empty() {
         return String::new();
@@ -301,7 +368,11 @@ where
         {
             continue;
         }
-        let package = disposition.finding().package();
+        let finding = disposition.finding();
+        if !finding.is_registry_finding() || finding.source_candidates().len() != 1 {
+            continue;
+        }
+        let package = finding.package();
         if !targets.contains(package) {
             targets.push(package.clone());
         }
@@ -363,9 +434,10 @@ fn collect_remediations(
         .filter_map(|disposition| match disposition {
             AdvisoryDisposition::Accepted { .. } => None,
             AdvisoryDisposition::Expired { finding, .. }
-            | AdvisoryDisposition::Unreviewed { finding } => {
-                (!finding.details().patched_versions().is_empty()).then_some(finding)
-            }
+            | AdvisoryDisposition::Unreviewed { finding } => (finding.is_registry_finding()
+                && finding.source_candidates().len() == 1
+                && !finding.details().patched_versions().is_empty())
+            .then_some(finding),
         })
         .collect::<Vec<_>>();
 
@@ -515,9 +587,33 @@ fn render_audit_report(
     native_ignores: &[ReconciledNativeIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
     licenses_posture: CargoDenyLicensesPosture,
+    source_lockfile: Option<&barbican::Lockfile>,
+    source_policy_context: SourcePolicyContext,
 ) -> Result<(), CommandError> {
     writeln!(stdout, "Audit: {}", if passed { "PASS" } else { "FAIL" })
         .map_err(CommandError::Io)?;
+    if let Some(diagnostic) = source_policy_context.diagnostic() {
+        writeln!(stdout, "  {diagnostic}").map_err(CommandError::Io)?;
+    }
+    if source_lockfile.is_none() {
+        writeln!(
+            stdout,
+            "  source context unavailable; no reviewed advisory exceptions can be authorised"
+        )
+        .map_err(CommandError::Io)?;
+    }
+    for package in source_lockfile
+        .into_iter()
+        .flat_map(barbican::Lockfile::packages)
+        .filter(|package| {
+            package
+                .source
+                .as_deref()
+                .is_some_and(|source| source.starts_with("git+"))
+        })
+    {
+        writeln!(stdout, "  Git source {}: {}; advisory coverage is not established for Git; source/native review remains required", package.exact_spec(), barbican::source_diagnostic(package.source.as_deref())).map_err(CommandError::Io)?;
+    }
     writeln!(
         stdout,
         "cargo-deny licenses check: {} ({})",
@@ -617,6 +713,8 @@ fn render_audit_json_report(
     native_ignores: &[ReconciledNativeIgnore],
     unmanaged_policy: UnmanagedDelegatedPolicyMode,
     licenses_posture: CargoDenyLicensesPosture,
+    source_lockfile: Option<&barbican::Lockfile>,
+    source_policy_context: SourcePolicyContext,
 ) -> Result<(), CommandError> {
     let findings = outcome
         .reconciliation()
@@ -625,7 +723,15 @@ fn render_audit_json_report(
         .map(|disposition| finding_json(disposition, dependency_paths, remediations))
         .collect::<Vec<_>>();
     let report = json!({
-        "schema_version": 5,
+        "schema_version": 6,
+        "source_context_available": source_lockfile.is_some(),
+        "source_policy_context": { "status": source_policy_context.status(), "diagnostic": source_policy_context.diagnostic() },
+        "git_sources": source_lockfile.into_iter().flat_map(barbican::Lockfile::packages)
+            .filter(|package| package.source.as_deref().is_some_and(|source| source.starts_with("git+")))
+            .map(|package| json!({ "spec": package.exact_spec().to_string(), "name": package.name, "version": package.version,
+                "source_identity": source_identity_json(package.source.as_deref()),
+                "diagnostic": barbican::source_diagnostic(package.source.as_deref()),
+                "advisory_visibility": "not-established-for-git" })).collect::<Vec<_>>(),
         "status": if passed { "pass" } else { "fail" },
         "success": passed,
         "dependency_paths_available": dependency_paths.available,
@@ -676,6 +782,21 @@ fn render_audit_json_report(
     writeln!(stdout).map_err(CommandError::Io)
 }
 
+fn source_identity_json(source: Option<&str>) -> serde_json::Value {
+    match source {
+        Some(barbican::CRATES_IO_SOURCE) => {
+            json!({ "source": "crates-io", "source_string": barbican::CRATES_IO_SOURCE })
+        }
+        Some(source) => match barbican::GitSourceIdentity::from_locked_source(source) {
+            Ok(git) => json!({ "source": "git", "url": git.url(), "rev": git.rev() }),
+            Err(_) => {
+                json!({ "source": "unsupported", "diagnostic": barbican::source_diagnostic(Some(source)) })
+            }
+        },
+        None => serde_json::Value::Null,
+    }
+}
+
 fn finding_json(
     disposition: &AdvisoryDisposition,
     dependency_paths: &DependencyPathReport,
@@ -689,6 +810,9 @@ fn finding_json(
             "spec": finding.package().to_string(),
             "name": finding.package().crate_name(),
             "version": finding.package().version(),
+            "source_identity": if finding.source_status() == barbican::AdvisorySourceStatus::Resolved { source_identity_json(finding.source()) } else { serde_json::Value::Null },
+            "source_candidates": finding.source_candidates().iter().map(|source| source_identity_json(source.as_deref())).collect::<Vec<_>>(),
+            "source_status": finding.source_status().as_str(),
         },
         "disposition": disposition_json(disposition),
         "title": details.title(),
@@ -736,6 +860,9 @@ fn governed_exception_json(disposition: &AdvisoryDisposition) -> Option<serde_js
     let AdvisoryDisposition::Unreviewed { finding } = disposition else {
         return None;
     };
+    if !finding.is_registry_finding() || finding.source_candidates().len() != 1 {
+        return None;
+    }
     let AdvisoryFindingId::RustSec(advisory_id) = finding.advisory_id() else {
         return None;
     };
@@ -799,7 +926,12 @@ fn render_finding_failure(finding: &AdvisoryFinding, reason: &str) -> String {
     if !finding.details().patched_versions().is_empty() {
         write!(
             &mut rendered,
-            "; fixed in {}",
+            "; {} {}",
+            if finding.is_registry_finding() {
+                "fixed in"
+            } else {
+                "registry advisory patched range (not Git fix proof):"
+            },
             finding
                 .details()
                 .patched_versions()
@@ -858,6 +990,10 @@ fn render_governed_exception_pointer(
     stdout: &mut dyn Write,
     finding: &AdvisoryFinding,
 ) -> Result<(), CommandError> {
+    if !finding.is_registry_finding() || finding.source_candidates().len() != 1 {
+        writeln!(stdout, "  source review required; Git/ambiguous findings have no governed exception or registry update path").map_err(CommandError::Io)?;
+        return Ok(());
+    }
     let AdvisoryFindingId::RustSec(advisory_id) = finding.advisory_id() else {
         return Ok(());
     };
@@ -1083,6 +1219,9 @@ fn render_finding_id(id: &AdvisoryFindingId) -> String {
 
 fn render_completeness_failure(failure: &AdvisoryAuditCompletenessFailure) -> String {
     match failure {
+        AdvisoryAuditCompletenessFailure::FindingSourceUnavailable { package } => format!(
+            "source attribution unavailable or ambiguous for {package}; no advisory exception can be applied"
+        ),
         AdvisoryAuditCompletenessFailure::MissingCargoDenyReport => {
             "missing cargo-deny structured report".to_owned()
         }

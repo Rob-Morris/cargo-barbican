@@ -283,9 +283,7 @@ fn assess_reports_elevated_risk_findings_for_new_surfaces() {
     assert!(
         rendered.contains("new non-crates.io direct specs: Cargo.toml:dependencies:forked (git)")
     );
-    assert!(rendered.contains(
-        "source changes: forked@0.1.0 source=git+https://example.com/forked.git#deadbeef"
-    ));
+    assert!(rendered.contains("source changes: forked@0.1.0 source=(unsupported Git source)"));
     assert!(rendered.contains("new -sys crates: native-sys@1.2.3"));
     assert!(rendered.contains("new/changed build.rs surface: native-sys@1.2.3"));
     assert!(rendered.contains("new/changed proc-macro surface: native-sys@1.2.3"));
@@ -347,7 +345,7 @@ fn assess_lists_reviewed_age_exception_under_allowed_policy_exceptions() {
   "packages": [
     {
       "name": "serde",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.0.228",
       "targets": [{"kind": ["lib"]}]
     }
@@ -418,7 +416,7 @@ fn assess_does_not_honour_age_exception_with_missing_review_record() {
   "packages": [
     {
       "name": "serde",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.0.228",
       "targets": [{"kind": ["lib"]}]
     }
@@ -487,7 +485,7 @@ fn assess_blocks_reviewed_age_exception_checksum_mismatch() {
   "packages": [
     {
       "name": "serde",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.0.228",
       "targets": [{"kind": ["lib"]}]
     }

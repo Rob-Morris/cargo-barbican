@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.29.0
+# Synced from cargo-barbican v0.30.0
 # Copy this template into a consumer repo, then edit that repo's
 # reviewed-targets.toml to declare reviewed dependency families.
 
@@ -48,3 +48,10 @@
 #
 # [rust.families.allowed_advisories]
 # some-crate = [{ id = "RUSTSEC-2026-0001", review_by = "2026-12-31" }]
+
+# Exact Git targets use a distinct identity; review each locked Git package.
+# See docs/user/git-sources.md in the upstream repo for complete constraints.
+# [rust.families.resolved]
+# upstream = { source = "git", version = "0.1.0", url = "https://example.org/repo.git", rev = "0123456789abcdef0123456789abcdef01234567" }
+# Git direct entries use source/url/rev, without version. Git advisory and age
+# exceptions are unsupported. Scaffolding does not complete a source review.

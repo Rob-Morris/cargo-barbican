@@ -8,7 +8,7 @@ use crate::{
     CargoManifestDependency, CargoMetadata, CratesIoClient, ExactCrateSpec, HighScrutinyConfig,
     Lockfile, ReleaseAgeOutcome, ReviewedExecutionSurfaceAllowance, ReviewedReleaseAgeException,
     Sha256Digest, changed_crates_io_checksums, check_release_age_at,
-    is_native_sys_execution_surface, package_surfaces,
+    is_native_sys_execution_surface, package_surfaces_for_identity,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,7 +132,16 @@ impl NonCratesIoSourceChange {
 
 impl fmt::Display for NonCratesIoSourceChange {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} source={}", self.spec, self.source)
+        write!(
+            formatter,
+            "{} source={}",
+            self.spec,
+            crate::source_diagnostic(if self.source == "none" {
+                None
+            } else {
+                Some(&self.source)
+            })
+        )
     }
 }
 
@@ -684,12 +693,12 @@ where
             }
         }
 
-        match package_surfaces(metadata, &spec) {
+        match package_surfaces_for_identity(metadata, package) {
             Ok(surfaces) => {
                 if is_native_sys_execution_surface(spec.is_native_sys(), surfaces.has_native_links)
                 {
                     push_execution_surface(
-                        &spec,
+                        package,
                         ExecutionSurfaceKind::NativeSys,
                         reviewed_execution_surface_allowances,
                         &mut items,
@@ -699,7 +708,7 @@ where
                 }
                 if surfaces.has_build_rs {
                     push_execution_surface(
-                        &spec,
+                        package,
                         ExecutionSurfaceKind::BuildRs,
                         reviewed_execution_surface_allowances,
                         &mut items,
@@ -709,7 +718,7 @@ where
                 }
                 if surfaces.is_proc_macro {
                     push_execution_surface(
-                        &spec,
+                        package,
                         ExecutionSurfaceKind::ProcMacro,
                         reviewed_execution_surface_allowances,
                         &mut items,
@@ -741,16 +750,17 @@ where
 }
 
 fn push_execution_surface(
-    spec: &ExactCrateSpec,
+    package: &crate::LockedPackage,
     surface: ExecutionSurfaceKind,
     allowances: &[ReviewedExecutionSurfaceAllowance],
     items: &mut Vec<RustAssessmentItem>,
     allowed_surfaces: &mut Vec<ReviewedExecutionSurfaceAllowance>,
     make_item: impl FnOnce(ExactCrateSpec) -> RustAssessmentItem,
 ) {
+    let spec = package.exact_spec();
     match allowances
         .iter()
-        .find(|allowance| allowance.spec() == spec && allowance.surface() == surface)
+        .find(|allowance| allowance.matches_package(package) && allowance.surface() == surface)
     {
         Some(allowance) => allowed_surfaces.push(allowance.clone()),
         None => items.push(make_item(spec.clone())),
@@ -886,7 +896,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "serde",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.227",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.227", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.0.227",
       "targets": [{"kind": ["lib"]}]
     }
@@ -945,7 +955,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "demo-sys",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#demo-sys@1.2.3",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#demo-sys@1.2.3", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.3",
       "targets": [{"kind": ["custom-build"]}]
     }
@@ -1106,7 +1116,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "demo-sys",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#demo-sys@1.2.3",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#demo-sys@1.2.3", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.3",
       "targets": [
         {"kind": ["custom-build"]},
@@ -1216,7 +1226,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "demo",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#demo@1.2.3",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#demo@1.2.3", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.3",
       "targets": [{"kind": ["custom-build"]}]
     }
@@ -1267,7 +1277,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "native-link",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#native-link@1.2.3",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#native-link@1.2.3", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.3",
       "links": "native",
       "targets": [{"kind": ["lib"]}]
@@ -1328,7 +1338,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "native-sys",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#native-sys@1.2.4",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#native-sys@1.2.4", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.4",
       "targets": [{"kind": ["lib"]}]
     }
@@ -1386,7 +1396,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "demo-sys",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#demo-sys@1.2.3",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#demo-sys@1.2.3", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.3",
       "targets": [
         {"kind": ["custom-build"]},
@@ -1395,7 +1405,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
     },
     {
       "name": "drift-sys",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#drift-sys@1.2.4",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#drift-sys@1.2.4", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.4",
       "targets": []
     }

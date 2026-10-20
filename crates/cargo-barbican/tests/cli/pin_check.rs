@@ -361,7 +361,7 @@ serde = {{ version = "1.0.228", checksum_sha256 = "{checksum}" }}
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("Pin check: FAIL"));
     assert!(rendered.contains("non-crates.io sources"));
-    assert!(rendered.contains("git+https://attacker.example/serde"));
+    assert!(rendered.contains("(unsupported Git source)"));
 }
 
 #[test]
@@ -411,7 +411,7 @@ serde = "1.0.228"
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("Pin check: FAIL"));
     assert!(rendered.contains("non-crates.io sources"));
-    assert!(rendered.contains("git+https://attacker.example/serde"));
+    assert!(rendered.contains("(unsupported Git source)"));
 }
 
 #[test]
@@ -1762,5 +1762,5 @@ serde = {{ version = "1.0.228", checksum_sha256 = "{checksum}" }}
     assert!(!rendered.contains('\u{202e}'));
     assert!(rendered.contains("Pin check: FAIL"));
     assert!(rendered.contains("non-crates.io sources"));
-    assert!(rendered.contains("git+https://attacker.example/serde\\x202e"));
+    assert!(rendered.contains("(unsupported Git source)"));
 }

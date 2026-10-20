@@ -1141,3 +1141,12 @@ standard release path, `cargo barbican gatehouse pre-release` composes them
 without merging their semantics and applies toolchain conformance plus the
 blocking inventory coverage floor first. See [ci.md](ci.md) for the
 scheduled-audit pattern.
+
+## Exact Git sources
+
+Exact reviewed Git dependencies use the existing `pin add` / `pin check`,
+inventory, audit and verification workflow. See the
+[Git source guide](git-sources.md) for the tagged policy
+schema, full-commit requirement, per-package review, source-bound allowances,
+manual intake and advisory/build-input limitations. Registry age/advisory
+exceptions never authorise Git targets; cargo-deny permission remains separate.

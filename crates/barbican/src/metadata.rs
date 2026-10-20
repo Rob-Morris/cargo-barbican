@@ -376,6 +376,15 @@ pub fn select_package_id(
         });
     }
 
+    if matches
+        .iter()
+        .any(|package| package.source.as_deref() != Some(crate::CRATES_IO_SOURCE))
+    {
+        return Err(CargoMetadataError::UpdateSourceUnsupported {
+            crate_name: crate_name.to_owned(),
+        });
+    }
+
     if matches.len() == 1 {
         return Ok(matches[0].id.clone());
     }
@@ -431,6 +440,25 @@ pub fn package_surfaces(
     }
 
     Ok(surfaces)
+}
+
+pub fn package_surfaces_for_identity(
+    metadata: &CargoMetadata,
+    package: &crate::LockedPackage,
+) -> Result<MetadataPackageSurfaces, CargoMetadataError> {
+    metadata
+        .packages
+        .iter()
+        .find(|candidate| {
+            candidate.name == package.name
+                && candidate.version == package.version
+                && candidate.source == package.source
+        })
+        .map(MetadataPackageSurfaces::from_package)
+        .ok_or_else(|| CargoMetadataError::PackageVersionNotFound {
+            crate_name: package.name.clone(),
+            version: package.version.clone(),
+        })
 }
 
 pub fn shortest_workspace_dependency_path(
@@ -645,6 +673,7 @@ pub(crate) fn metadata_packages(
         .packages
         .iter()
         .map(move |package| MetadataPackageInfo {
+            source: package.source.as_deref(),
             name: package.name.as_str(),
             version: package.version.as_str(),
             is_workspace_member: workspace_members.contains(package.id.as_str()),
@@ -672,6 +701,10 @@ fn dependency_name_matches_package(dependency_name: &str, package_name: &str) ->
 
 #[derive(Debug, Error)]
 pub enum CargoMetadataError {
+    #[error(
+        "update {crate_name}: registry-only update cannot select a Git, path or alternate-registry package; review a new exact source revision explicitly"
+    )]
+    UpdateSourceUnsupported { crate_name: String },
     #[error("incomplete Cargo doctest scope: {0}")]
     IncompleteDoctestScope(String),
     #[error(
@@ -796,6 +829,7 @@ impl MetadataPackageSurfaces {
 }
 
 pub(crate) struct MetadataPackageInfo<'a> {
+    pub(crate) source: Option<&'a str>,
     pub(crate) name: &'a str,
     pub(crate) version: &'a str,
     pub(crate) is_workspace_member: bool,
@@ -1022,10 +1056,10 @@ mod tests {
       {"name":"external_alias","pkg":"path+file:///outside#external@3.0.0"},
       {"name":"member","pkg":"path+file:///repo/member#member@0.1.0"}
     ]},
-    {"id":"registry+https://github.com/rust-lang/crates.io-index#real@1.0.0","deps":[
+    {"id":"registry+https://github.com/rust-lang/crates.io-index#real@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index","deps":[
       {"name":"real","pkg":"registry+https://github.com/rust-lang/crates.io-index#real@2.0.0"}
     ]},
-    {"id":"registry+https://github.com/rust-lang/crates.io-index#real@2.0.0","deps":[]},
+    {"id":"registry+https://github.com/rust-lang/crates.io-index#real@2.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index","deps":[]},
     {"id":"path+file:///outside#external@3.0.0","deps":[]},
     {"id":"path+file:///repo/member#member@0.1.0","deps":[]}
   ]}
@@ -1288,7 +1322,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "serde",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.0.228",
       "targets": []
     }
@@ -1313,8 +1347,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             r#"{
   "packages": [
     {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
-    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "version": "1.0.228", "targets": []},
-    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@0.9.15", "version": "0.9.15", "targets": []}
+    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.0.228", "targets": []},
+    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@0.9.15", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "0.9.15", "targets": []}
   ],
   "workspace_members": ["path+file:///repo#root@0.1.0"],
   "resolve": {
@@ -1348,8 +1382,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             r#"{
   "packages": [
     {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
-    {"name": "mid", "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0", "version": "1.0.0", "targets": []},
-    {"name": "leaf", "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "version": "2.0.0", "targets": []}
+    {"name": "mid", "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.0.0", "targets": []},
+    {"name": "leaf", "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "2.0.0", "targets": []}
   ],
   "workspace_members": ["path+file:///repo#root@0.1.0"],
   "resolve": {
@@ -1359,11 +1393,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         "deps": [{"name": "mid", "pkg": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0"}]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": []
       }
     ]
@@ -1397,10 +1431,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": [],
      "dependencies": [{"name": "quick-xml", "req": "^0.39", "kind": "dev"}]},
-    {"name": "plist", "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "version": "1.9.0", "targets": [],
+    {"name": "plist", "id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.9.0", "targets": [],
      "dependencies": [{"name": "quick-xml", "req": ">=0.39, <0.40"}]},
-    {"name": "undeclared-parent", "id": "registry+https://github.com/rust-lang/crates.io-index#undeclared-parent@0.2.0", "version": "0.2.0", "targets": []},
-    {"name": "quick-xml", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "version": "0.39.4", "targets": []}
+    {"name": "undeclared-parent", "id": "registry+https://github.com/rust-lang/crates.io-index#undeclared-parent@0.2.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "0.2.0", "targets": []},
+    {"name": "quick-xml", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "0.39.4", "targets": []}
   ],
   "workspace_members": ["path+file:///repo#root@0.1.0"],
   "resolve": {
@@ -1409,13 +1443,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         {"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"},
         {"name": "plist", "pkg": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0"}
       ]},
-      {"id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "deps": [
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#plist@1.9.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "deps": [
         {"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}
       ]},
-      {"id": "registry+https://github.com/rust-lang/crates.io-index#undeclared-parent@0.2.0", "deps": [
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#undeclared-parent@0.2.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "deps": [
         {"name": "quick_xml", "pkg": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4"}
       ]},
-      {"id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "deps": []}
+      {"id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "source": "registry+https://github.com/rust-lang/crates.io-index", "deps": []}
     ]
   }
 }"#,
@@ -1448,7 +1482,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         let metadata = parse_cargo_metadata(
             r#"{
   "packages": [
-    {"name": "quick-xml", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "version": "0.39.4", "targets": []}
+    {"name": "quick-xml", "id": "registry+https://github.com/rust-lang/crates.io-index#quick-xml@0.39.4", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "0.39.4", "targets": []}
   ],
   "workspace_members": [],
   "resolve": null
@@ -1470,10 +1504,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             r#"{
   "packages": [
     {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
-    {"name": "short", "id": "registry+https://github.com/rust-lang/crates.io-index#short@1.0.0", "version": "1.0.0", "targets": []},
-    {"name": "long-a", "id": "registry+https://github.com/rust-lang/crates.io-index#long-a@1.0.0", "version": "1.0.0", "targets": []},
-    {"name": "long-b", "id": "registry+https://github.com/rust-lang/crates.io-index#long-b@1.0.0", "version": "1.0.0", "targets": []},
-    {"name": "leaf", "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "version": "2.0.0", "targets": []}
+    {"name": "short", "id": "registry+https://github.com/rust-lang/crates.io-index#short@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.0.0", "targets": []},
+    {"name": "long-a", "id": "registry+https://github.com/rust-lang/crates.io-index#long-a@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.0.0", "targets": []},
+    {"name": "long-b", "id": "registry+https://github.com/rust-lang/crates.io-index#long-b@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.0.0", "targets": []},
+    {"name": "leaf", "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "2.0.0", "targets": []}
   ],
   "workspace_members": ["path+file:///repo#root@0.1.0"],
   "resolve": {
@@ -1486,19 +1520,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         ]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#short@1.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#short@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#long-a@1.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#long-a@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": [{"name": "long_b", "pkg": "registry+https://github.com/rust-lang/crates.io-index#long-b@1.0.0"}]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#long-b@1.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#long-b@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": []
       }
     ]
@@ -1532,8 +1566,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {"name": "member-far", "id": "path+file:///repo#member-far@0.1.0", "version": "0.1.0", "targets": []},
     {"name": "member-near", "id": "path+file:///repo#member-near@0.1.0", "version": "0.1.0", "targets": []},
-    {"name": "mid", "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0", "version": "1.0.0", "targets": []},
-    {"name": "leaf", "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "version": "2.0.0", "targets": []}
+    {"name": "mid", "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.0.0", "targets": []},
+    {"name": "leaf", "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "2.0.0", "targets": []}
   ],
   "workspace_members": [
     "path+file:///repo#member-far@0.1.0",
@@ -1550,11 +1584,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#mid@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": [{"name": "leaf", "pkg": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0"}]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#leaf@2.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": []
       }
     ]
@@ -1583,8 +1617,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             r#"{
   "packages": [
     {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
-    {"name": "cycle-a", "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0", "version": "1.0.0", "targets": []},
-    {"name": "cycle-b", "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-b@1.0.0", "version": "1.0.0", "targets": []}
+    {"name": "cycle-a", "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.0.0", "targets": []},
+    {"name": "cycle-b", "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-b@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.0.0", "targets": []}
   ],
   "workspace_members": ["path+file:///repo#root@0.1.0"],
   "resolve": {
@@ -1594,11 +1628,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         "deps": [{"name": "cycle_a", "pkg": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0"}]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": [{"name": "cycle_b", "pkg": "registry+https://github.com/rust-lang/crates.io-index#cycle-b@1.0.0"}]
       },
       {
-        "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-b@1.0.0",
+        "id": "registry+https://github.com/rust-lang/crates.io-index#cycle-b@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
         "deps": [{"name": "cycle_a", "pkg": "registry+https://github.com/rust-lang/crates.io-index#cycle-a@1.0.0"}]
       }
     ]
@@ -1646,8 +1680,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
             r#"{
   "packages": [
     {"name": "root", "id": "path+file:///repo#root@0.1.0", "version": "0.1.0", "targets": []},
-    {"name": "windows-sys", "id": "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.61.0", "version": "0.61.0", "targets": []},
-    {"name": "windows-sys", "id": "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.60.2", "version": "0.60.2", "targets": []}
+    {"name": "windows-sys", "id": "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.61.0", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "0.61.0", "targets": []},
+    {"name": "windows-sys", "id": "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.60.2", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "0.60.2", "targets": []}
   ],
   "workspace_members": ["path+file:///repo#root@0.1.0"],
   "resolve": {
@@ -1681,8 +1715,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         let metadata = parse_cargo_metadata(
             r#"{
   "packages": [
-    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "version": "1.0.228", "targets": []},
-    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@0.9.15", "version": "0.9.15", "targets": []}
+    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "1.0.228", "targets": []},
+    {"name": "serde", "id": "registry+https://github.com/rust-lang/crates.io-index#serde@0.9.15", "source": "registry+https://github.com/rust-lang/crates.io-index", "version": "0.9.15", "targets": []}
   ],
   "workspace_members": ["path+file:///repo#root@0.1.0"],
   "resolve": {
@@ -1712,7 +1746,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "demo",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#demo@1.2.3",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#demo@1.2.3", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.3",
       "links": "demo-native",
       "targets": [
@@ -1752,7 +1786,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
     },
     {
       "name": "shadow",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#shadow@1.0.0",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#shadow@1.0.0", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.0.0",
       "targets": [{"kind": ["custom-build"]}]
     },
@@ -1802,7 +1836,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
   "packages": [
     {
       "name": "demo",
-      "id": "registry+https://github.com/rust-lang/crates.io-index#demo@1.2.3",
+      "id": "registry+https://github.com/rust-lang/crates.io-index#demo@1.2.3", "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "1.2.3",
       "targets": [{"kind": ["custom-build"]}]
     }

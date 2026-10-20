@@ -121,6 +121,15 @@ fn render_pin_check_report(
         writeln!(stdout, "Pin check: FAIL").map_err(CommandError::Io)?;
     }
     writeln!(stdout, "  manifest: {manifest_path}").map_err(CommandError::Io)?;
+    for issue in report.git_issues() {
+        writeln!(
+            stdout,
+            "  - {}: {}",
+            escape_render_field(&issue.package),
+            escape_render_field(&issue.reason)
+        )
+        .map_err(CommandError::Io)?;
+    }
 
     if let Some(source_replacement) = source_replacement {
         writeln!(
@@ -270,6 +279,9 @@ fn render_observed_direct_dependencies(observed: &[ObservedDirectDependency]) ->
 }
 
 fn render_resolved_target(target: &ReviewedResolvedTarget) -> String {
+    if let Some(git) = target.git() {
+        return format!("{{source=git, version={}, {git}}}", target.version());
+    }
     let version = escape_render_field(target.version());
     match target.checksum_sha256() {
         Some(checksum) => {
@@ -299,7 +311,7 @@ fn render_non_crates_io_sources_suffix(sources: &std::collections::BTreeSet<Stri
 
     let escaped = sources
         .iter()
-        .map(|source| escape_render_field(source))
+        .map(|source| escape_render_field(&barbican::source_diagnostic(Some(source))))
         .collect::<Vec<_>>();
 
     format!(", non-crates.io sources {}", render_values(escaped.iter()))

@@ -131,6 +131,13 @@ impl fmt::Display for RunnerError {
                     Some(code) => write!(formatter, "command exited with status {code}")?,
                     None => write!(formatter, "command terminated without an exit code")?,
                 }
+                if stdout.contains("://")
+                    || stderr.contains("://")
+                    || stdout.contains("git+")
+                    || stderr.contains("git+")
+                {
+                    return write!(formatter, "; source-bearing command output omitted");
+                }
                 if !stdout.is_empty() {
                     write!(formatter, "; stdout: {stdout}")?;
                 }

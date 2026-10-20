@@ -4,12 +4,14 @@ use std::fmt::Write as _;
 use thiserror::Error;
 use time::Date;
 
+use crate::GitSourceIdentity;
 use crate::format_iso_date;
 use crate::lockfile::{LockedPackage, Lockfile};
 use crate::manifest::CargoManifestDirectRequirement;
 use crate::review_record::REVIEW_RECORD_SCAFFOLD_MARKER;
 use crate::reviewed_targets::{
-    RawReviewedAdvisory, RawReviewedResolvedTarget, RawReviewedRustFamily, RawReviewedTargets,
+    RawGitDirectTarget, RawGitResolvedTarget, RawGitTag, RawRegistryArtifact, RawReviewedAdvisory,
+    RawReviewedDirectTarget, RawReviewedResolvedTarget, RawReviewedRustFamily, RawReviewedTargets,
     RawRustReviewedTargets, ReviewedTargets, RustSecAdvisoryId,
 };
 use crate::sha256::Sha256Digest;
@@ -119,14 +121,17 @@ pub fn compose_pin_family_stub(
     let crate_name = spec.crate_name().to_owned();
     let mut direct = BTreeMap::new();
     if let Some(requirement) = direct_requirement {
-        direct.insert(crate_name.clone(), requirement.to_owned());
+        direct.insert(
+            crate_name.clone(),
+            RawReviewedDirectTarget::Registry(requirement.to_owned()),
+        );
     }
 
     let resolved_target = match checksum_sha256 {
-        Some(checksum) => RawReviewedResolvedTarget::RegistryArtifact {
+        Some(checksum) => RawReviewedResolvedTarget::RegistryArtifact(RawRegistryArtifact {
             version: spec.version().to_owned(),
             checksum_sha256: checksum.to_string(),
-        },
+        }),
         None => RawReviewedResolvedTarget::Version(spec.version().to_owned()),
     };
     let mut allowed_advisories = BTreeMap::new();
@@ -174,17 +179,50 @@ pub fn compose_pin_review_record(
     advisory_exceptions: &[PinExceptionAdvisory],
     date: Date,
 ) -> String {
+    compose_pin_review_record_with_git(
+        spec,
+        checksum_sha256,
+        from_crates_io,
+        None,
+        family_name,
+        direct_requirement,
+        advisory_exceptions,
+        date,
+    )
+}
+
+fn compose_pin_review_record_with_git(
+    spec: &ExactCrateSpec,
+    checksum_sha256: Option<&Sha256Digest>,
+    from_crates_io: bool,
+    git: Option<&GitSourceIdentity>,
+    family_name: &str,
+    direct_requirement: Option<&str>,
+    advisory_exceptions: &[PinExceptionAdvisory],
+    date: Date,
+) -> String {
     let crate_name = spec.crate_name();
     let version = spec.version();
     let iso_date = format_iso_date(date);
-    let target_source = if from_crates_io {
+    let target_source = if let Some(git) = git {
+        format!("(Git: {git})")
+    } else if from_crates_io {
         "(from `crates.io`)".to_owned()
     } else {
         "(non-crates.io source; record the source manually)".to_owned()
     };
-    let resolved_set = match checksum_sha256 {
-        Some(checksum) => format!("`{crate_name}` `{version}` (checksum_sha256 `{checksum}`)"),
-        None => format!("`{crate_name}` `{version}` (no `Cargo.lock` checksum recorded)"),
+    let resolved_set = if let Some(git) = git {
+        format!("`{crate_name}` `{version}` (Git: {git}; not a registry archive identity)")
+    } else {
+        match checksum_sha256 {
+            Some(checksum) => format!("`{crate_name}` `{version}` (checksum_sha256 `{checksum}`)"),
+            None => format!("`{crate_name}` `{version}` (no `Cargo.lock` checksum recorded)"),
+        }
+    };
+    let release_age = if git.is_some() {
+        "- Not applicable: registry release age does not establish Git age. Git age exceptions are unsupported."
+    } else {
+        "- Minimum policy:\n- Observed publish date / age:\n- Pass / fail:"
     };
     let direct_set = match direct_requirement {
         Some(requirement) => format!(" `{crate_name}` `{requirement}`"),
@@ -248,9 +286,7 @@ pub fn compose_pin_review_record(
 
 ## Release Age
 
-- Minimum policy:
-- Observed publish date / age:
-- Pass / fail:
+{release_age}
 
 ## Advisory Review
 
@@ -280,6 +316,9 @@ pub fn compose_pin_review_record(
 "
     );
 
+    if let Some(git) = git {
+        record.push_str(&format!("\n## Exact Git Source Review\n\n- Repository: {}\n- Requested and resolved commit: {}\n- Review immutable source, full feature/lock graph and each in-repository package.\n- Record build/proc-macro/native inputs, submodules/LFS/downloads, provenance and licence evidence.\n- Advisory scanners may exclude Git; zero findings do not replace source review.\n- Git advisory and release-age exceptions are unsupported.\n", git.url(), git.rev()));
+    }
     record
 }
 
@@ -302,6 +341,13 @@ fn rendered_advisory_exceptions(advisory_exceptions: &[PinExceptionAdvisory]) ->
 /// configured policy file name, which is a binary/CLI concern).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinAddRejection {
+    UnsupportedSource {
+        crate_name: String,
+        reason: String,
+    },
+    AmbiguousSource {
+        crate_name: String,
+    },
     NotInLockfile {
         crate_name: String,
     },
@@ -333,6 +379,7 @@ pub struct PinAddPlan {
     review_record: String,
     exact: ExactCrateSpec,
     checksum: Option<Sha256Digest>,
+    git: Option<GitSourceIdentity>,
     direct_requirement: Option<String>,
     has_non_conforming_direct_requirement: bool,
     family_stub: String,
@@ -340,6 +387,9 @@ pub struct PinAddPlan {
 }
 
 impl PinAddPlan {
+    pub fn git(&self) -> Option<&GitSourceIdentity> {
+        self.git.as_ref()
+    }
     pub fn family_name(&self) -> &str {
         &self.family_name
     }
@@ -402,6 +452,17 @@ pub fn plan_pin_add(
     }
 
     let package = select_locked_package(&matching_packages, target)?;
+    let git = if package.is_crates_io() {
+        None
+    } else {
+        Some(
+            GitSourceIdentity::from_locked_source(package.source.as_deref().unwrap_or_default())
+                .map_err(|error| PinAddRejection::UnsupportedSource {
+                    crate_name: package.name.clone(),
+                    reason: error.to_string(),
+                })?,
+        )
+    };
 
     if let Some(family) = family_covering_crate(reviewed_targets, target.crate_name()) {
         return Err(PinAddRejection::AlreadyCovered {
@@ -425,34 +486,99 @@ pub fn plan_pin_add(
         .iter()
         .filter(|requirement| requirement.name() == package.name)
         .collect::<Vec<_>>();
+    if let Some(git) = &git
+        && observed_direct.iter().any(|declaration| {
+            declaration.git() != Some(git)
+                || declaration
+                    .version_requirement()
+                    .is_some_and(|requirement| {
+                        semver::VersionReq::parse(requirement)
+                            .ok()
+                            .zip(semver::Version::parse(&package.version).ok())
+                            .is_none_or(|(requirement, version)| !requirement.matches(&version))
+                    })
+        })
+    {
+        return Err(PinAddRejection::UnsupportedSource {
+            crate_name: package.name.clone(),
+            reason: "direct Git declarations must request the reviewed repository and full commit"
+                .to_owned(),
+        });
+    }
     let exact = package.exact_spec();
-    let direct_requirement = exact_direct_requirement(&observed_direct, exact);
+    let direct_requirement = if let Some(git) = &git {
+        (!observed_direct.is_empty()).then(|| git.declaration_source())
+    } else {
+        exact_direct_requirement(&observed_direct, exact)
+    };
     let has_non_conforming_direct_requirement =
         direct_requirement.is_none() && !observed_direct.is_empty();
 
-    let family_stub = compose_pin_family_stub(
-        &family_name,
-        &review_record,
-        exact,
-        package.checksum(),
-        direct_requirement.as_deref(),
-        &[],
-    );
-    let record_stub = compose_pin_review_record(
+    let record_stub = compose_pin_review_record_with_git(
         exact,
         package.checksum(),
         package.is_crates_io(),
+        git.as_ref(),
         &family_name,
         direct_requirement.as_deref(),
         &[],
         date,
     );
 
+    let family_stub = if let Some(git) = &git {
+        let mut direct = BTreeMap::new();
+        if !observed_direct.is_empty() {
+            direct.insert(
+                package.name.clone(),
+                RawReviewedDirectTarget::Git(RawGitDirectTarget {
+                    source: RawGitTag::Git,
+                    url: git.url().to_owned(),
+                    rev: git.rev().to_owned(),
+                }),
+            );
+        }
+        let family = RawReviewedRustFamily {
+            name: family_name.clone(),
+            review_record: review_record.clone(),
+            direct,
+            resolved: BTreeMap::from([(
+                package.name.clone(),
+                RawReviewedResolvedTarget::Git(RawGitResolvedTarget {
+                    source: RawGitTag::Git,
+                    version: package.version.clone(),
+                    url: git.url().to_owned(),
+                    rev: git.rev().to_owned(),
+                }),
+            )]),
+            allowed_surfaces: BTreeMap::new(),
+            allowed_age_exceptions: BTreeMap::new(),
+            allowed_advisories: BTreeMap::new(),
+        };
+        format!(
+            "\n{}",
+            toml::to_string(&RawReviewedTargets {
+                rust: RawRustReviewedTargets {
+                    families: vec![family]
+                }
+            })
+            .expect("typed Git family serialises")
+        )
+    } else {
+        compose_pin_family_stub(
+            &family_name,
+            &review_record,
+            exact,
+            package.checksum(),
+            direct_requirement.as_deref(),
+            &[],
+        )
+    };
     Ok(PinAddPlan {
         family_name,
         review_record,
         exact: exact.clone(),
         checksum: package.checksum().cloned(),
+        git,
         direct_requirement,
         has_non_conforming_direct_requirement,
         family_stub,
@@ -556,6 +682,15 @@ pub fn plan_pin_exception(
     }
     let package =
         select_locked_package(&matching_packages, target).map_err(PinExceptionRejection::Target)?;
+    if !package.is_crates_io() {
+        return Err(PinExceptionRejection::Target(
+            PinAddRejection::UnsupportedSource {
+                crate_name: package.name.clone(),
+                reason: "Git and other non-crates.io advisory exceptions are unsupported"
+                    .to_owned(),
+            },
+        ));
+    }
 
     for advisory in advisories {
         if let Some(existing) = reviewed_targets
@@ -666,6 +801,7 @@ pub fn plan_pin_exception(
             review_record,
             exact: exact.clone(),
             checksum: Some(checksum.clone()),
+            git: None,
             direct_requirement,
             has_non_conforming_direct_requirement,
             family_stub,
@@ -706,6 +842,30 @@ fn select_locked_package<'a>(
     matching_packages: &[&'a LockedPackage],
     target: &PinAddTarget,
 ) -> Result<&'a LockedPackage, PinAddRejection> {
+    let selected_versions = matching_packages
+        .iter()
+        .filter(|package| {
+            target
+                .version()
+                .is_none_or(|version| package.version == version)
+        })
+        .map(|package| package.version.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    if selected_versions.len() == 1
+        && matching_packages
+            .iter()
+            .filter(|package| {
+                target
+                    .version()
+                    .is_none_or(|version| package.version == version)
+            })
+            .count()
+            > 1
+    {
+        return Err(PinAddRejection::AmbiguousSource {
+            crate_name: target.crate_name().to_owned(),
+        });
+    }
     match target.version() {
         Some(version) => matching_packages
             .iter()
@@ -849,10 +1009,11 @@ mod tests {
 
         assert_eq!(
             rejection,
-            PinExceptionRejection::MissingChecksum {
+            PinExceptionRejection::Target(super::PinAddRejection::UnsupportedSource {
                 crate_name: "local-crate".to_owned(),
-                version: "0.1.0".to_owned(),
-            }
+                reason: "Git and other non-crates.io advisory exceptions are unsupported"
+                    .to_owned(),
+            })
         );
     }
 
@@ -1175,7 +1336,10 @@ serde = {{ version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abc
             "docs/dependency-reviews/2026-07-02-serde.md"
         );
         assert_eq!(
-            family.direct().get("serde").map(String::as_str),
+            family
+                .direct()
+                .get("serde")
+                .and_then(crate::ReviewedDirectTarget::requirement),
             Some("=1.0.228")
         );
         let resolved = family

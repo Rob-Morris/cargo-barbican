@@ -330,7 +330,7 @@ pub(crate) enum CiSystem {
 pub(crate) enum PinCommand {
     #[command(
         about = "Scaffold a reviewed family and review-record stub from Cargo.lock",
-        long_about = "Reads the resolved version and checksum_sha256 for one crate already \
+        long_about = "Reads the resolved version and registry checksum or exact Git source for one crate already \
             resolved in Cargo.lock, fully offline, and appends a reviewed-targets.toml family \
             stub plus a review-record markdown stub pre-filled with the resolved facts. The \
             scaffold is not a completed review."
@@ -367,7 +367,7 @@ pub(crate) enum PinCommand {
         about = "Enforce reviewed-target policy",
         long_about = "Checks active reviewed Rust families in reviewed-targets.toml against the \
             current workspace manifests and Cargo.lock: review records exist, direct \
-            requirements and resolved versions/checksums match, and no patch table or cargo \
+            requirements and resolved source identities match, every Git package is reviewed, and no patch table or cargo \
             config source override bypasses an active reviewed family. Skips successfully when \
             no reviewed-target manifest is present or no active Rust families are configured."
     )]

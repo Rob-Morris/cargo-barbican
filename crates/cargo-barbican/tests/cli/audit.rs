@@ -7,6 +7,7 @@ fn audit_runs_cargo_deny_json_by_default() {
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -41,6 +42,7 @@ fn audit_auto_includes_licenses_check_when_deny_toml_declares_policy() {
         "[licenses]\nallow = [\"MIT\", \"Apache-2.0\"]\n",
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -80,6 +82,7 @@ fn audit_skips_licenses_check_without_a_declared_policy() {
     write_root_manifest(&temp_dir);
     fs::write(temp_dir.join("deny.toml"), "[bans]\nwildcards = \"deny\"\n")
         .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -119,6 +122,7 @@ checks = ["advisories", "bans", "sources"]
         "[licenses]\nallow = [\"MIT\"]\n",
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -152,6 +156,7 @@ fn audit_fails_on_licenses_rejections_when_policy_is_enforced() {
         "[licenses]\nallow = [\"MIT\"]\n",
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -182,6 +187,7 @@ fn audit_json_reports_enforced_licenses_posture_from_deny_toml_policy() {
         "[licenses]\nallow = [\"MIT\"]\n",
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -191,7 +197,7 @@ fn audit_json_reports_enforced_licenses_posture_from_deny_toml_policy() {
     assert_eq!(exit_code, ExitCode::SUCCESS);
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
-    assert_eq!(report["schema_version"], 5);
+    assert_eq!(report["schema_version"], 6);
     assert_eq!(
         report["cargo_deny"]["licenses"],
         serde_json::json!({ "posture": "enforced", "reason": "deny-toml-policy" })
@@ -205,6 +211,7 @@ fn audit_reports_failures() {
     let runner = FakeCommandRunner::default().with_cargo_deny_json("not-json");
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -229,6 +236,7 @@ fn audit_fails_closed_with_install_hint_when_cargo_deny_is_missing() {
         FakeCommandRunner::default().with_missing_delegate(cargo_barbican::Delegate::CargoDeny);
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -256,6 +264,7 @@ fn audit_json_fails_closed_with_empty_stdout_when_cargo_deny_is_missing() {
         FakeCommandRunner::default().with_missing_delegate(cargo_barbican::Delegate::CargoDeny);
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -286,6 +295,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -317,6 +327,7 @@ fn audit_does_not_require_cargo_audit_when_it_is_not_the_configured_scanner() {
         FakeCommandRunner::default().with_missing_delegate(cargo_barbican::Delegate::CargoAudit);
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -338,6 +349,7 @@ fn audit_fails_closed_when_delegate_availability_probe_errors() {
         .with_delegate_probe_error(cargo_barbican::Delegate::CargoDeny, "permission denied");
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -362,6 +374,7 @@ fn audit_surfaces_cargo_deny_exit_status_and_stderr_on_runtime_failure() {
     );
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -394,6 +407,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -414,6 +428,7 @@ fn audit_in_non_rust_dir_reports_missing_workspace_root_not_a_delegate_parse_err
     let client = FakeCratesIoClient::default();
     let runner = FakeCommandRunner::default();
     let temp_dir = fresh_temp_dir();
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -439,6 +454,7 @@ fn audit_accepts_reviewed_advisory_with_cargo_deny_scanner() {
     let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
     let temp_dir = fresh_temp_dir();
     write_advisory_audit_fixture(&temp_dir, None, "2026-09-21");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -480,6 +496,7 @@ fn audit_treats_native_ignore_as_governed_when_every_finding_is_accepted() {
         "[advisories]\nignore = [\"RUSTSEC-2026-0001\"]\n",
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -520,6 +537,7 @@ fn audit_json_distinguishes_governed_native_compatibility_ids() {
         "[advisories]\nignore = [\"RUSTSEC-2026-0001\"]\n",
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -538,7 +556,7 @@ fn audit_json_distinguishes_governed_native_compatibility_ids() {
     assert!(stderr.is_empty());
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
-    assert_eq!(report["schema_version"], 5);
+    assert_eq!(report["schema_version"], 6);
     assert_eq!(
         report["native_delegated_ignores"],
         serde_json::json!([{
@@ -559,6 +577,7 @@ fn audit_fails_unreviewed_advisory_with_cargo_deny_scanner() {
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
     fs::write(temp_dir.join("barbican.toml"), "").expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -596,6 +615,7 @@ fn adding_native_ignore_cannot_turn_unreviewed_finding_into_pass() {
         "[advisories]\nignore = [\"RUSTSEC-2026-0001\"]\n",
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -665,6 +685,7 @@ fn native_ignore_is_unmanaged_when_same_advisory_has_an_unreviewed_occurrence() 
         "[advisories]\nignore = [\"RUSTSEC-2026-0001\"]\n",
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -700,6 +721,7 @@ fn audit_fails_expired_reviewed_advisory_with_cargo_deny_scanner() {
     let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
     let temp_dir = fresh_temp_dir();
     write_advisory_audit_fixture(&temp_dir, None, "2000-01-01");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -732,6 +754,7 @@ fn audit_accepts_reviewed_advisory_with_cargo_audit_scanner() {
         Some(r#"lockfile_scanner = "cargo-audit""#),
         "2026-09-21",
     );
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -773,6 +796,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -810,6 +834,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -821,7 +846,7 @@ lockfile_scanner = "cargo-audit"
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
 
-    assert_eq!(report["schema_version"], 5);
+    assert_eq!(report["schema_version"], 6);
     assert_eq!(report["status"], "fail");
     assert_eq!(report["success"], false);
     assert_eq!(report["dependency_paths_available"], true);
@@ -898,6 +923,7 @@ ignore = ["RUSTSEC-2026-0002"]
 "#,
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -945,6 +971,7 @@ fn audit_text_names_the_provable_blocker_from_requirement_edges() {
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nplist = \"1.9\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -971,6 +998,7 @@ fn audit_text_reports_pinned_parent_edits_for_exact_pinned_blockers() {
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nplist = \"=1.9.0\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1003,6 +1031,7 @@ fn audit_reports_transitive_lockfile_update_when_no_parent_caps_the_patched_rang
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nplist = \"1.9\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1037,6 +1066,7 @@ fn audit_json_reports_blockers_for_capped_transitive_findings() {
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nplist = \"1.9\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1106,6 +1136,7 @@ fn audit_json_reports_completeness_failures_for_missing_summary_checks() {
     );
     let temp_dir = fresh_temp_dir();
     write_root_manifest(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1134,6 +1165,7 @@ fn audit_json_outputs_direct_update_remediation_for_unpinned_direct_dependency()
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1168,6 +1200,7 @@ fn audit_text_remediation_targets_transitive_parent_not_vulnerable_crate() {
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nplist = \"1.9\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1197,6 +1230,7 @@ fn audit_text_remediation_keeps_direct_exact_pin_as_manifest_edit() {
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\ntauri = \"=2.11.2\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1220,6 +1254,7 @@ fn audit_text_remediation_suggests_direct_update_for_unpinned_direct_dependency(
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1242,6 +1277,7 @@ fn audit_json_outputs_null_remediation_when_patched_versions_are_empty() {
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1253,7 +1289,7 @@ fn audit_json_outputs_null_remediation_when_patched_versions_are_empty() {
     let report: serde_json::Value =
         serde_json::from_slice(&stdout).expect("stdout should be valid json");
 
-    assert_eq!(report["schema_version"], 5);
+    assert_eq!(report["schema_version"], 6);
     assert!(
         report["findings"][0]["patched"]
             .as_array()
@@ -1276,6 +1312,7 @@ fn audit_json_outputs_accepted_exception_details_and_collects_paths() {
         Some(r#"lockfile_scanner = "cargo-audit""#),
         "2026-09-21",
     );
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1327,6 +1364,7 @@ fn audit_json_outputs_expired_exception_details() {
         Some(r#"lockfile_scanner = "cargo-audit""#),
         "2000-01-01",
     );
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1375,6 +1413,7 @@ fn audit_degrades_remediation_and_keeps_the_report_when_manifests_cannot_be_pars
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "not toml [");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1415,6 +1454,7 @@ serde = { version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcd
     )
     .expect("reviewed policy should write");
     write_review_record(&temp_dir, "docs/dependency-reviews/serde.md");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1445,6 +1485,7 @@ fn audit_degrades_on_cargo_validation_errors_without_a_standard_prefix() {
         "[package]\nname = \"bad name\"\nversion = \"0.1.0\"\n",
     );
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1476,6 +1517,7 @@ fn audit_degraded_nested_workspace_root_stays_anchored_to_itself() {
         "[package]\nname = \"bad name\"\nversion = \"0.1.0\"\n\n[workspace]\n",
     );
     write_cargo_audit_config(&child);
+    write_audit_source_lock(&child);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1507,6 +1549,7 @@ fn audit_json_emits_null_remediation_when_manifests_cannot_be_parsed() {
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "not toml [");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1540,6 +1583,7 @@ fn audit_text_escapes_untrusted_advisory_title_and_patched_ranges() {
     let temp_dir = fresh_temp_dir();
     write_manifest(&temp_dir, "[dependencies]\nserde = \"1\"\n");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1575,6 +1619,7 @@ fn audit_text_remediation_honours_workspace_inherited_exact_pins_end_to_end() {
     )
     .expect("member manifest should write");
     write_cargo_audit_config(&temp_dir);
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1603,6 +1648,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1638,6 +1684,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1669,6 +1716,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1699,6 +1747,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1726,6 +1775,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1750,6 +1800,7 @@ fn audit_accepts_reviewed_advisory_with_both_scanners() {
         Some(r#"lockfile_scanner = "both""#),
         "2026-09-21",
     );
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1787,6 +1838,7 @@ unmaintained = "allow"
 "#,
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1826,6 +1878,7 @@ ignore = ["RUSTSEC-2026-0001"]
 "#,
     )
     .expect("cargo audit config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1856,6 +1909,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1892,6 +1946,7 @@ ignore = ["RUSTSEC-2026-0001"]
 "#,
     )
     .expect("deny config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1920,6 +1975,7 @@ fn audit_rejects_symlinked_deny_toml_without_reading_target() {
         .expect("secret target should write");
     symlink(temp_dir.join("secret.env"), temp_dir.join("deny.toml"))
         .expect("deny.toml symlink should create");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1948,6 +2004,7 @@ fn audit_rejects_symlinked_barbican_toml_without_reading_target() {
         .expect("secret target should write");
     symlink(temp_dir.join("secret.env"), temp_dir.join("barbican.toml"))
         .expect("barbican.toml symlink should create");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -1979,6 +2036,7 @@ fn audit_rejects_symlinked_reviewed_targets_without_reading_target() {
         temp_dir.join("reviewed-targets.toml"),
     )
     .expect("reviewed-targets.toml symlink should create");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -2013,6 +2071,7 @@ lockfile_scanner = "cargo-deny"
     .expect("reviewed targets should write");
     fs::write(temp_dir.join("Cargo.toml"), "[dependencies]\n").expect("manifest should write");
     fs::write(temp_dir.join("Cargo.lock"), "version = 4\n").expect("lockfile should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -2043,6 +2102,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -2074,6 +2134,7 @@ lockfile_scanner = "cargo-audit"
 "#,
     )
     .expect("config should write");
+    write_audit_source_lock(&temp_dir);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
@@ -2320,4 +2381,18 @@ fn metadata_with_invalid_workspace_package_json() -> String {
   }
 }"#
     .to_owned()
+}
+
+fn write_audit_source_lock(root: &Path) {
+    if !root.join("Cargo.lock").exists() {
+        fs::write(
+            root.join("Cargo.lock"),
+            lockfile_with_packages(&[
+                ("serde", "1.0.228", true),
+                ("quick-xml", "0.39.4", true),
+                ("tauri", "2.11.2", true),
+            ]),
+        )
+        .expect("advisory source fixture should write");
+    }
 }

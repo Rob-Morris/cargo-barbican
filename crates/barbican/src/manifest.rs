@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Component, Path};
 
+use crate::GitSourceIdentity;
 use thiserror::Error;
 use toml::Value;
 
@@ -71,6 +72,8 @@ pub struct CargoManifestDirectRequirement {
     name: String,
     source_kind: CargoDependencySourceKind,
     version_requirement: Option<String>,
+    dependency_key: String,
+    git: Option<GitSourceIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -95,6 +98,32 @@ impl CargoManifestPackage {
 }
 
 impl CargoManifestDirectRequirement {
+    pub(crate) fn effective<'a>(&'a self, workspace: &'a [Self]) -> Option<&'a Self> {
+        if self.source_kind == CargoDependencySourceKind::Workspace {
+            workspace
+                .iter()
+                .find(|root| root.dependency_key == self.dependency_key)
+        } else {
+            Some(self)
+        }
+    }
+
+    fn with_inherited_identity(&self, inherited: &Self) -> Self {
+        let mut effective = self.clone();
+        effective.name = inherited.name.clone();
+        effective.source_kind = inherited.source_kind;
+        effective.version_requirement = inherited.version_requirement.clone();
+        effective.git = inherited.git.clone();
+        effective
+    }
+
+    pub fn dependency_key(&self) -> &str {
+        &self.dependency_key
+    }
+
+    pub fn git(&self) -> Option<&GitSourceIdentity> {
+        self.git.as_ref()
+    }
     pub fn manifest_path(&self) -> &str {
         &self.manifest_path
     }
@@ -114,6 +143,26 @@ impl CargoManifestDirectRequirement {
     pub fn version_requirement(&self) -> Option<&str> {
         self.version_requirement.as_deref()
     }
+}
+
+pub fn resolve_workspace_requirements(
+    requirements: &[CargoManifestDirectRequirement],
+    workspace: &[CargoManifestDirectRequirement],
+) -> Result<Vec<CargoManifestDirectRequirement>, CargoManifestError> {
+    requirements
+        .iter()
+        .map(|requirement| {
+            if requirement.source_kind != CargoDependencySourceKind::Workspace {
+                return Ok(requirement.clone());
+            }
+            let inherited = requirement.effective(workspace).ok_or_else(|| {
+                CargoManifestError::MissingWorkspaceDependency {
+                    key: requirement.dependency_key.clone(),
+                }
+            })?;
+            Ok(requirement.with_inherited_identity(inherited))
+        })
+        .collect()
 }
 
 impl fmt::Display for CargoManifestDependency {
@@ -718,12 +767,54 @@ fn collect_direct_requirement_section(
 
     for (name, dependency_value) in table {
         let (source_kind, version_requirement) = dependency_shape(dependency_value)?;
+        if source_kind == CargoDependencySourceKind::Workspace
+            && dependency_value.as_table().is_some_and(|table| {
+                [
+                    "package",
+                    "version",
+                    "git",
+                    "rev",
+                    "branch",
+                    "tag",
+                    "path",
+                    "registry",
+                    "registry-index",
+                ]
+                .iter()
+                .any(|key| table.contains_key(*key))
+            })
+        {
+            return Err(CargoManifestError::InvalidDependencyIdentity { key: name.clone() });
+        }
+        let package = dependency_value
+            .as_table()
+            .and_then(|table| table.get("package"));
+        let package_name = match package {
+            Some(Value::String(package)) => package.clone(),
+            Some(_) => {
+                return Err(CargoManifestError::InvalidDependencyIdentity { key: name.clone() });
+            }
+            None => name.clone(),
+        };
+        let git = dependency_value.as_table().and_then(|table| {
+            if table.contains_key("branch")
+                || table.contains_key("tag")
+                || table.contains_key("path")
+                || table.contains_key("registry")
+                || table.contains_key("registry-index")
+            {
+                return None;
+            }
+            GitSourceIdentity::new(table.get("git")?.as_str()?, table.get("rev")?.as_str()?).ok()
+        });
         dependencies.insert(CargoManifestDirectRequirement {
             manifest_path: manifest_path.to_owned(),
             section: section.to_owned(),
-            name: name.to_owned(),
+            name: package_name,
             source_kind,
             version_requirement,
+            dependency_key: name.clone(),
+            git,
         });
     }
 
@@ -779,8 +870,12 @@ fn workspace_dependency_value(
 
 #[derive(Debug, Error)]
 pub enum CargoManifestError {
-    #[error("unable to parse Cargo.toml: {0}")]
+    #[error("unable to parse Cargo.toml: invalid syntax or schema (source text omitted)")]
     Parse(#[source] toml::de::Error),
+    #[error("dependency {key:?} has an invalid package identity")]
+    InvalidDependencyIdentity { key: String },
+    #[error("inherited dependency {key:?} has no workspace definition")]
+    MissingWorkspaceDependency { key: String },
     #[error("Cargo.toml root must be a TOML table")]
     ExpectedTable,
     #[error("{manifest_path}: dependency section {section} must be a table")]

@@ -41,6 +41,24 @@ where
         writeln!(stdout, "{note}").map_err(CommandError::Io)?;
     }
     let parse_result = parse_specs(raw_specs, stderr)?;
+    if let Ok((lockfile, _)) = load_current_lockfile_with_text(current_dir, Path::new("Cargo.lock"))
+    {
+        for spec in &parse_result.specs {
+            if lockfile
+                .packages()
+                .iter()
+                .any(|package| package.name == spec.crate_name() && !package.is_crates_io())
+            {
+                return fail(
+                    stderr,
+                    format!(
+                        "update {}: registry-only update cannot select an external source; review a new exact Git revision explicitly",
+                        spec.crate_name()
+                    ),
+                );
+            }
+        }
+    }
     writeln!(stdout, "Release-age check for requested versions:").map_err(CommandError::Io)?;
     let age_exit = finish_release_age_checks(
         &parse_result.specs,

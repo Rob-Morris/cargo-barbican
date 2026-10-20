@@ -60,6 +60,11 @@ requires re-review.
 `inspect` can supply evidence for a review record, but it does not by itself
 activate an entry in `reviewed-targets.toml`.
 
+## Recent security remediation
+
+- [rustls 0.23.46](2026-10-20-rustls-advisory-remediation.md) — transitive
+  HTTPS dependency; remediates four October 2026 advisories.
+
 ## Verification runner tool
 
 - [cargo-nextest 0.9.146](2026-10-14-cargo-nextest-0.9.146.md) — external CI

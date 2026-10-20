@@ -326,7 +326,15 @@ pub(crate) fn load_manifest_dependencies_from_root(
 pub(crate) fn load_current_manifest_direct_requirements(
     current_dir: &Path,
 ) -> Result<Vec<barbican::CargoManifestDirectRequirement>, CommandError> {
-    parse_manifest_requirements(&load_manifest_texts_from_root(current_dir)?)
+    let texts = load_manifest_texts_from_root(current_dir)?;
+    barbican::resolve_workspace_requirements(
+        &parse_manifest_requirements(&texts)?,
+        &parse_workspace_requirements(&texts)?,
+    )
+    .map_err(|source| CommandError::ManifestParse {
+        path: "Cargo.toml".to_owned(),
+        source,
+    })
 }
 
 pub(crate) fn load_current_manifest_direct_and_workspace_requirements(

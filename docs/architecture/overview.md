@@ -164,20 +164,17 @@ to canonicalise the repo root once and assert every walked or read path remains
 within it before using the path. That closes the workspace-member discovery and
 intermediate-review-record symlink cases together.
 
-### Reviewed-Target Source-Kind Enforcement (Non-Sequenced)
+### Reviewed source identity
 
-Version-only reviewed targets are currently retained for backwards-compatible
-policy manifests. The safe preferred form for crates.io artefacts is the
-structured `{ version = "...", checksum_sha256 = "..." }` entry, which binds
-the reviewed target to Cargo.lock's crates.io checksum chain.
-
-Future reviewed-target hardening should make source-kind expectations explicit
-for all reviewed targets. In particular, version-only entries should not be
-source-agnostic: a same-version git, path, or alternate-registry source must
-not satisfy a reviewed crates.io target merely because the version string
-matches. The likely direction is either to require checksums by default for
-crates.io artefacts or to add an explicit reviewed source kind for legacy
-version-only entries.
+Reviewed targets distinguish crates.io archives from exact Git repositories and
+commits. The shared pure matcher owns source parity; Cargo owns resolution and
+the binary retains filesystem/subprocess integration. Every locked Git package
+requires explicit review before build/test execution, including in-repository
+children. Registry and Git identities and allowances cannot substitute for one
+another. Advisory source attribution precedes deduplication and reconciliation;
+Git scanner coverage is disclosed rather than inferred from a version label.
+See [Git admission](../user/git-sources.md) and the
+[functional contract](../functional/cli.md#exact-git-reviewed-source-admission).
 
 ## Verification runner boundary
 

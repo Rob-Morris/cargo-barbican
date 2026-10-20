@@ -311,6 +311,11 @@ pub(super) fn parse_specs(
     let mut failed = false;
 
     for raw_spec in raw_specs {
+        if barbican::is_source_spec_input(&raw_spec) {
+            writeln!(stderr, "FAIL Git pre-add automation is unsupported; use the exact Git adoption workflow in docs/user/git-sources.md").map_err(CommandError::Io)?;
+            failed = true;
+            continue;
+        }
         match raw_spec.parse::<ExactCrateSpec>() {
             Ok(spec) => specs.push(spec),
             Err(error) => {

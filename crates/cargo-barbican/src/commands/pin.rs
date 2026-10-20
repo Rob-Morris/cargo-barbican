@@ -59,6 +59,12 @@ fn run_pin_add(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
+    if barbican::is_source_spec_input(spec) {
+        return fail(
+            stderr,
+            "pin takes a resolved package name, not a URL; use docs/user/git-sources.md for exact Git admission",
+        );
+    }
     let target = match parse_pin_add_target(spec) {
         Ok(target) => target,
         Err(error) => return fail(stderr, format!("pin add {spec}: {error}")),
@@ -106,7 +112,9 @@ fn run_pin_add(
         plan.exact()
     )
     .map_err(CommandError::Io)?;
-    if plan.checksum().is_none() {
+    if let Some(git) = plan.git() {
+        writeln!(stdout, "- Git identity: {git}; package version is informational and release age is not applicable").map_err(CommandError::Io)?;
+    } else if plan.checksum().is_none() {
         writeln!(
             stdout,
             "- note: no Cargo.lock checksum for {}; the family pins by exact version only",
@@ -115,7 +123,9 @@ fn run_pin_add(
         .map_err(CommandError::Io)?;
     }
     let exact_requirement = format!("={}", plan.exact().version());
-    if plan.direct_requirement().is_some() {
+    if plan.git().is_some() {
+        writeln!(stdout, "- Git declarations must retain the full reviewed revision; cargo-deny source permission is a separate consumer decision").map_err(CommandError::Io)?;
+    } else if plan.direct_requirement().is_some() {
         writeln!(
             stdout,
             "- note: exact direct manifest pin \"{exact_requirement}\" included in the family"
@@ -221,6 +231,12 @@ fn run_pin_exception(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
+    if barbican::is_source_spec_input(spec) {
+        return fail(
+            stderr,
+            "pin takes a resolved package name, not a URL; use docs/user/git-sources.md for exact Git admission",
+        );
+    }
     let target = match parse_pin_add_target(spec) {
         Ok(target) => target,
         Err(error) => return fail(stderr, format!("pin exception {spec}: {error}")),
@@ -406,6 +422,12 @@ fn render_pin_exception_rejection(
 
 fn render_pin_add_rejection(rejection: &PinAddRejection) -> String {
     match rejection {
+        PinAddRejection::UnsupportedSource { crate_name, reason } => {
+            format!("pin add {crate_name}: {reason}")
+        }
+        PinAddRejection::AmbiguousSource { crate_name } => format!(
+            "pin add {crate_name}: multiple locked source identities; refusing to choose by version alone"
+        ),
         PinAddRejection::NotInLockfile { crate_name } => format!(
             "pin add {crate_name}: not present in Cargo.lock; add the dependency and run `cargo barbican resolve` first"
         ),

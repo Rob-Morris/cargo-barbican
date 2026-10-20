@@ -121,6 +121,7 @@ pub(crate) fn resolved_sources_match(expected: &str, actual: &str) -> bool {
     expected == actual
         || (expected.starts_with(GIT_SOURCE_PREFIX)
             && actual.starts_with(GIT_SOURCE_PREFIX)
+            && !expected.contains(SOURCE_PRECISE_SEPARATOR)
             && expected.split(SOURCE_PRECISE_SEPARATOR).next()
                 == actual.split(SOURCE_PRECISE_SEPARATOR).next())
 }
@@ -408,7 +409,7 @@ impl LockedPackage {
 
 #[derive(Debug, Error)]
 pub enum LockfileError {
-    #[error("unable to parse Cargo.lock: {0}")]
+    #[error("unable to parse Cargo.lock: invalid syntax or schema (source text omitted)")]
     Parse(#[source] toml::de::Error),
     #[error("invalid locked package {name}@{version}: {source}")]
     InvalidPackageSpec {
@@ -423,17 +424,19 @@ pub enum LockfileError {
         version: String,
         checksum: String,
     },
-    #[error("invalid dependency reference {reference:?} in locked package {parent}")]
+    #[error("invalid dependency reference in locked package {parent} (source text omitted)")]
     InvalidDependencyReference {
         parent: ExactCrateSpec,
         reference: String,
     },
-    #[error("dependency reference {reference:?} in locked package {parent} matches no package")]
+    #[error(
+        "dependency reference in locked package {parent} matches no package (source text omitted)"
+    )]
     UnknownDependencyReference {
         parent: ExactCrateSpec,
         reference: String,
     },
-    #[error("dependency reference {reference:?} in locked package {parent} is ambiguous")]
+    #[error("dependency reference in locked package {parent} is ambiguous (source text omitted)")]
     AmbiguousDependencyReference {
         parent: ExactCrateSpec,
         reference: String,

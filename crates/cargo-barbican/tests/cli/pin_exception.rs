@@ -222,7 +222,7 @@ fn pin_exception_requires_a_lockfile_checksum() {
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stdout.is_empty());
     assert!(stderr.contains(
-        "FAIL pin exception serde@1.0.228: Cargo.lock records no crates.io checksum; advisory exceptions require a checksum-bound resolved target"
+        "FAIL pin exception serde: Git and other non-crates.io advisory exceptions are unsupported"
     ));
     assert!(!temp_dir.join("docs/dependency-reviews").exists());
 }

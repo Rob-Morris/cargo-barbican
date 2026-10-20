@@ -140,6 +140,12 @@ where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
+    if barbican::is_source_spec_input(&args.spec) {
+        return fail(
+            stderr,
+            "Git pre-add automation is unsupported; use the exact Git adoption workflow in docs/user/git-sources.md",
+        );
+    }
     let spec = match args.spec.parse::<ExactCrateSpec>() {
         Ok(spec) => spec,
         Err(error) => return fail(stderr, error),

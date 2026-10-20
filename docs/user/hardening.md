@@ -227,3 +227,12 @@ That combination is what turns barbican's "every bypass leaves a diff" model
 into an actual control — the diff exists, a human who did not write it must
 approve it, and the gates re-run on infrastructure the author does not
 control. If you configure nothing else from this guide, configure that.
+
+## Exact Git sources
+
+Exact reviewed Git dependencies use the existing `pin add` / `pin check`,
+inventory, audit and verification workflow. See the
+[Git source guide](git-sources.md) for the tagged policy
+schema, full-commit requirement, per-package review, source-bound allowances,
+manual intake and advisory/build-input limitations. Registry age/advisory
+exceptions never authorise Git targets; cargo-deny permission remains separate.

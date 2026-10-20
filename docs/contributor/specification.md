@@ -415,3 +415,12 @@ fails if the tool is absent or wrong; CI runs it on macOS and Linux. Keep
 
 Nextest selection also rejects effective `alias.nextest` and
 `CARGO_ALIAS_NEXTEST` at the toolchain preflight, before any delegate can run.
+
+## Exact Git sources
+
+Exact reviewed Git dependencies use the existing `pin add` / `pin check`,
+inventory, audit and verification workflow. See the
+[Git source guide](../user/git-sources.md) for the tagged policy
+schema, full-commit requirement, per-package review, source-bound allowances,
+manual intake and advisory/build-input limitations. Registry age/advisory
+exceptions never authorise Git targets; cargo-deny permission remains separate.

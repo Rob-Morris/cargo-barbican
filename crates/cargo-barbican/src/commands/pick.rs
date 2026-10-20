@@ -24,6 +24,10 @@ pub(super) fn run_pick<C>(
 where
     C: CratesIoClient + ?Sized,
 {
+    if barbican::is_source_spec_input(&raw_spec) {
+        writeln!(stderr, "FAIL pick is crates.io-only; use the exact Git adoption workflow in docs/user/git-sources.md").map_err(CommandError::Io)?;
+        return Ok(exit_code_from_policy_failures(true));
+    }
     let pick_spec = match parse_pick_spec(&raw_spec) {
         Ok(spec) => spec,
         Err(error) => {

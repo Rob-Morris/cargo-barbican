@@ -48,7 +48,15 @@ pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
         .unwrap_or_default();
     let reviewed_report = reviewed_targets
         .as_ref()
-        .map(|targets| check_reviewed_rust_targets(targets, &manifest_requirements, &lockfile));
+        .map(|targets| {
+            let effective = barbican::resolve_workspace_requirements(
+                &manifest_requirements,
+                &workspace_requirements,
+            )
+            .map_err(|source| manifest_parse_error("Cargo.toml", source))?;
+            Ok::<_, CommandError>(check_reviewed_rust_targets(targets, &effective, &lockfile))
+        })
+        .transpose()?;
     let graph_collection = collect_graph_facts(current_dir, runner, &lockfile);
 
     let inventory = build_inventory(
@@ -153,14 +161,14 @@ fn render_coverage_floor(
         if !external.is_empty() {
             writeln!(
                 stdout,
-                "  direct dependencies use a non-crates.io source a reviewed family cannot cover (git, alternate registry, or a path outside the workspace):"
+                "  direct dependencies use an unreviewed or unsupported external source:"
             )
             .map_err(CommandError::Io)?;
             for source in external {
-                let origin = source.source().unwrap_or("an unrecorded source");
+                let origin = barbican::source_diagnostic(source.source());
                 writeln!(
                     stdout,
-                    "  - {}@{} resolves via {origin}; a reviewed family cannot cover a non-crates.io source — review it and pin to crates.io, or remove it",
+                    "  - {}@{} resolves via {origin}; review an exact Git target with `pin add`, use crates.io, or remove the unsupported source",
                     source.name(),
                     source.version()
                 )
@@ -417,7 +425,10 @@ fn render_inventory(
 
     writeln!(stdout).map_err(CommandError::Io)?;
     writeln!(stdout, "Non-crates.io sources:").map_err(CommandError::Io)?;
-    if inventory.non_crates_io_sources().is_empty() {
+    for source in inventory.reviewed_git_sources() {
+        writeln!(stdout, "  - {}@{} reviewed Git: {}; record completion and transitive Git coverage are enforced by pin check", source.name(), source.version(), barbican::source_diagnostic(source.source())).map_err(CommandError::Io)?;
+    }
+    if inventory.non_crates_io_sources().is_empty() && inventory.reviewed_git_sources().is_empty() {
         writeln!(stdout, "  none").map_err(CommandError::Io)?;
     }
     for source in inventory.non_crates_io_sources() {
@@ -426,7 +437,7 @@ fn render_inventory(
             "  - {}@{} source={}",
             escape_render_field(source.name()),
             escape_render_field(source.version()),
-            escape_render_field(source.source().unwrap_or("(none)"))
+            escape_render_field(&barbican::source_diagnostic(source.source()))
         )
         .map_err(CommandError::Io)?;
     }
@@ -869,7 +880,7 @@ fn render_gap(gap: &InventoryGap) -> String {
                 "non-crates.io dependency source for {}@{}: {}",
                 escape_render_field(name),
                 escape_render_field(version),
-                escape_render_field(source.as_deref().unwrap_or("(none)"))
+                escape_render_field(&barbican::source_diagnostic(source.as_deref()))
             )
         }
         InventoryGap::UndeclaredExecutionSurface { spec, surface, .. } => {

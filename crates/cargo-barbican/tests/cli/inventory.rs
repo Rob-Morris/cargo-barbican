@@ -139,12 +139,15 @@ serde = ["proc-macro"]
     assert!(observational.contains("non-crates.io dependency source for local@0.1.0"));
     assert!(!observational.contains("non-crates.io dependency source for app@0.1.0: (none)"));
     assert!(observational.contains("non-crates.io dependency source for app@0.2.0"));
-    assert!(observational.contains(
-        "non-crates.io dependency source for git-crate@0.1.0: git+https://example.invalid/git-crate"
-    ));
-    assert!(observational.contains(
-        "non-crates.io dependency source for app@0.1.0: git+https://example.invalid/app"
-    ));
+    assert!(
+        observational.contains(
+            "non-crates.io dependency source for git-crate@0.1.0: (unsupported Git source)"
+        )
+    );
+    assert!(
+        observational
+            .contains("non-crates.io dependency source for app@0.1.0: (unsupported Git source)")
+    );
     assert!(!observational.contains("non-crates.io dependency source for explicit-app@0.1.0"));
     assert!(!observational.contains("review record not completed for family serde-family"));
     assert!(!observational.contains("resolved crates.io package is not covered"));
@@ -270,8 +273,8 @@ fn inventory_enforce_fails_on_external_git_direct_dependency() {
 
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stderr.is_empty());
-    assert!(stdout.contains("non-crates.io source a reviewed family cannot cover"));
-    assert!(stdout.contains("evilgit@9.9.9 resolves via git+https://example.invalid/evil.git"));
+    assert!(stdout.contains("unreviewed or unsupported external source"));
+    assert!(stdout.contains("evilgit@9.9.9 resolves via (unsupported Git source)"));
     assert!(stdout.contains("enforced external direct dependencies: 1"));
     assert!(stdout.contains("other observational manifest/source findings: 0"));
     assert!(stdout.contains("Inventory: FAIL"));
@@ -292,7 +295,7 @@ fn inventory_enforce_fails_on_external_path_direct_dependency() {
 
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stderr.is_empty());
-    assert!(stdout.contains("outsider@0.1.0 resolves via an unrecorded source"));
+    assert!(stdout.contains("outsider@0.1.0 resolves via (no source: path or workspace member)"));
     assert!(stdout.contains("Inventory: FAIL"));
     assert!(!stdout.contains("Inventory: PASS"));
 }
@@ -388,9 +391,7 @@ source = "git+https://example.invalid/helper.git#0000000000000000000000000000000
 
         assert_eq!(exit_code, ExitCode::from(1), "{section}: {stdout}");
         assert!(stderr.is_empty());
-        assert!(
-            stdout.contains("helper@1.0.0 resolves via git+https://example.invalid/helper.git")
-        );
+        assert!(stdout.contains("helper@1.0.0 resolves via (unsupported Git source)"));
         assert!(stdout.contains("Inventory: FAIL"));
     }
 }
@@ -435,7 +436,7 @@ source = "git+https://example.invalid/patched#0000000000000000000000000000000000
 
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stderr.is_empty());
-    assert!(stdout.contains("patched@1.0.0 resolves via git+https://example.invalid/patched"));
+    assert!(stdout.contains("patched@1.0.0 resolves via (unsupported Git source)"));
     assert!(!stdout.contains("exact direct-dependency facts were not collected"));
     assert!(stdout.contains("Inventory: FAIL"));
 }
@@ -484,7 +485,7 @@ source = "git+https://example.invalid/evil.git#000000000000000000000000000000000
                     "git+https://example.invalid/evil.git#0000000000000000000000000000000000000000",
                 ),
             ),
-            "evilgit@9.9.9 resolves via git+https://example.invalid/evil.git",
+            "evilgit@9.9.9 resolves via (unsupported Git source)",
         ),
         (
             "alias = { package = \"outsider\", path = \"../outsider\" }",
@@ -497,7 +498,7 @@ version = "0.1.0""#,
                 "0.1.0",
                 None,
             ),
-            "outsider@0.1.0 resolves via an unrecorded source",
+            "outsider@0.1.0 resolves via (no source: path or workspace member)",
         ),
         (
             "alias = { package = \"private-crate\", registry = \"private\", version = \"=2.0.0\" }",
@@ -512,7 +513,7 @@ checksum = "3333333333333333333333333333333333333333333333333333333333333333""#,
                 "2.0.0",
                 Some("registry+https://example.invalid/index"),
             ),
-            "private-crate@2.0.0 resolves via registry+https://example.invalid/index",
+            "private-crate@2.0.0 resolves via (unsupported external source)",
         ),
     ];
 
@@ -656,9 +657,11 @@ fn inventory_offline_external_source_is_unclassified_not_observational() {
         )
     );
     assert!(stdout.contains("other observational manifest/source findings: 0"));
-    assert!(stdout.contains(
-        "non-crates.io dependency source for evilgit@9.9.9: git+https://example.invalid/evil.git"
-    ));
+    assert!(
+        stdout.contains(
+            "non-crates.io dependency source for evilgit@9.9.9: (unsupported Git source)"
+        )
+    );
 }
 
 #[test]
@@ -938,12 +941,15 @@ fn inventory_without_reviewed_targets_reports_no_policy() {
     assert!(observational.contains("non-crates.io dependency source for local@0.1.0"));
     assert!(!observational.contains("non-crates.io dependency source for app@0.1.0: (none)"));
     assert!(observational.contains("non-crates.io dependency source for app@0.2.0"));
-    assert!(observational.contains(
-        "non-crates.io dependency source for git-crate@0.1.0: git+https://example.invalid/git-crate"
-    ));
-    assert!(observational.contains(
-        "non-crates.io dependency source for app@0.1.0: git+https://example.invalid/app"
-    ));
+    assert!(
+        observational.contains(
+            "non-crates.io dependency source for git-crate@0.1.0: (unsupported Git source)"
+        )
+    );
+    assert!(
+        observational
+            .contains("non-crates.io dependency source for app@0.1.0: (unsupported Git source)")
+    );
     assert!(observational.contains(
         "live execution surface is not declared in reviewed policy: serde@1.0.228 proc-macro"
     ));
@@ -1013,8 +1019,8 @@ fn inventory_prunes_git_and_target_dirs_during_workspace_discovery() {
     assert!(stdout.contains("real-member crates/real-member/Cargo.toml:dependencies =0.1.0"));
     assert!(!stdout.contains("target-phantom crates/real-member/target/phantom/Cargo.toml"));
     assert!(!stdout.contains("git-phantom crates/real-member/.git/phantom/Cargo.toml"));
-    assert!(stdout.contains("non-crates.io dependency source for target-phantom@0.1.0: (none)"));
-    assert!(stdout.contains("non-crates.io dependency source for git-phantom@0.1.0: (none)"));
+    assert!(stdout.contains("non-crates.io dependency source for target-phantom@0.1.0: (no source: path or workspace member)"));
+    assert!(stdout.contains("non-crates.io dependency source for git-phantom@0.1.0: (no source: path or workspace member)"));
 }
 
 #[test]
@@ -1052,7 +1058,7 @@ fn inventory_escapes_control_characters_in_rendered_fields() {
     );
     assert!(
         stdout.contains(
-            "non-crates.io dependency source for control-source@0.1.0: git+https://example.invalid/control\\x1b[1A\\x1b[2K\\n  none\\x2028\\x2029"
+            "non-crates.io dependency source for control-source@0.1.0: (unsupported Git source)"
         ),
         "{stdout}"
     );
@@ -1192,7 +1198,7 @@ fn inventory_escapes_malformed_reviewed_targets_parse_diagnostics() {
     assert!(rendered.starts_with("FAIL "));
     assert!(rendered.contains("reviewed-targets.toml"));
     assert!(!rendered.contains('\u{001b}'));
-    assert!(rendered.contains("\\x1b"));
+    assert!(rendered.contains("source text omitted"));
     assert!(rendered.contains('\n'));
 }
 

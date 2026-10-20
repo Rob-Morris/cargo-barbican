@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::inventory::ReviewRecordFact;
 use crate::reviewed_targets::ObservedResolvedTarget;
 use crate::{
-    CargoDependencySourceKind, CargoManifestDirectRequirement, Lockfile, ReviewedAdvisoryException,
-    ReviewedExecutionSurfaceAllowance, ReviewedResolvedTarget, ReviewedTargets, Sha256Digest,
+    CargoDependencySourceKind, CargoManifestDirectRequirement, GitSourceIdentity, Lockfile,
+    ReviewedAdvisoryException, ReviewedDirectTarget, ReviewedExecutionSurfaceAllowance,
+    ReviewedResolvedTarget, ReviewedTargets, Sha256Digest,
 };
 
 const NO_SOURCE_LABEL: &str = "(no source: path or workspace member)";
@@ -12,17 +13,48 @@ const NO_SOURCE_LABEL: &str = "(no source: path or workspace member)";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustReviewedTargetsReport {
     families: Vec<RustReviewedFamilyReport>,
+    git_issues: Vec<ReviewedGitIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewedGitIssue {
+    pub package: String,
+    pub reason: String,
 }
 
 impl RustReviewedTargetsReport {
+    pub fn git_issues(&self) -> &[ReviewedGitIssue] {
+        &self.git_issues
+    }
+
+    pub fn covers_git_package(&self, spec: &crate::ExactCrateSpec, source: Option<&str>) -> bool {
+        !self
+            .git_issues
+            .iter()
+            .any(|issue| issue.package == spec.crate_name())
+            && self
+                .families
+                .iter()
+                .flat_map(|family| &family.resolved_checks)
+                .any(|check| {
+                    check.is_success()
+                        && check.expected_target.spec() == spec
+                        && check
+                            .expected_target
+                            .git()
+                            .is_some_and(|git| Some(git.locked_source().as_str()) == source)
+                })
+    }
     pub fn families(&self) -> &[RustReviewedFamilyReport] {
         &self.families
     }
 
     pub fn is_success(&self) -> bool {
-        self.families
-            .iter()
-            .all(RustReviewedFamilyReport::is_success)
+        self.git_issues.is_empty()
+            && self
+                .families
+                .iter()
+                .all(RustReviewedFamilyReport::is_success)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -178,6 +210,7 @@ impl<'a> ReviewedAdvisoryExceptionBinding<'a> {
 pub struct ReviewedDirectDependencyCheck {
     crate_name: String,
     expected_requirement: String,
+    expected_target: ReviewedDirectTarget,
     observed: Vec<ObservedDirectDependency>,
 }
 
@@ -196,10 +229,19 @@ impl ReviewedDirectDependencyCheck {
 
     pub fn is_success(&self) -> bool {
         !self.observed.is_empty()
-            && self.observed.iter().all(|entry| {
-                entry.source_kind().requires_exact_pin()
-                    && entry.version_requirement() == Some(self.expected_requirement.as_str())
-            })
+            && self
+                .observed
+                .iter()
+                .all(|entry| match &self.expected_target {
+                    ReviewedDirectTarget::Registry(requirement) => {
+                        entry.source_kind() == CargoDependencySourceKind::Registry
+                            && entry.version_requirement() == Some(requirement.as_str())
+                    }
+                    ReviewedDirectTarget::Git(git) => {
+                        entry.source_kind() == CargoDependencySourceKind::Git
+                            && entry.git.as_ref() == Some(git)
+                    }
+                })
     }
 }
 
@@ -209,6 +251,7 @@ pub struct ObservedDirectDependency {
     section: String,
     source_kind: CargoDependencySourceKind,
     version_requirement: Option<String>,
+    git: Option<GitSourceIdentity>,
 }
 
 impl ObservedDirectDependency {
@@ -342,6 +385,7 @@ pub fn check_reviewed_rust_targets(
                     section: dependency.section().to_owned(),
                     source_kind: dependency.source_kind(),
                     version_requirement: dependency.version_requirement().map(str::to_owned),
+                    git: dependency.git().cloned(),
                 });
             grouped
         },
@@ -352,6 +396,7 @@ pub fn check_reviewed_rust_targets(
         |mut grouped, package| {
             let observed = grouped.entry(package.name.as_str()).or_default();
             observed.versions.insert(package.version.clone());
+            observed.has_crates_io_entry |= package.is_crates_io();
 
             if !package.is_crates_io() {
                 observed.non_crates_io_sources.insert(
@@ -384,7 +429,8 @@ pub fn check_reviewed_rust_targets(
                 .map(
                     |(crate_name, expected_requirement)| ReviewedDirectDependencyCheck {
                         crate_name: crate_name.clone(),
-                        expected_requirement: expected_requirement.clone(),
+                        expected_requirement: expected_requirement.to_string(),
+                        expected_target: expected_requirement.clone(),
                         observed: direct_by_name
                             .get(crate_name.as_str())
                             .cloned()
@@ -417,9 +463,56 @@ pub fn check_reviewed_rust_targets(
                 advisory_exceptions: family.advisory_exceptions().to_vec(),
             }
         })
-        .collect();
+        .collect::<Vec<_>>();
 
-    RustReviewedTargetsReport { families }
+    let mut git_issues = Vec::new();
+    for package in lockfile.packages().iter().filter(|package| {
+        package
+            .source
+            .as_deref()
+            .is_some_and(|source| source.starts_with("git+"))
+    }) {
+        let matched = families
+            .iter()
+            .flat_map(|family| &family.resolved_checks)
+            .any(|check| {
+                check.crate_name() == package.name
+                    && check.expected_target.git().is_some()
+                    && check.is_success()
+            });
+        if !matched {
+            git_issues.push(ReviewedGitIssue { package: package.name.clone(), reason: "unreviewed, unsupported or mismatching locked Git identity; every Git package needs an exact reviewed target".to_owned() });
+        }
+    }
+    for dependency in manifest_requirements
+        .iter()
+        .filter(|dependency| dependency.source_kind() == CargoDependencySourceKind::Git)
+    {
+        let matched = families
+            .iter()
+            .flat_map(|family| &family.resolved_checks)
+            .any(|check| {
+                check.crate_name() == dependency.name()
+                    && check.is_success()
+                    && dependency
+                        .git()
+                        .is_some_and(|git| check.expected_target.git() == Some(git))
+                    && dependency.version_requirement().is_none_or(|requirement| {
+                        semver::VersionReq::parse(requirement)
+                            .ok()
+                            .zip(semver::Version::parse(check.expected_target.version()).ok())
+                            .is_some_and(|(requirement, version)| requirement.matches(&version))
+                    })
+            });
+        if !matched {
+            git_issues.push(ReviewedGitIssue { package: dependency.name().to_owned(), reason: format!("git-intent-not-exact or unreviewed: {}:{}:{} must declare the reviewed repository and full commit", dependency.manifest_path(), dependency.section(), dependency.dependency_key()) });
+        }
+    }
+
+    RustReviewedTargetsReport {
+        families,
+        git_issues,
+    }
 }
 
 #[cfg(test)]

@@ -8,8 +8,8 @@ use thiserror::Error;
 use time::Date;
 
 use crate::{
-    ExactCrateSpec, ExactVersionRequirementError, IsoDateError, Sha256Digest,
-    parse_exact_version_requirement, parse_iso_date,
+    ExactCrateSpec, ExactVersionRequirementError, GitSourceError, GitSourceIdentity, IsoDateError,
+    Sha256Digest, parse_exact_version_requirement, parse_iso_date,
 };
 
 const RUSTSEC_ID_LEN: usize = 17;
@@ -60,7 +60,7 @@ impl ReviewedTargets {
 pub struct ReviewedRustFamily {
     name: String,
     review_record: String,
-    direct: BTreeMap<String, String>,
+    direct: BTreeMap<String, ReviewedDirectTarget>,
     resolved: BTreeMap<String, ReviewedResolvedTarget>,
     execution_surface_allowances: Vec<ReviewedExecutionSurfaceAllowance>,
     release_age_exceptions: Vec<ReviewedReleaseAgeException>,
@@ -76,7 +76,7 @@ impl ReviewedRustFamily {
         &self.review_record
     }
 
-    pub fn direct(&self) -> &BTreeMap<String, String> {
+    pub fn direct(&self) -> &BTreeMap<String, ReviewedDirectTarget> {
         &self.direct
     }
 
@@ -100,6 +100,30 @@ impl ReviewedRustFamily {
     /// expiry before using these exceptions to suppress findings.
     pub fn advisory_exceptions(&self) -> &[ReviewedAdvisoryException] {
         &self.advisory_exceptions
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewedDirectTarget {
+    Registry(String),
+    Git(GitSourceIdentity),
+}
+
+impl ReviewedDirectTarget {
+    pub fn requirement(&self) -> Option<&str> {
+        match self {
+            Self::Registry(value) => Some(value),
+            Self::Git(_) => None,
+        }
+    }
+}
+
+impl fmt::Display for ReviewedDirectTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Registry(value) => formatter.write_str(value),
+            Self::Git(identity) => identity.fmt(formatter),
+        }
     }
 }
 
@@ -160,9 +184,18 @@ impl ReviewedAllowanceBinding {
 pub struct ReviewedExecutionSurfaceAllowance {
     binding: ReviewedAllowanceBinding,
     surface: ExecutionSurfaceKind,
+    expected_target: ReviewedResolvedTarget,
 }
 
 impl ReviewedExecutionSurfaceAllowance {
+    pub fn matches_package(&self, package: &crate::LockedPackage) -> bool {
+        self.expected_target.matches_package(package)
+    }
+
+    pub fn source(&self) -> String {
+        self.expected_target.source_string()
+    }
+
     pub fn spec(&self) -> &ExactCrateSpec {
         self.binding.spec()
     }
@@ -404,7 +437,15 @@ impl fmt::Display for ReviewedAdvisoryException {
 pub struct ReviewedResolvedTarget {
     spec: ExactCrateSpec,
     version: String,
-    checksum_sha256: Option<Sha256Digest>,
+    source: ReviewedResolvedSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewedResolvedSource {
+    CratesIo {
+        checksum_sha256: Option<Sha256Digest>,
+    },
+    Git(GitSourceIdentity),
 }
 
 impl ReviewedResolvedTarget {
@@ -420,12 +461,54 @@ impl ReviewedResolvedTarget {
     }
 
     pub fn checksum_sha256(&self) -> Option<&Sha256Digest> {
-        self.checksum_sha256.as_ref()
+        match &self.source {
+            ReviewedResolvedSource::CratesIo { checksum_sha256 } => checksum_sha256.as_ref(),
+            ReviewedResolvedSource::Git(_) => None,
+        }
+    }
+
+    pub fn git(&self) -> Option<&GitSourceIdentity> {
+        match &self.source {
+            ReviewedResolvedSource::Git(identity) => Some(identity),
+            _ => None,
+        }
+    }
+
+    pub fn source_string(&self) -> String {
+        self.git().map_or_else(
+            || crate::CRATES_IO_SOURCE.to_owned(),
+            GitSourceIdentity::locked_source,
+        )
+    }
+
+    pub fn matches_package(&self, package: &crate::LockedPackage) -> bool {
+        package.exact_spec() == self.spec()
+            && match self.git() {
+                Some(git) => {
+                    package.source.as_deref() == Some(git.locked_source().as_str())
+                        && package.checksum().is_none()
+                }
+                None => {
+                    package.is_crates_io()
+                        && self
+                            .checksum_sha256()
+                            .is_none_or(|checksum| package.checksum() == Some(checksum))
+                }
+            }
     }
 
     pub(crate) fn is_satisfied_by(&self, observed: &ObservedResolvedTarget) -> bool {
         let version_matches =
             observed.versions.len() == 1 && observed.versions.contains(self.version());
+        if let Some(git) = self.git() {
+            return version_matches
+                && !observed.has_crates_io_entry
+                && observed.checksums_sha256.is_empty()
+                && observed.non_crates_io_sources.len() == 1
+                && observed
+                    .non_crates_io_sources
+                    .contains(&git.locked_source());
+        }
         let source_matches = observed.non_crates_io_sources.is_empty();
         let checksum_matches = match self.checksum_sha256() {
             Some(expected_checksum) => {
@@ -455,6 +538,7 @@ pub(crate) struct ObservedResolvedTarget {
     /// satisfied by a checksum-less lockfile entry, even if another entry for
     /// the same name/version does carry the expected checksum.
     pub(crate) has_checksumless_entry: bool,
+    pub(crate) has_crates_io_entry: bool,
 }
 
 pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, ReviewedTargetsError> {
@@ -497,7 +581,17 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
             });
         }
 
-        for (crate_name, requirement) in &family.direct {
+        let mut direct = BTreeMap::new();
+        for (crate_name, raw_requirement) in &family.direct {
+            if let RawReviewedDirectTarget::Git(raw) = raw_requirement {
+                let identity = GitSourceIdentity::new(&raw.url, &raw.rev)
+                    .map_err(ReviewedTargetsError::GitSource)?;
+                direct.insert(crate_name.clone(), ReviewedDirectTarget::Git(identity));
+                continue;
+            }
+            let RawReviewedDirectTarget::Registry(requirement) = raw_requirement else {
+                unreachable!()
+            };
             match parse_exact_version_requirement(crate_name, requirement) {
                 Ok(_) => {}
                 Err(ExactVersionRequirementError::MissingEquals) => {
@@ -516,17 +610,26 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
                     });
                 }
             }
+            direct.insert(
+                crate_name.clone(),
+                ReviewedDirectTarget::Registry(requirement.clone()),
+            );
         }
 
         let mut resolved = BTreeMap::new();
 
         for (crate_name, target) in &family.resolved {
-            let (version, checksum_sha256) = match target {
-                RawReviewedResolvedTarget::Version(version) => (version.clone(), None),
-                RawReviewedResolvedTarget::RegistryArtifact {
+            let (version, source_kind) = match target {
+                RawReviewedResolvedTarget::Version(version) => (
+                    version.clone(),
+                    ReviewedResolvedSource::CratesIo {
+                        checksum_sha256: None,
+                    },
+                ),
+                RawReviewedResolvedTarget::RegistryArtifact(RawRegistryArtifact {
                     version,
                     checksum_sha256,
-                } => {
+                }) => {
                     let digest =
                         Sha256Digest::try_from(checksum_sha256.as_str()).map_err(|_| {
                             ReviewedTargetsError::InvalidResolvedChecksum {
@@ -536,8 +639,20 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
                             }
                         })?;
 
-                    (version.clone(), Some(digest))
+                    (
+                        version.clone(),
+                        ReviewedResolvedSource::CratesIo {
+                            checksum_sha256: Some(digest),
+                        },
+                    )
                 }
+                RawReviewedResolvedTarget::Git(raw) => (
+                    raw.version.clone(),
+                    ReviewedResolvedSource::Git(
+                        GitSourceIdentity::new(&raw.url, &raw.rev)
+                            .map_err(ReviewedTargetsError::GitSource)?,
+                    ),
+                ),
             };
 
             let spec = ExactCrateSpec::from_parts(crate_name, &version).map_err(|source| {
@@ -554,9 +669,30 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
                 ReviewedResolvedTarget {
                     spec,
                     version,
-                    checksum_sha256,
+                    source: source_kind,
                 },
             );
+        }
+        for (name, requirement) in &direct {
+            if let ReviewedDirectTarget::Git(git) = requirement
+                && resolved.get(name).and_then(ReviewedResolvedTarget::git) != Some(git)
+            {
+                return Err(ReviewedTargetsError::GitDirectMismatch {
+                    crate_name: name.clone(),
+                });
+            }
+        }
+        for (name, target) in &resolved {
+            for previous in &rust_families {
+                let previous: &ReviewedRustFamily = previous;
+                if let Some(other) = previous.resolved().get(name)
+                    && (target.git().is_some() || other.git().is_some())
+                {
+                    return Err(ReviewedTargetsError::DuplicateGitTarget {
+                        crate_name: name.clone(),
+                    });
+                }
+            }
         }
 
         let mut execution_surface_allowances = Vec::new();
@@ -595,6 +731,7 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
                         review_record: family.review_record.clone(),
                     },
                     surface,
+                    expected_target: target.target.clone(),
                 });
             }
         }
@@ -709,7 +846,7 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
         rust_families.push(ReviewedRustFamily {
             name: family.name,
             review_record: family.review_record,
-            direct: family.direct,
+            direct,
             resolved,
             execution_surface_allowances,
             release_age_exceptions,
@@ -758,6 +895,12 @@ fn resolve_allowance_checksum<'a>(
     table: &'static str,
     crate_name: &str,
 ) -> Result<&'a Sha256Digest, ReviewedTargetsError> {
+    if target.git().is_some() {
+        return Err(ReviewedTargetsError::GitExceptionUnsupported {
+            table,
+            crate_name: crate_name.to_owned(),
+        });
+    }
     target
         .checksum_sha256()
         .ok_or_else(|| ReviewedTargetsError::AllowedTargetChecksumMissing {
@@ -800,7 +943,24 @@ fn is_terminal_control_char(character: char) -> bool {
 
 #[derive(Debug, Error)]
 pub enum ReviewedTargetsError {
-    #[error("unable to parse reviewed-targets.toml: {0}")]
+    #[error("{0}")]
+    GitSource(#[source] GitSourceError),
+    #[error("Git direct target {crate_name:?} must match the same family's resolved Git target")]
+    GitDirectMismatch { crate_name: String },
+    #[error(
+        "reviewed Git package {crate_name:?} must be owned by one family and cannot coexist with another reviewed source"
+    )]
+    DuplicateGitTarget { crate_name: String },
+    #[error(
+        "{table} does not support Git target {crate_name:?}; Git age and advisory exceptions are unsupported"
+    )]
+    GitExceptionUnsupported {
+        table: &'static str,
+        crate_name: String,
+    },
+    #[error(
+        "unable to parse reviewed-targets.toml: invalid syntax or schema (source text omitted)"
+    )]
     Parse(#[source] toml::de::Error),
     #[error("reviewed family name must not be empty or contain control characters: {family:?}")]
     InvalidFamilyName { family: String },
@@ -957,7 +1117,7 @@ pub(crate) struct RawReviewedRustFamily {
     pub(crate) name: String,
     pub(crate) review_record: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(crate) direct: BTreeMap<String, String>,
+    pub(crate) direct: BTreeMap<String, RawReviewedDirectTarget>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) resolved: BTreeMap<String, RawReviewedResolvedTarget>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -979,10 +1139,45 @@ pub(crate) struct RawReviewedAdvisory {
 #[serde(untagged)]
 pub(crate) enum RawReviewedResolvedTarget {
     Version(String),
-    RegistryArtifact {
-        version: String,
-        checksum_sha256: String,
-    },
+    RegistryArtifact(RawRegistryArtifact),
+    Git(RawGitResolvedTarget),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RawRegistryArtifact {
+    pub(crate) version: String,
+    pub(crate) checksum_sha256: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub(crate) enum RawReviewedDirectTarget {
+    Registry(String),
+    Git(RawGitDirectTarget),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) enum RawGitTag {
+    #[serde(rename = "git")]
+    Git,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RawGitDirectTarget {
+    pub(crate) source: RawGitTag,
+    pub(crate) url: String,
+    pub(crate) rev: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RawGitResolvedTarget {
+    pub(crate) source: RawGitTag,
+    pub(crate) version: String,
+    pub(crate) url: String,
+    pub(crate) rev: String,
 }
 
 #[cfg(test)]
@@ -1032,7 +1227,13 @@ serde = [
             family.review_record(),
             "docs/dependency-reviews/2026-05-27-serde.md"
         );
-        assert_eq!(family.direct().get("serde"), Some(&"=1.0.228".to_owned()));
+        assert_eq!(
+            family
+                .direct()
+                .get("serde")
+                .and_then(super::ReviewedDirectTarget::requirement),
+            Some("=1.0.228")
+        );
         assert_eq!(
             family
                 .resolved()
