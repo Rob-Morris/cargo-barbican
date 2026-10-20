@@ -9,10 +9,12 @@ approve, or certify the dependencies already in the repository.
 The insiders release supports macOS and Linux and installs from an immutable
 git tag. It does not claim universal transitive human review: bring direct and
 elevated-risk dependencies under policy first, while the inventory keeps the
-remaining transitive and execution-surface backlog visible. Windows,
-crates.io publication, positive reviewed policy for external git/path/alternate
-registry dependencies, and hostile-checkout race-free containment remain out
-of scope for this release.
+remaining registry-transitive and execution-surface backlog visible. Exact
+Git dependencies are supported through [explicit source review](git-sources.md);
+every locked Git package, including repository children, requires completed
+review before execution. Windows, crates.io publication, external path and
+alternate-registry admission, and hostile-checkout race-free containment remain
+out of scope for this release.
 
 Adoption requires a rustup-managed Rust installation with `rustup`, `cargo`,
 `rustc`, and `rustdoc` on `PATH`. The execution gates fail closed when rustup is absent

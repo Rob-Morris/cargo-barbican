@@ -164,7 +164,7 @@ to canonicalise the repo root once and assert every walked or read path remains
 within it before using the path. That closes the workspace-member discovery and
 intermediate-review-record symlink cases together.
 
-### Reviewed source identity
+## Reviewed source identity
 
 Reviewed targets distinguish crates.io archives from exact Git repositories and
 commits. The shared pure matcher owns source parity; Cargo owns resolution and

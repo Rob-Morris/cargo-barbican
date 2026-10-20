@@ -60,9 +60,11 @@ certification:
 - `inventory --enforce` holds exact direct-dependency coverage; uncovered
   routine transitive crates and undeclared execution surfaces remain clearly
   labelled review backlog
-- legitimate git, path-outside-workspace, and alternate-registry direct
-  dependencies do not yet have a positive reviewed-target model and fail the
-  coverage floor
+- exact Git dependencies have a positive reviewed-target model: every locked
+  Git package needs explicit completed review before execution, including
+  repository children; see [Git admission](docs/user/git-sources.md)
+- path-outside-workspace and alternate-registry direct dependencies remain
+  unsupported and fail the coverage floor
 - crates.io publication and Windows support are not part of this release
 - cross-command hostile-checkout symlink containment and race-free filesystem
   guarantees remain deferred
