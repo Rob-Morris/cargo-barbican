@@ -41,11 +41,14 @@ These mitigations are active in the shipped gates today. They matter because
 each one closes a route that would otherwise let a dependency change dodge the
 diff:
 
-- **Lockfile doppelgaengers for reviewed crates.** `pin check` requires every
-  `Cargo.lock` entry whose name matches a reviewed crate to be crates.io
-  sourced. A second locked entry for the same name from a git, path, or
-  alternate-registry source is a blocking mismatch even when a clean crates.io
-  entry at the reviewed version sits right next to it.
+- **Source substitution for reviewed crates.** `pin check` requires every
+  `Cargo.lock` entry whose name matches a reviewed crate to match the reviewed
+  source and version. A reviewed crates.io target cannot be satisfied by Git,
+  path, or alternate-registry entries, even alongside a matching registry
+  entry. A reviewed Git target requires the exact repository URL and full
+  commit; another repository, revision, or registry entry cannot satisfy it.
+  Every locked Git package requires explicit review, including packages from
+  the same repository. See [Git sources](git-sources.md) for the exact contract.
 - **Checksumless lockfile siblings.** For checksum-bound reviewed targets, a
   matching-version `Cargo.lock` entry with no checksum fails the check — even
   if another entry for the same name and version carries the expected
@@ -55,12 +58,15 @@ diff:
   crate fails closed, and the detection resolves the
   `alias = { package = "real-crate", ... }` rename form to the real package
   name, so aliasing the patch does not hide it.
-- **Repo-root Cargo-config source controls.** While any reviewed family is
+- **Effective Cargo-config source controls.** While any reviewed family is
   active, an `include`, `[source]` table, config-defined `[patch]` table, or
-  top-level `paths` override in the effective repo-root `.cargo/config` or
-  `.cargo/config.toml` fails `pin check` — each can or may repoint a reviewed
-  crate away from crates.io, or substitute local source code for it, without
-  any change to `Cargo.toml` or `Cargo.lock`.
+  top-level `paths` override in effective Cargo configuration fails `pin check`.
+  Inspection covers the workspace root, its ancestors, and Cargo home, using
+  Cargo's effective `.cargo/config` / `.cargo/config.toml` selection. These
+  controls can substitute source code without a corresponding manifest or
+  lockfile change. Repository and ancestor config symlinks are refused. A
+  Cargo-home config symlink is inspected only when both Cargo home and its
+  resolved target stay outside the workspace.
 - **Ungoverned advisory ignores are neutralised during `audit`.** `audit`
   never runs `cargo-deny` against your `deny.toml` directly: it generates a
   runtime config that forces the `[advisories]` section with an empty `ignore`
@@ -84,8 +90,10 @@ diff:
 - **Symlinked policy files are refused.** `barbican.toml`,
   `reviewed-targets.toml`, `deny.toml`, `.cargo/audit.toml`, and the repo-root
   cargo config are all read through a loader that refuses symlinks, and a
-  review record only satisfies the gate when it is a regular file. Pointing a
-  policy path at content outside the repo does not work.
+  review record only satisfies the gate when it is a regular file. This is
+  leaf-file protection: intermediate symlink containment for review-record
+  paths remains a known gap, described below. The external Cargo-home config
+  exception follows the boundary in the preceding source-controls rule.
 - **`verify` fails closed without policy.** Deleting `reviewed-targets.toml`,
   or emptying it of active families, does not turn the gate off: `verify`
   refuses to run build/test verification without at least one active reviewed
@@ -96,20 +104,28 @@ diff:
 The honest residual gaps — routes the tool does not close, which the
 repo-side recipe below exists to cover:
 
-- **Hierarchical cargo config outside the repo root is not inspected.** A
-  `.cargo/config.toml` in a parent directory, or in `$CARGO_HOME`, can carry
-  the same `[source]`/`[patch]`/`paths` overrides and is not read by
-  `pin check`. This is machine state, not repo state — it cannot be gated by
-  a diff. CI running on clean, ephemeral runners is the mitigation.
+- **Broader build containment and binary provenance are not established.**
+  Toolchain conformance checks the exact configured Rust release and host,
+  including executable-selection controls; it does not attest the binaries
+  or sandbox everything Cargo executes. Reviewed build scripts, proc macros,
+  runners, linkers and tests execute with ordinary Cargo semantics after the
+  gate passes. Clean, ephemeral CI runners remain useful defence in depth.
+- **Intermediate symlink and concurrent-filesystem containment are incomplete.**
+  Review-record readers refuse a symlink at the file itself, but do not yet
+  prove every intermediate directory stays inside the workspace. Workspace
+  discovery and other filesystem paths also have separately deferred
+  containment work. Do not treat the gate as a race-free sandbox for an
+  untrusted checkout. See the [architecture boundaries](../architecture/overview.md).
 - **`[replace]` manifest tables are not detected.** The deprecated `[replace]`
   mechanism can repoint a crate like `[patch]` can, and barbican does not yet
   look for it. It does still show up as a manifest diff a reviewer can see.
-- **Crates outside reviewed families are not gated deterministically.**
-  `pin check` and `verify` enforce only what `reviewed-targets.toml` covers.
-  A new transitive crate in an unreviewed family enters the lockfile without
-  a deterministic block; `assess`, `inventory`, and release-age checks in
-  `update`/`resolve` observe it, but coverage of the graph is a review
-  decision, not an automatic guarantee.
+- **Registry review coverage is deliberately bounded.** `pin check` enforces
+  reviewed registry families, and `inventory --enforce` adds a direct-dependency
+  coverage floor to pre-release. Uncovered registry transitive dependencies
+  and execution-surface backlog remain observational; release-age checks and
+  assessment do not establish universal human review. Git has a stricter
+  boundary: every locked Git package needs explicit reviewed coverage before
+  build/test execution.
 - **The policy files themselves are editable.** By design. The control on
   that edit is the diff — which is only a control if a human other than the
   author must approve it. That is the next section.
