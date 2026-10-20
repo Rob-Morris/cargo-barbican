@@ -32,6 +32,9 @@ where
     R: CommandRunner + ?Sized,
 {
     match command {
+        PinCommand::Refresh { specs } => {
+            super::pin_refresh::run_refresh(&specs, current_dir, runner, now, stdout, stderr)
+        }
         PinCommand::Add { spec } => run_pin_add(&spec, current_dir, now, stdout, stderr),
         PinCommand::Exception {
             spec,
@@ -96,7 +99,21 @@ fn run_pin_add(
         date,
     ) {
         Ok(plan) => plan,
-        Err(rejection) => return fail(stderr, render_pin_add_rejection(&rejection)),
+        Err(rejection) => {
+            let mut detail = render_pin_add_rejection(&rejection);
+            if matches!(rejection, PinAddRejection::AlreadyCovered { .. })
+                && barbican::plan_pin_refresh(
+                    &reviewed_targets,
+                    &lockfile,
+                    &manifest_requirements,
+                    &[spec.to_owned()],
+                )
+                .is_ok()
+            {
+                detail.push_str(&format!("; run cargo barbican pin refresh {} to copy changed registry facts and reopen review", target.crate_name()));
+            }
+            return fail(stderr, detail);
+        }
     };
 
     if let Some(exit) = write_family_scaffold(current_dir, config_path, &plan, "pin add", stderr)? {

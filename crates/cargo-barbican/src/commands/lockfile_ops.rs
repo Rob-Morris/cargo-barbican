@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -21,13 +22,41 @@ pub(super) fn write_file_atomically(path: &Path, contents: &str) -> io::Result<(
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     let temp_path = unique_temp_path(parent, path);
-
-    fs::write(&temp_path, contents).inspect_err(|_| {
-        let _ = fs::remove_file(&temp_path);
-    })?;
-    fs::rename(&temp_path, path).inspect_err(|_| {
+    let permissions = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            Some(metadata.permissions())
+        }
+        Ok(_) => {
+            return Err(io::Error::other(
+                "atomic replacement requires a regular destination",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let mut file = create_private_temp(&temp_path)?;
+    let result = (|| {
+        file.write_all(contents.as_bytes())?;
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)?;
+        }
+        drop(file);
+        fs::rename(&temp_path, path)
+    })();
+    result.inspect_err(|_| {
         let _ = fs::remove_file(&temp_path);
     })
+}
+
+fn create_private_temp(path: &Path) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 fn unique_temp_path(parent: &Path, target: &Path) -> PathBuf {
@@ -162,6 +191,31 @@ mod tests {
     use barbican::{OffsetDateTime, Sha256Digest, VersionInfo};
 
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_file_is_private_before_content_and_existing_paths_are_not_removed() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = std::env::temp_dir().join(format!(
+            "barbican-private-temp-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut file = create_private_temp(&path).unwrap();
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(file.metadata().unwrap().len(), 0);
+        file.write_all(b"private review").unwrap();
+        assert_eq!(
+            create_private_temp(&path).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"private review");
+        drop(file);
+        fs::remove_file(path).unwrap();
+    }
 
     fn fresh_temp_dir() -> PathBuf {
         static NEXT_ID: AtomicU64 = AtomicU64::new(0);

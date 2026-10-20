@@ -398,6 +398,16 @@ Contract notes:
 - the current implementation does not claim stronger installed-tree or broader
   non-crates.io artefact parity beyond this gate
 
+## Reviewed registry pin refresh
+
+Registry pin refresh reuses source-aware selection, active manifest declarations
+and the existing exact direct-pin rule. Changed targets lose their surface/age/
+advisory grants, and shared review records reopen together. The binary validates
+protected input/output roles, writes every PENDING record before one policy
+replacement, and reports safe retained PENDING on I/O failure. Gatehouse re-pin
+requires per-target explicit-baseline proof and canonical age/assessment; neither
+command approves review. See [DD-004](../architecture/decisions/dd-004-reviewed-pin-refresh.md).
+
 ## Verification test runner
 
 The optional `[verify]` section selects the closed cargo-test/nextest runner.

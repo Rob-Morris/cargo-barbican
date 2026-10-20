@@ -210,6 +210,11 @@ surfaces for every dependency change — never raw cargo mutations:
   `cargo update`, and do not hand-edit `Cargo.lock`.
 - Bring a crate under reviewed-target policy with
   `cargo barbican pin add <crate>`.
+- After an explicitly authorised update of an existing registry family, use
+  `cargo barbican pin refresh <crate>` to copy lockfile facts and reopen its
+  review. This withdraws old grants; never remove PENDING or renew grants
+  merely to make the gate green. `gatehouse re-pin` can gather age/assessment
+  first, but requires an explicit pre-move baseline and still leaves PENDING.
 - Accept an advisory finding only with
   `cargo barbican pin exception <crate> <RUSTSEC-id>`. A matching
   `deny.toml` or `.cargo/audit.toml` ignore may coexist for direct-tool use,

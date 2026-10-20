@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::Date;
 
+pub mod refresh;
+
 use crate::{
     ExactCrateSpec, ExactVersionRequirementError, GitSourceError, GitSourceIdentity, IsoDateError,
     Sha256Digest, parse_exact_version_requirement, parse_iso_date,

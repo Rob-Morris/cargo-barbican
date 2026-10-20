@@ -13,6 +13,7 @@ mod pick;
 mod pin_add;
 mod pin_check;
 mod pin_exception;
+mod pin_refresh;
 mod policy_init;
 mod resolve;
 mod review;

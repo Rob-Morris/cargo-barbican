@@ -20,6 +20,10 @@ system works today. Decision records explain why it ended up that way.
 
 ## Index
 
+- [DD-004: Reviewed Registry Pin Refresh](dd-004-reviewed-pin-refresh.md)
+  — fact mutation withdraws old grants and reopens review; explicit-baseline
+  Gatehouse composition keeps evidence separate from approval.
+
 - [DD-001: CLI Command Vocabulary For Resolution, Lockfile Generation, And Updates](dd-001-cli-command-vocabulary.md)
   — `pick` (discover a version), `resolve` (reclaimed for whole-graph lockfile
   resolution), and `update` (renamed from `resolve`).

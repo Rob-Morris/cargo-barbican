@@ -838,7 +838,7 @@ fn compose_allowed_advisories_fragment(
     }
 }
 
-fn select_locked_package<'a>(
+pub(crate) fn select_locked_package<'a>(
     matching_packages: &[&'a LockedPackage],
     target: &PinAddTarget,
 ) -> Result<&'a LockedPackage, PinAddRejection> {
@@ -907,7 +907,7 @@ fn family_covering_crate<'a>(
         .map(|family| family.name())
 }
 
-fn exact_direct_requirement(
+pub(crate) fn exact_direct_requirement(
     observed_direct: &[&CargoManifestDirectRequirement],
     exact: &ExactCrateSpec,
 ) -> Option<String> {

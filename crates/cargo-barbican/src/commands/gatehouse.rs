@@ -37,6 +37,16 @@ where
     R: CommandRunner + ?Sized,
 {
     match command {
+        GatehouseCommand::RePin { base_ref, base_dir } => super::pin_refresh::run_re_pin(
+            base_ref.as_deref(),
+            base_dir.as_deref(),
+            current_dir,
+            client,
+            runner,
+            now,
+            stdout,
+            stderr,
+        ),
         GatehouseCommand::PreRelease => run_pre_release(current_dir, runner, now, stdout, stderr),
         GatehouseCommand::Candidate(args) => {
             run_candidate(args, current_dir, client, runner, now, stdout, stderr)

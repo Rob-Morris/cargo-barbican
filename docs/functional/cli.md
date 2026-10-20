@@ -186,6 +186,23 @@ cargo barbican inspect [--min-age-days N] <crate@version>...
     allowances: its verdict is fail-closed and never suppressed by an
     `allowed_surfaces` entry.
 
+cargo barbican gatehouse re-pin (--base-ref REF | --base-dir DIR)
+    Discover drifted reviewed registry targets, prove every previous reviewed
+    identity against a nonempty matching baseline set, and require every
+    current identity to be newly selected relative to that baseline. A Git
+    reference is resolved once to an immutable commit. A baseline directory
+    supplies both manifests and Cargo.lock. There is no HEAD default.
+    Run canonical age-lock then strict assess; only after both pass publish
+    one aggregate pin refresh. An unrelated addition cannot explain another
+    target's drift. Missing targets, source transitions, ambiguous siblings
+    and same-version checksum changes/backfill require deliberate manual
+    recovery rather than automatic re-pin. Unchanged Git entries are retained.
+    The two evidence stages share an invocation-local exact-release cache and
+    captured time while keeping their own output and verdicts. Any evidence
+    failure leaves policy and records untouched. No-drift success still runs
+    evidence and reports only that no refresh is needed. Success never completes
+    human review, renews grants, runs inspect/audit/verify, or builds/tests.
+
 cargo barbican gatehouse pre-release
     Run the standard pre-release supply-chain workflow over the current Rust
     workspace. The workflow is fail-fast and runs, in order:
@@ -363,6 +380,37 @@ cargo barbican inventory [--enforce]
     `pin check` and `inventory --enforce`. `--enforce` does not change any of
     the report body above it, so the default output is unchanged when the flag
     is absent.
+
+cargo barbican pin refresh <crate>[@version]...
+    Offline after workspace discovery. Copy changed registry version/checksum
+    facts from Cargo.lock into existing uniquely covering reviewed families.
+    Both previous reviewed and selected current sources must be crates.io;
+    current checksums are mandatory and an explicit version cannot hide
+    conflicting same-name source/version/checksum siblings. Reject duplicate,
+    absent, ambiguous or clean requests before any writes. No family members
+    are added or removed. Update an existing direct pin only when every active
+    declaration, including aliases/workspace inheritance, is the new exact
+    registry pin; otherwise retain it and report the remaining mismatch.
+    Withdraw changed targets' allowed_surfaces, allowed_age_exceptions and
+    allowed_advisories for version changes, checksum changes and backfill;
+    preserve untouched targets and record withdrawn grants in review history.
+    Reopen existing nonempty confined regular review records as PENDING.
+    Group shared records into one append, naming every family they reopen.
+    Reject symlinks, protected input/record collisions and ambiguous filesystem
+    aliases. Preserve source comments with bounded TOML edits, requiring the
+    reparsed result to equal independently planned policy changes. Unsupported
+    layouts fail without writes and print proposed facts for manual review.
+    Validate the entire batch before writing. Atomically replace all PENDING
+    records first, then publish exactly one complete policy replacement.
+    Temporary files are exclusively created private before content is written;
+    replacement preserves existing destination permissions. Detect changed
+    inputs before publication. On a later I/O failure, previous record appends
+    may remain PENDING; the command returns nonzero with recovery paths and
+    never publishes only some pin changes or rolls markers back. This is not
+    a multi-file transaction, power-loss durability or race-free sandbox.
+    Success exits 0 for prepared facts; pin check/verify remain blocked until
+    explicit review completion. This command does not assess, audit, move the
+    lockfile, grant source permission, build or test.
 
 cargo barbican pin add <crate>[@version]
     Scaffold a reviewed-target family and review-record stub for one crate

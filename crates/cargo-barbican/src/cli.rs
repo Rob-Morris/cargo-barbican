@@ -220,7 +220,9 @@ pub(crate) enum Command {
             reviewed-targets.toml and their checked-in review records that gate which crates \
             may enter the dependency graph. add scaffolds a reviewed family and review-record \
             stub for a crate already resolved in Cargo.lock; exception scaffolds a bounded, \
-            checksum-pinned acceptance of specific RustSec advisories for such a crate; and \
+            checksum-pinned acceptance of specific RustSec advisories for such a crate; refresh \
+            copies changed registry facts into existing families, withdraws old grants and \
+            reopens review as PENDING; and \
             check enforces the active reviewed families against the current workspace manifests \
             and Cargo.lock. Use add and exception to grow the policy, and check to enforce it."
     )]
@@ -272,6 +274,25 @@ pub(crate) enum Command {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum GatehouseCommand {
+    #[command(
+        about = "Assess an explicit baseline, then refresh drifted registry pins without approving review"
+    )]
+    RePin {
+        #[arg(
+            long,
+            required_unless_present = "base_dir",
+            conflicts_with = "base_dir",
+            help = "Explicit pre-move Git reference"
+        )]
+        base_ref: Option<String>,
+        #[arg(
+            long,
+            required_unless_present = "base_ref",
+            conflicts_with = "base_ref",
+            help = "Explicit baseline directory containing manifests and Cargo.lock"
+        )]
+        base_dir: Option<PathBuf>,
+    },
     #[command(
         about = "Run the standard pre-release supply-chain gate",
         long_about = "Runs the standard pre-release workflow over the current Rust workspace: \
@@ -328,6 +349,17 @@ pub(crate) enum CiSystem {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum PinCommand {
+    #[command(
+        about = "Refresh existing registry pin facts and reopen their review records",
+        long_about = "Copies changed registry versions/checksums from Cargo.lock into existing reviewed families, withdraws grants for changed targets, and reopens their existing records as PENDING. Fully offline after workspace discovery. Does not complete review, move the lockfile, assess, audit, build or test."
+    )]
+    Refresh {
+        #[arg(
+            required = true,
+            help = "Resolved registry crate names, optionally with @version"
+        )]
+        specs: Vec<String>,
+    },
     #[command(
         about = "Scaffold a reviewed family and review-record stub from Cargo.lock",
         long_about = "Reads the resolved version and registry checksum or exact Git source for one crate already \

@@ -37,6 +37,11 @@ impl Delegate {
 }
 
 pub trait CommandRunner {
+    fn git_resolve_commit(
+        &self,
+        current_dir: &Path,
+        reference: &str,
+    ) -> Result<String, RunnerError>;
     fn git_show(&self, current_dir: &Path, object: &str) -> Result<String, RunnerError>;
     /// Runtime command policy reads environment through this boundary so test
     /// runners never inherit unrelated toolchain controls from the test host.
@@ -162,6 +167,22 @@ impl std::error::Error for RunnerError {
 pub struct RealCommandRunner;
 
 impl CommandRunner for RealCommandRunner {
+    fn git_resolve_commit(
+        &self,
+        current_dir: &Path,
+        reference: &str,
+    ) -> Result<String, RunnerError> {
+        run_command(
+            current_dir,
+            "git",
+            [
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                &format!("{reference}^{{commit}}"),
+            ],
+        )
+    }
     fn git_show(&self, current_dir: &Path, object: &str) -> Result<String, RunnerError> {
         run_command(current_dir, "git", ["show", object])
     }

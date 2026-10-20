@@ -74,16 +74,18 @@ If the updated crate is covered by an active reviewed family, `pin check` now
 fails by design: the lockfile moved away from the exact version and checksum
 the family recorded. Treat the bump as a re-review of that family:
 
-1. Read the new resolved version and `checksum` from `Cargo.lock`.
-2. Update the family's `resolved` entry (and `direct` entry, if the crate is
-   an exact-pinned direct dependency) in `reviewed-targets.toml`.
-3. Update the family's review record — see
+1. Run `cargo barbican pin refresh <crate>` to copy the new registry facts,
+   withdraw old grants and reopen the existing record as PENDING. An existing
+   direct pin moves only when active manifest declarations uniformly match.
+2. Review the appended version/checksum and withdrawn grants. Explicitly
+   re-record any justified replacement allowances or exceptions.
+3. Complete the append before deleting PENDING — see
    [Reviewed-Family Lifecycle](#reviewed-family-lifecycle) for what a
    mechanical re-pin needs versus a genuine re-review.
 
-`pin add` cannot do this for you: it fails closed when the crate is already
-covered by an existing family. Re-pinning an existing family is a deliberate
-manual edit.
+`pin add` still refuses an existing family. `pin refresh` prepares its review;
+it never completes or approves it. Source transitions, family membership
+changes and unsupported source layouts require deliberate manual handling.
 
 ### 4. Close the loop
 
@@ -184,6 +186,19 @@ pattern.
 
 ### Dependabot and Renovate bumps
 
+For a routine registry bump, use an explicit **pre-move** baseline:
+
+```bash
+cargo barbican gatehouse re-pin --base-ref <pre-move-commit>
+```
+
+This runs age-lock and strict assessment before copying pin facts. Every
+refreshed target must be explained by that baseline; an unrelated package
+change is insufficient. It leaves review PENDING and withdraws old grants.
+For elevated reviews, checksum-only changes or deliberate exception handling,
+use `cargo barbican pin refresh <crate>` independently, then gather evidence
+and explicitly complete the appended review. A bot receives no exemption.
+
 A bot bump of a crate covered by a reviewed family fails `pin check` by
 design; that mismatch is the gate working, not a false positive. Review the
 bumped version as you would any update, then re-pin the family before merging.
@@ -206,11 +221,12 @@ Two distinct cases, distinguished by what changed:
 
 - **Mechanical re-pin.** The new version introduces no new execution surface
   and no other elevated-risk finding — `assess` reports the diff as routine
-  after the update. Update the family's `resolved` version and
-  `checksum_sha256` from `Cargo.lock`, the `direct` pin if configured, and
-  append the new version, date, and commands run to the existing review
-  record (or write a short successor record citing the old one under
-  `Inheritance`).
+  after the update. Use `pin refresh <crate>` to copy the registry version and
+  checksum from `Cargo.lock`, update an already-present direct pin when current
+  declarations are uniformly exact, and append to the existing record.
+  Refresh removes that target's old grants and reopens review as PENDING.
+  Review the append and any replacement grants before removing its marker;
+  assessment does not complete that human decision automatically.
 - **Genuine re-review.** `assess` flags a new or changed `build.rs`,
   proc-macro, or native `-sys` surface in the newly selected packages, or the
   release otherwise changes the trust posture (new upstream maintainer, new

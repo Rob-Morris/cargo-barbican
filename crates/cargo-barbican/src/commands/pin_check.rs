@@ -86,6 +86,27 @@ pub(super) fn enforce_reviewed_targets(
         &config_path.display().to_string(),
     )?;
 
+    for family in report.families() {
+        for check in family
+            .resolved_checks()
+            .iter()
+            .filter(|check| !check.is_success())
+        {
+            if barbican::plan_pin_refresh(
+                reviewed_targets,
+                &lockfile,
+                &manifest_requirements,
+                &[check.crate_name().to_owned()],
+            )
+            .is_ok()
+            {
+                writeln!(stdout, "  recovery: cargo barbican pin refresh {} (registry facts only; review reopens as PENDING)", check.crate_name()).map_err(CommandError::Io)?;
+            } else {
+                writeln!(stdout, "  recovery: reconcile source/coverage manually; see docs/user/git-sources.md for exact Git review").map_err(CommandError::Io)?;
+            }
+        }
+    }
+
     Ok(
         if report.is_success()
             && review_record_checks

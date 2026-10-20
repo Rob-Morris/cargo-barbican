@@ -90,6 +90,8 @@ current implemented surface is:
 - `cargo barbican policy init`
 - `cargo barbican inventory`
 - `cargo barbican pin add`
+- `cargo barbican pin refresh`
+- `cargo barbican gatehouse re-pin`
 - `cargo barbican pin exception`
 - `cargo barbican pin check`
 - `cargo barbican review`

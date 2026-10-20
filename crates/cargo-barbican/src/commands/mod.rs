@@ -12,6 +12,7 @@ mod lockfile_ops;
 mod pick;
 mod pin;
 mod pin_check;
+mod pin_refresh;
 mod policy;
 mod render;
 mod resolve;

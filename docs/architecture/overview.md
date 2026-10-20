@@ -52,6 +52,12 @@ The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
 `inventory`, `pin add`, `pin exception`, `pin check`, `review`, `audit`, and
 `verify` are implemented.
 
+`pin refresh` updates existing registry pin facts, withdraws changed targets'
+grants and reopens review records. `gatehouse re-pin` composes explicit-baseline
+proof and existing age/assessment before one aggregate refresh. Record writes
+precede policy publication; failures may retain safe PENDING evidence. See
+[DD-004](decisions/dd-004-reviewed-pin-refresh.md).
+
 The current intake layer is:
 
 - `assess` remains the post-add diff classifier

@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.30.1
+# Synced from cargo-barbican v0.31.0
 # Review and edit this local policy after copying or running `cargo barbican policy init`.
 
 [release_age]

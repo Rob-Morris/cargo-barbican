@@ -613,6 +613,13 @@ impl FakeCommandRunner {
 }
 
 impl CommandRunner for FakeCommandRunner {
+    fn git_resolve_commit(
+        &self,
+        current_dir: &Path,
+        reference: &str,
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        self.git_show(current_dir, &format!("{reference}^{{commit}}"))
+    }
     fn environment_variable(&self, name: &str) -> Option<OsString> {
         self.environment.get(name).cloned()
     }

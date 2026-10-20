@@ -26,6 +26,8 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption; `--toolchain` creates an absent exact native pin and `--ci github` also emits the CI workflow. |
 | `cargo barbican inventory` | Base audit / gate | Report dependency inventory and reviewed-policy coverage; `--enforce` gates direct-dependency coverage. |
 | `cargo barbican pin add` | Policy management | Scaffold a reviewed family and review-record stub from `Cargo.lock`. |
+| `cargo barbican pin refresh` | Policy management | Copy changed registry pin facts into existing families, withdraw old grants and reopen review as PENDING. |
+| `cargo barbican gatehouse re-pin` | Workflow | Check each moved registry target against an explicit baseline, run age/assessment, then refresh without completing review. |
 | `cargo barbican pin exception` | Policy management | Scaffold a governed, checksum-bound acceptance of a RustSec advisory finding. |
 | `cargo barbican pin check` | Base policy gate | Enforce reviewed-target policy. |
 | `cargo barbican review` | Base review aid | Print a policy-focused review diff. |
@@ -122,8 +124,8 @@ lockfile under policy and then use the base post-add commands:
 
 ```bash
 cargo barbican resolve
-cargo barbican age-lock
-cargo barbican assess
+cargo barbican age-lock --base-ref <pre-move-commit>
+cargo barbican assess --base-ref <pre-move-commit>
 cargo barbican review
 cargo barbican audit
 cargo barbican verify
@@ -234,11 +236,31 @@ manifest requirement) away from the exact version and checksum the family
 recorded, and that mismatch is exactly what `pin check` exists to catch. This
 is not a false positive to suppress. Treat it as a re-review trigger: review
 the bumped version the same way any other update would be reviewed, then
-update the family's `resolved` entry (and `direct` entry, if pinned) in
-`reviewed-targets.toml` and the review record to match, before merging the
-bot's PR.
+use `pin refresh <crate>` to copy registry facts and reopen the existing
+record, or `gatehouse re-pin --base-ref <pre-move-commit>` for the evidence-first
+routine path. Refresh withdraws the changed target's old grants. Complete the
+append and deliberately record any replacement grants before removing PENDING
+and merging the PR. A committed PR's HEAD is not its pre-move baseline.
 
 ### Maintaining Reviewed Targets
+
+For existing registry families after a lockfile move:
+
+```bash
+cargo barbican pin refresh serde
+# Or gather evidence first, then refresh every eligible moved registry target:
+cargo barbican gatehouse re-pin --base-ref <pre-move-commit>
+# Non-Git baseline containing manifests and Cargo.lock:
+cargo barbican gatehouse re-pin --base-dir <baseline-directory>
+```
+
+Refresh withdraws the changed targets' surface, release-age and advisory grants
+and records them in the existing review history. Shared records reopen all
+referencing families. Complete the appended review, explicitly decide any new
+grants, then remove PENDING and run the normal gate. An I/O failure can leave
+safe PENDING appends with old pins; inspect the diff and pin check before retrying.
+Neither command approves review or builds/tests. Exact Git refresh and source
+migration require the manual source-review workflow.
 
 Use reviewed targets when a dependency family has been deliberately reviewed
 and should be pinned before build or test execution.
@@ -599,6 +621,8 @@ Currently supported workflows:
 
 - `pre-release` - whole-repo toolchain, inventory, audit, and verify workflow
 - `candidate` - pre-add intake dossier for one exact crates.io candidate
+- `re-pin` - explicit-baseline age/assessment followed by registry pin refresh;
+  review remains PENDING
 
 ### `cargo barbican resolve`
 
