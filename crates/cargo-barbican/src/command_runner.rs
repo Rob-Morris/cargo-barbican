@@ -299,7 +299,9 @@ impl CommandRunner for RealCommandRunner {
     }
 
     fn cargo_audit(&self, current_dir: &Path) -> Result<String, RunnerError> {
-        run_cargo_command(current_dir, ["audit"])
+        let mut command = prepared_cargo_tool_command(current_dir, Delegate::CargoAudit.binary());
+        command.arg("audit");
+        stdout_from_output(run_prepared_command(command)?)
     }
 
     fn cargo_audit_json(
@@ -307,7 +309,8 @@ impl CommandRunner for RealCommandRunner {
         controlled_cwd: &Path,
         lockfile_path: &Path,
     ) -> Result<CommandOutput, RunnerError> {
-        let mut command = prepared_cargo_command(controlled_cwd);
+        let mut command =
+            prepared_cargo_tool_command(controlled_cwd, Delegate::CargoAudit.binary());
         command.args(["audit", "--json", "-f"]);
         command.arg(lockfile_path);
         command.arg("-d");
@@ -322,8 +325,8 @@ impl CommandRunner for RealCommandRunner {
         config_path: &Path,
         checks: &[barbican::CargoDenyCheck],
     ) -> Result<CommandOutput, RunnerError> {
-        let mut command = prepared_cargo_command(current_dir);
-        command.args(["deny", "-f", "json", "check", "-c"]);
+        let mut command = prepared_cargo_tool_command(current_dir, Delegate::CargoDeny.binary());
+        command.args(["--locked", "-f", "json", "check", "-c"]);
         command.arg(config_path);
         for check in checks {
             command.arg(check.as_str());
@@ -492,7 +495,11 @@ fn forward_delegate_stderr(mut source: impl Read, mut destination: impl Write) -
 }
 
 fn prepared_cargo_command(current_dir: &Path) -> ProcessCommand {
-    let mut command = ProcessCommand::new("cargo");
+    prepared_cargo_tool_command(current_dir, "cargo")
+}
+
+fn prepared_cargo_tool_command(current_dir: &Path, program: &str) -> ProcessCommand {
+    let mut command = ProcessCommand::new(program);
     command.current_dir(current_dir);
 
     for (name, _) in env::vars_os() {

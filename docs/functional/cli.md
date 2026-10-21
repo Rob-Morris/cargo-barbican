@@ -601,6 +601,14 @@ cargo barbican audit [--format text|json]
     posture (`enforced`, `skipped`, or `disabled`, with the reason), so the
     effective state is never invisible.
 
+    Scanners run through their `cargo-deny` / `cargo-audit` executables
+    directly, so Cargo `deny` and `audit` aliases cannot replace the scanner.
+    The executables on `PATH` remain trusted tools. `cargo-deny` runs with
+    `--locked` to refuse lockfile changes while retaining normal advisory
+    fetching; `cargo-audit` reads the explicit lockfile from an isolated
+    working directory. Candidate audit evidence also invokes `cargo-audit`
+    directly in its candidate sandbox.
+
     Before delegating, `audit` checks that each required scanner binary is on
     `PATH` (`cargo-deny` always; `cargo-audit` only when it is the configured
     lockfile scanner). A missing binary fails closed with an actionable
