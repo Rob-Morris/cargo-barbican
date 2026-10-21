@@ -203,6 +203,35 @@ cargo barbican gatehouse re-pin (--base-ref REF | --base-dir DIR)
     evidence and reports only that no refresh is needed. Success never completes
     human review, renews grants, runs inspect/audit/verify, or builds/tests.
 
+cargo barbican gatehouse policy-check
+    Check the current Rust workspace without building or testing workspace code.
+    Runs four blocking stages, in order: exact toolchain conformance,
+    inventory --enforce for direct-dependency coverage, audit, and strict
+    reviewed pin enforcement. Normal workspace discovery includes member
+    invocation. No baseline, stage selection, bypass, new config or JSON mode.
+    Requires reviewed-targets.toml with at least one active Rust family;
+    standalone pin check retains its optional-policy skip behaviour.
+    Pins retain completed-record, exact version/checksum/direct/source and exact
+    Git coverage checks. Audit retains configured licence/source/ban checks,
+    advisory disclosure, source-bound exceptions and expiry at invocation time.
+    Inventory's transitive/surface backlog remains observational. This does not
+    add release-age, comparative assess or archive/IOC checks.
+    Valid nextest configuration and applicable alias controls are retained,
+    without requiring or probing the test executable. Canonical conformance
+    runs once and its captured Cargo configuration is reused for pins.
+    Fails fast. Returned stage failures print Gatehouse policy-check: FAIL
+    (toolchain|inventory|audit|pins). Operational errors use the ordinary
+    stderr FAIL diagnostic and may have no aggregate stdout failure token.
+    Exit codes remain 0 success, 1 policy/operational failure, 2 usage error.
+    Success prints Policy checks only; build/test not run. followed by
+    Gatehouse policy-check: PASS. No Verify, pre-release or execution OK token.
+    Manifests, Cargo.lock, reviewed policy and records are not rewritten.
+    Version probes, frozen metadata and intended scanners are permitted;
+    scratch files, advisory databases and caches may update. There is no
+    sandbox, binary-attestation, cached-build certification or persistent PASS.
+    Consumers own execution-cache identity. Use gatehouse pre-release for the
+    full release gate; generated CI keeps that default.
+
 cargo barbican gatehouse pre-release
     Run the standard pre-release supply-chain workflow over the current Rust
     workspace. The workflow is fail-fast and runs, in order:
@@ -608,6 +637,9 @@ cargo barbican audit [--format text|json]
     fetching; `cargo-audit` reads the explicit lockfile from an isolated
     working directory. Candidate audit evidence also invokes `cargo-audit`
     directly in its candidate sandbox.
+    A parsed report does not override abnormal scanner termination. Nonzero
+    status must be explained by cargo-deny's error-summary bitset or
+    cargo-audit's findings status; reviewed advisory exceptions still apply.
 
     Before delegating, `audit` checks that each required scanner binary is on
     `PATH` (`cargo-deny` always; `cargo-audit` only when it is the configured
@@ -807,6 +839,12 @@ contract, not a routine rewording.
   was available.
 - `Toolchain check: PASS` / `Toolchain check: FAIL` — printed by the
   toolchain preflight used by standalone `verify` and `gatehouse pre-release`.
+- `Gatehouse policy-check: PASS` / `Gatehouse policy-check: FAIL (toolchain)` /
+  `Gatehouse policy-check: FAIL (inventory)` / `Gatehouse policy-check: FAIL (audit)` /
+  `Gatehouse policy-check: FAIL (pins)` — printed after the fixed policy stages
+  pass or return a blocking verdict. Propagated operational errors use the
+  ordinary stderr `FAIL` contract and need not print an aggregate stdout token.
+  PASS covers policy only; build/test execution is separate.
 - `Gatehouse pre-release: PASS` / `Gatehouse pre-release: FAIL (toolchain)` / `Gatehouse pre-release: FAIL (inventory)` /
   `Gatehouse pre-release: FAIL (audit)` / `Gatehouse pre-release: FAIL (verify)` — printed by `gatehouse pre-release`
   after its blocking primitives pass or fail. Operational errors that prevent
@@ -871,10 +909,10 @@ Every command follows one rule for where output goes:
   release-age gate failures reported outside a report, fetch failures), also
   write their `FAIL` line to stderr, matching the same stream.
 
-Because every failure path funnels through that one renderer (or writes to
-stderr directly using the same `FAIL` token), grepping stderr for
-line-leading `^FAIL ` reliably surfaces every failure, not just the ones a
-given command happened to render itself. The renderer also escapes the detail
+Operational errors funnel through that renderer (or a direct diagnostic with
+the same `FAIL` prefix). Returned policy rejections can instead carry a stdout
+verdict with empty stderr, so consumers must check exit status; grepping stderr
+alone does not identify every failed check. The renderer escapes the detail
 through the same terminal-injection guard used for evidence fields — untrusted
 crate names, requirements, network-sourced strings, and policy file paths
 cannot inject ANSI or bidi control sequences into the terminal — and never

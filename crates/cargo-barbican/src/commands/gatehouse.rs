@@ -22,6 +22,7 @@ use super::{
 };
 
 const PRE_RELEASE_STEP_COUNT: u8 = 4;
+const POLICY_CHECK_STEP_COUNT: u8 = 4;
 
 pub(super) fn run_gatehouse<C, R>(
     command: GatehouseCommand,
@@ -48,6 +49,7 @@ where
             stderr,
         ),
         GatehouseCommand::PreRelease => run_pre_release(current_dir, runner, now, stdout, stderr),
+        GatehouseCommand::PolicyCheck => run_policy_check(current_dir, runner, now, stdout, stderr),
         GatehouseCommand::Candidate(args) => {
             run_candidate(args, current_dir, client, runner, now, stdout, stderr)
         }
@@ -66,7 +68,12 @@ where
 {
     let verify_config = load_config(current_dir)?.verify;
     writeln!(stdout, "Gatehouse pre-release:").map_err(CommandError::Io)?;
-    write_pre_release_step(stdout, 1, "toolchain conformance (blocking)")?;
+    write_gatehouse_step(
+        stdout,
+        PRE_RELEASE_STEP_COUNT,
+        1,
+        "toolchain conformance (blocking)",
+    )?;
     let toolchain_preflight = match toolchain::run_toolchain_check(
         current_dir,
         runner,
@@ -83,7 +90,12 @@ where
     };
 
     writeln!(stdout).map_err(CommandError::Io)?;
-    write_pre_release_step(stdout, 2, "inventory coverage floor (blocking)")?;
+    write_gatehouse_step(
+        stdout,
+        PRE_RELEASE_STEP_COUNT,
+        2,
+        "inventory coverage floor (blocking)",
+    )?;
     let inventory_exit = inventory::run_inventory(current_dir, runner, now, true, stdout)?;
     if inventory_exit != ExitCode::SUCCESS {
         writeln!(stdout, "Gatehouse pre-release: FAIL (inventory)").map_err(CommandError::Io)?;
@@ -91,7 +103,7 @@ where
     }
 
     writeln!(stdout).map_err(CommandError::Io)?;
-    write_pre_release_step(stdout, 3, "audit (blocking)")?;
+    write_gatehouse_step(stdout, PRE_RELEASE_STEP_COUNT, 3, "audit (blocking)")?;
     let audit_exit = audit::run_audit(
         AuditOutputFormat::Text,
         current_dir,
@@ -107,7 +119,12 @@ where
     }
 
     writeln!(stdout).map_err(CommandError::Io)?;
-    write_pre_release_step(stdout, 4, "verify (blocking; includes pin check)")?;
+    write_gatehouse_step(
+        stdout,
+        PRE_RELEASE_STEP_COUNT,
+        4,
+        "verify (blocking; includes pin check)",
+    )?;
     let verify_exit = verify::run_verify_after_gatehouse_preflights(
         current_dir,
         runner,
@@ -125,16 +142,95 @@ where
     Ok(ExitCode::SUCCESS)
 }
 
-fn write_pre_release_step(
+fn run_policy_check<R>(
+    current_dir: &Path,
+    runner: &R,
+    now: OffsetDateTime,
     stdout: &mut dyn IoWrite,
+    stderr: &mut dyn IoWrite,
+) -> Result<ExitCode, CommandError>
+where
+    R: CommandRunner + ?Sized,
+{
+    let verify_config = load_config(current_dir)?.verify;
+    writeln!(stdout, "Gatehouse policy-check:").map_err(CommandError::Io)?;
+    write_gatehouse_step(
+        stdout,
+        POLICY_CHECK_STEP_COUNT,
+        1,
+        "toolchain conformance (blocking)",
+    )?;
+    let preflight = match toolchain::run_toolchain_check(
+        current_dir,
+        runner,
+        verify_config.test_runner,
+        stdout,
+        stderr,
+    )? {
+        toolchain::ToolchainCheckOutcome::Passed(preflight) => preflight,
+        toolchain::ToolchainCheckOutcome::Failed(exit) => {
+            writeln!(stdout, "Gatehouse policy-check: FAIL (toolchain)")
+                .map_err(CommandError::Io)?;
+            return Ok(exit);
+        }
+    };
+    writeln!(stdout).map_err(CommandError::Io)?;
+    write_gatehouse_step(
+        stdout,
+        POLICY_CHECK_STEP_COUNT,
+        2,
+        "inventory coverage floor (blocking)",
+    )?;
+    let exit = inventory::run_inventory(current_dir, runner, now, true, stdout)?;
+    if exit != ExitCode::SUCCESS {
+        writeln!(stdout, "Gatehouse policy-check: FAIL (inventory)").map_err(CommandError::Io)?;
+        return Ok(exit);
+    }
+    writeln!(stdout).map_err(CommandError::Io)?;
+    write_gatehouse_step(stdout, POLICY_CHECK_STEP_COUNT, 3, "audit (blocking)")?;
+    let exit = audit::run_audit(
+        AuditOutputFormat::Text,
+        current_dir,
+        None,
+        runner,
+        now,
+        stdout,
+        stderr,
+    )?;
+    if exit != ExitCode::SUCCESS {
+        writeln!(stdout, "Gatehouse policy-check: FAIL (audit)").map_err(CommandError::Io)?;
+        return Ok(exit);
+    }
+    writeln!(stdout).map_err(CommandError::Io)?;
+    write_gatehouse_step(
+        stdout,
+        POLICY_CHECK_STEP_COUNT,
+        4,
+        "reviewed pin enforcement (blocking; active policy required)",
+    )?;
+    let exit = super::pin_check::enforce_required_reviewed_targets(
+        current_dir,
+        preflight.cargo_configs(),
+        "gatehouse policy-check",
+        stdout,
+        stderr,
+    )?;
+    if exit != ExitCode::SUCCESS {
+        writeln!(stdout, "Gatehouse policy-check: FAIL (pins)").map_err(CommandError::Io)?;
+        return Ok(exit);
+    }
+    writeln!(stdout, "Policy checks only; build/test not run.").map_err(CommandError::Io)?;
+    writeln!(stdout, "Gatehouse policy-check: PASS").map_err(CommandError::Io)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn write_gatehouse_step(
+    stdout: &mut dyn IoWrite,
+    total: u8,
     number: u8,
     description: &str,
 ) -> Result<(), CommandError> {
-    writeln!(
-        stdout,
-        "Step {number}/{PRE_RELEASE_STEP_COUNT} — {description}"
-    )
-    .map_err(CommandError::Io)
+    writeln!(stdout, "Step {number}/{total} — {description}").map_err(CommandError::Io)
 }
 
 fn run_candidate<C, R>(

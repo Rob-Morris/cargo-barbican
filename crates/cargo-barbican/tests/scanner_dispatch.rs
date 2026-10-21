@@ -27,7 +27,9 @@ impl Fixture {
         for directory in ["workspace/src", "scratch", "cargo-home", "bin", "records"] {
             fs::create_dir_all(fixture.root.join(directory)).unwrap();
         }
-        for tool in ["cargo", "rustc", "rustdoc", "cat"] {
+        for tool in [
+            "cargo", "rustup", "rustc", "rustdoc", "cat", "cc", "as", "ld",
+        ] {
             let executable = std::env::split_paths(&std::env::var_os("PATH").unwrap())
                 .map(|path| path.join(tool))
                 .find(|path| path.is_file())
@@ -72,6 +74,11 @@ esac
 if [ '{scanner}' = deny ]; then cat "$BARBICAN_SCANNER_FIXTURE/deny.json" >&2
 else cat "$BARBICAN_SCANNER_FIXTURE/audit.json"
 fi
+case "${{BARBICAN_SCANNER_MODE-clean}}" in
+  {scanner}-report-failed) exit 42 ;;
+  {scanner}-report-signal) kill -TERM $$ ;;
+  {scanner}-report-unexplained) exit 1 ;;
+esac
 "##));
         }
         fixture
@@ -312,6 +319,12 @@ fn audit_native_scanner_success_and_failures_never_use_alias_fallback() {
         "audit-malformed",
         "deny-failed",
         "audit-failed",
+        "deny-report-failed",
+        "audit-report-failed",
+        "deny-report-signal",
+        "audit-report-signal",
+        "deny-report-unexplained",
+        "audit-report-unexplained",
         "missing-deny",
         "missing-audit",
     ] {
@@ -337,5 +350,163 @@ fn audit_native_scanner_success_and_failures_never_use_alias_fallback() {
             );
         }
         fixture.assert_unchanged();
+    }
+}
+
+impl Fixture {
+    fn policy_workspace(&self) {
+        let cargo_home = std::env::var_os("CARGO_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cargo"));
+        symlink(
+            cargo_home.join("registry").canonicalize().unwrap(),
+            self.root.join("cargo-home/registry"),
+        )
+        .unwrap();
+        self.write(
+            "workspace/rust-toolchain.toml",
+            "[toolchain]\nchannel='1.95.0'\n",
+        );
+        self.write("workspace/Cargo.toml", "[package]\nname='scanner-fixture'\nversion='0.1.0'\nedition='2024'\n\n[workspace]\nmembers=['member']\n\n[dependencies]\nsemver='=1.0.28'\n");
+        self.write(
+            "workspace/member/Cargo.toml",
+            "[package]\nname='member-fixture'\nversion='0.1.0'\nedition='2024'\n",
+        );
+        self.write("workspace/member/src/lib.rs", "pub fn member() {}\n");
+        self.write("workspace/Cargo.lock", "version = 4\n\n[[package]]\nname = \"member-fixture\"\nversion = \"0.1.0\"\n\n[[package]]\nname = \"scanner-fixture\"\nversion = \"0.1.0\"\ndependencies = [\"semver\"]\n\n[[package]]\nname = \"semver\"\nversion = \"1.0.28\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd\"\n");
+        self.write("workspace/reviewed-targets.toml", "[[rust.families]]\nname='semver'\nreview_record='review.md'\n[rust.families.direct]\nsemver='=1.0.28'\n[rust.families.resolved]\nsemver={version='1.0.28',checksum_sha256='8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd'}\n");
+        self.write(
+            "workspace/review.md",
+            "# Completed review fixture: semver\n",
+        );
+    }
+
+    fn policy_snapshot(&self) -> Vec<Option<Vec<u8>>> {
+        [
+            "Cargo.toml",
+            "Cargo.lock",
+            "reviewed-targets.toml",
+            "review.md",
+            "member/Cargo.toml",
+            "barbican.toml",
+            "rust-toolchain.toml",
+        ]
+        .iter()
+        .map(|path| fs::read(self.root.join("workspace").join(path)).ok())
+        .collect()
+    }
+
+    fn assert_policy_unchanged(&self, before: &[Option<Vec<u8>>]) {
+        assert_eq!(self.policy_snapshot(), before);
+        for marker in ["alias-hit", "build-hit", "target"] {
+            assert!(!self.root.join(marker).exists(), "unexpected {marker}");
+        }
+    }
+}
+
+#[test]
+fn policy_check_native_root_and_member_pass_without_workspace_execution() {
+    for scanner in ["cargo-deny", "cargo-audit", "both"] {
+        let fixture = Fixture::new();
+        fixture.policy_workspace();
+        fixture.alias("cargo-home");
+        let mut control = fixture.command("cargo", "workspace");
+        success(
+            control
+                .args(["check", "--locked", "--offline"])
+                .output()
+                .unwrap(),
+        );
+        assert!(
+            fixture.root.join("build-hit").exists(),
+            "build-script control must execute"
+        );
+        fs::remove_file(fixture.root.join("build-hit")).unwrap();
+        fs::remove_dir_all(fixture.root.join("target")).unwrap();
+        fixture.write("workspace/barbican.toml", &format!("[delegates.advisories]\nlockfile_scanner='{scanner}'\n[verify]\ntest_runner='nextest'\nnextest_version='0.9.146'\n"));
+        let before = fixture.policy_snapshot();
+        for directory in ["workspace", "workspace/member"] {
+            let mut command = fixture.command(env!("CARGO_BIN_EXE_cargo-barbican"), directory);
+            fixture.aliases(&mut command, "environment");
+            let output = success(
+                command
+                    .args(["gatehouse", "policy-check"])
+                    .output()
+                    .unwrap(),
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert!(
+                stdout.ends_with(
+                    "Policy checks only; build/test not run.\nGatehouse policy-check: PASS\n"
+                ),
+                "{stdout}"
+            );
+            assert!(!stdout.contains("Verify: PASS"));
+            assert!(!stdout.contains("OK   cargo"));
+            fixture.assert_policy_unchanged(&before);
+        }
+    }
+}
+
+#[test]
+fn policy_check_native_failures_never_execute_or_rewrite_workspace() {
+    for failure in [
+        "deny-malformed",
+        "audit-failed",
+        "deny-report-failed",
+        "audit-report-failed",
+        "deny-report-signal",
+        "audit-report-signal",
+        "deny-report-unexplained",
+        "audit-report-unexplained",
+        "missing-deny",
+        "missing-policy",
+        "empty-policy",
+        "pending-review",
+        "checksum",
+        "missing-lock",
+        "toolchain",
+    ] {
+        let fixture = Fixture::new();
+        fixture.policy_workspace();
+        fixture.alias("cargo-home");
+        match failure {
+            "missing-deny" => fs::remove_file(fixture.root.join("bin/cargo-deny")).unwrap(),
+            "missing-policy" => {
+                fs::remove_file(fixture.root.join("workspace/reviewed-targets.toml")).unwrap()
+            }
+            "empty-policy" => {
+                fixture.write("workspace/reviewed-targets.toml", "[rust]\nfamilies=[]\n")
+            }
+            "pending-review" => fixture.write(
+                "workspace/review.md",
+                &format!("# Review\n{}\n", barbican::REVIEW_RECORD_SCAFFOLD_MARKER),
+            ),
+            "checksum" => {
+                let path = fixture.root.join("workspace/reviewed-targets.toml");
+                let text = fs::read_to_string(&path).unwrap().replace(
+                    "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd",
+                    &"f".repeat(64),
+                );
+                fs::write(path, text).unwrap();
+            }
+            "missing-lock" => fs::remove_file(fixture.root.join("workspace/Cargo.lock")).unwrap(),
+            "toolchain" => fixture.write(
+                "workspace/rust-toolchain.toml",
+                "[toolchain]\nchannel='stable'\n",
+            ),
+            _ => {}
+        }
+        let before = fixture.policy_snapshot();
+        let mut command = fixture.command(env!("CARGO_BIN_EXE_cargo-barbican"), "workspace");
+        fixture.aliases(&mut command, "environment");
+        command.env("BARBICAN_SCANNER_MODE", failure);
+        let output = command
+            .args(["gatehouse", "policy-check"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{failure}: {output:?}");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("Gatehouse policy-check: PASS"));
+        fixture.assert_policy_unchanged(&before);
     }
 }

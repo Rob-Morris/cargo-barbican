@@ -451,7 +451,9 @@ fn audit_in_non_rust_dir_reports_missing_workspace_root_not_a_delegate_parse_err
 fn audit_accepts_reviewed_advisory_with_cargo_deny_scanner() {
     let cli = Cli::parse_from(["cargo-barbican", "audit"]);
     let client = FakeCratesIoClient::default();
-    let runner = FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
+    let mut runner =
+        FakeCommandRunner::default().with_cargo_deny_json(&cargo_deny_advisory_jsonl());
+    runner.cargo_deny_json_result.exit_code = Some(1);
     let temp_dir = fresh_temp_dir();
     write_advisory_audit_fixture(&temp_dir, None, "2026-09-21");
     write_audit_source_lock(&temp_dir);
@@ -747,7 +749,9 @@ fn audit_fails_expired_reviewed_advisory_with_cargo_deny_scanner() {
 fn audit_accepts_reviewed_advisory_with_cargo_audit_scanner() {
     let cli = Cli::parse_from(["cargo-barbican", "audit"]);
     let client = FakeCratesIoClient::default();
-    let runner = FakeCommandRunner::default().with_cargo_audit_json(&cargo_audit_advisory_json());
+    let mut runner =
+        FakeCommandRunner::default().with_cargo_audit_json(&cargo_audit_advisory_json());
+    runner.cargo_audit_json_result.exit_code = Some(1);
     let temp_dir = fresh_temp_dir();
     write_advisory_audit_fixture(
         &temp_dir,

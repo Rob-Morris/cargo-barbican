@@ -87,6 +87,7 @@ current implemented surface is:
 - `cargo barbican inspect`
 - `cargo barbican gatehouse candidate`
 - `cargo barbican gatehouse pre-release`
+- `cargo barbican gatehouse policy-check`
 - `cargo barbican policy init`
 - `cargo barbican inventory`
 - `cargo barbican pin add`

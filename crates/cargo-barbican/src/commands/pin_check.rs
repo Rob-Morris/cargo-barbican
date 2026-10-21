@@ -8,10 +8,11 @@ use barbican::{
     RustReviewedTargetsReport, check_reviewed_rust_targets, patched_reviewed_crates,
 };
 
+use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::{CommandRunner, cargo_home_from_environment};
 
 use super::{
-    CommandError, check_review_record_paths, escape_render_field, load_current_lockfile,
+    CommandError, check_review_record_paths, escape_render_field, fail, load_current_lockfile,
     load_current_manifest_direct_requirements, load_effective_cargo_configs,
     load_manifest_patched_crate_names, load_reviewed_targets, render_allowed_policy_exceptions,
     source_replacement_finding,
@@ -57,6 +58,39 @@ where
         config_path,
         current_dir,
         &cargo_configs,
+        stdout,
+    )
+}
+
+pub(super) fn enforce_required_reviewed_targets(
+    current_dir: &Path,
+    cargo_configs: &[super::loaders::EffectiveCargoConfig],
+    operation: &str,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError> {
+    let config_path = Path::new(REVIEWED_TARGETS_CONFIG_FILE);
+    let Some(reviewed_targets) = load_reviewed_targets(current_dir, config_path)? else {
+        return fail(
+            stderr,
+            format!(
+                "{REVIEWED_TARGETS_CONFIG_FILE}: reviewed-targets policy required for {operation}"
+            ),
+        );
+    };
+    if reviewed_targets.rust_families().is_empty() {
+        return fail(
+            stderr,
+            format!(
+                "{REVIEWED_TARGETS_CONFIG_FILE}: no active Rust reviewed families; {operation} requires at least one"
+            ),
+        );
+    }
+    enforce_reviewed_targets(
+        &reviewed_targets,
+        config_path,
+        current_dir,
+        cargo_configs,
         stdout,
     )
 }

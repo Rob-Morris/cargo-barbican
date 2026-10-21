@@ -29,7 +29,7 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.31.2
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.32.0
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -97,7 +97,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.31.2
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.32.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -129,7 +129,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.31.2
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.32.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -203,3 +203,11 @@ independently of what the commit touches, which makes a commit-time failure
 confusing when nothing in the commit is at fault). Run those two in CI, where an
 advisory-driven failure is expected and actionable rather than surprising at
 commit time.
+
+
+## Policy-only consumers
+
+`gatehouse policy-check` supports consumers that independently own locked
+execution and its reuse. It does not certify cached execution artefacts and
+does not replace the generated `gatehouse pre-release` release gate. Existing
+consumer workflows are not rewritten. See the [integration recipe](integration.md#policy-checks-without-buildtest).

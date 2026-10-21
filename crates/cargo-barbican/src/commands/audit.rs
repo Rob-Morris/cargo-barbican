@@ -141,7 +141,38 @@ where
     let mut cargo_deny_report =
         match runner.cargo_deny_json(current_dir, &generated_config_path, &cargo_deny_checks) {
             Ok(output) => match parse_cargo_deny_json_lines(&output.stderr) {
-                Ok(report) => report,
+                Ok(report) => {
+                    // cargo-deny documents a bitset of checks with errors. A
+                    // terminal report cannot authorise abnormal termination or
+                    // an unexplained non-zero status.
+                    let findings_status = report
+                        .summary_counts()
+                        .iter()
+                        .filter(|count| count.errors() > 0)
+                        .fold(0, |status, count| {
+                            status
+                                | match count.check() {
+                                    "advisories" => 0x1,
+                                    "bans" => 0x2,
+                                    "licenses" => 0x4,
+                                    "sources" => 0x8,
+                                    _ => 0,
+                                }
+                        });
+                    if output.exit_code != Some(0)
+                        && (findings_status == 0 || output.exit_code != Some(findings_status))
+                    {
+                        return fail(
+                            stderr,
+                            delegate_output_failure(
+                                Delegate::CargoDeny,
+                                &output,
+                                "exit status does not match structured findings",
+                            ),
+                        );
+                    }
+                    report
+                }
                 Err(error) => {
                     return fail(
                         stderr,
@@ -165,7 +196,24 @@ where
         let lockfile_path = current_dir.join("Cargo.lock");
         match runner.cargo_audit_json(scratch.path(), &lockfile_path) {
             Ok(output) => match parse_cargo_audit_json(&output.stdout) {
-                Ok(report) => Some(report),
+                Ok(report) => {
+                    // cargo-audit uses 1 for findings and 2 for operational
+                    // errors. Retain reviewed-exception reconciliation for 1.
+                    let has_findings =
+                        !report.findings().is_empty() || report.idless_warnings() > 0;
+                    if output.exit_code != Some(0) && !(output.exit_code == Some(1) && has_findings)
+                    {
+                        return fail(
+                            stderr,
+                            delegate_output_failure(
+                                Delegate::CargoAudit,
+                                &output,
+                                "exit status does not match structured findings",
+                            ),
+                        );
+                    }
+                    Some(report)
+                }
                 Err(error) => {
                     return fail(
                         stderr,
@@ -303,9 +351,8 @@ where
 }
 
 /// A delegate legitimately exits non-zero when it reports findings, but by the
-/// time this is reached its structured output has already failed to parse — so
-/// a non-zero exit here means the delegate itself failed, not that it enumerated
-/// advisories. Surface its status and a stderr excerpt in that case; only a
+/// time this is reached its output failed parsing or its exit status was not
+/// explained by the parsed findings. Surface status and a stderr excerpt; only a
 /// clean exit with unparseable output is a genuine structured-output contract
 /// violation worth reporting as a parse error.
 fn delegate_output_failure(

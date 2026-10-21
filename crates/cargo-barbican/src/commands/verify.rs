@@ -3,12 +3,11 @@ use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::REVIEWED_TARGETS_CONFIG_FILE;
 use crate::command_runner::CommandRunner;
 
-use super::pin_check::enforce_reviewed_targets;
+use super::pin_check::enforce_required_reviewed_targets;
 use super::toolchain;
-use super::{CommandError, fail, load_config, load_reviewed_targets};
+use super::{CommandError, fail, load_config};
 
 pub(super) fn run_verify<R>(
     current_dir: &Path,
@@ -76,28 +75,12 @@ fn run_reviewed_locked_verification<R>(
 where
     R: CommandRunner + ?Sized,
 {
-    let config_path = Path::new(REVIEWED_TARGETS_CONFIG_FILE);
-    let Some(reviewed_targets) = load_reviewed_targets(current_dir, config_path)? else {
-        return fail(
-            stderr,
-            format!("{REVIEWED_TARGETS_CONFIG_FILE}: reviewed-targets policy required for verify"),
-        );
-    };
-    if reviewed_targets.rust_families().is_empty() {
-        return fail(
-            stderr,
-            format!(
-                "{REVIEWED_TARGETS_CONFIG_FILE}: no active Rust reviewed families; verify requires at least one"
-            ),
-        );
-    }
-
-    let pin_check_exit = enforce_reviewed_targets(
-        &reviewed_targets,
-        config_path,
+    let pin_check_exit = enforce_required_reviewed_targets(
         current_dir,
         toolchain_preflight.cargo_configs(),
+        "verify",
         stdout,
+        stderr,
     )?;
     if pin_check_exit != ExitCode::SUCCESS {
         return Ok(pin_check_exit);

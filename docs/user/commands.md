@@ -27,6 +27,7 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican inventory` | Base audit / gate | Report dependency inventory and reviewed-policy coverage; `--enforce` gates direct-dependency coverage. |
 | `cargo barbican pin add` | Policy management | Scaffold a reviewed family and review-record stub from `Cargo.lock`. |
 | `cargo barbican pin refresh` | Policy management | Copy changed registry pin facts into existing families, withdraw old grants and reopen review as PENDING. |
+| `cargo barbican gatehouse policy-check` | Workflow gate | Check toolchain, direct coverage, audit and strict reviewed pins without workspace build/test. |
 | `cargo barbican gatehouse re-pin` | Workflow | Check each moved registry target against an explicit baseline, run age/assessment, then refresh without completing review. |
 | `cargo barbican pin exception` | Policy management | Scaffold a governed, checksum-bound acceptance of a RustSec advisory finding. |
 | `cargo barbican pin check` | Base policy gate | Enforce reviewed-target policy. |
@@ -47,7 +48,7 @@ For exact parser rules and behaviour contracts, see
   `pin check` and `verify` reconcile the current `Cargo.lock` against these
   exact targets.
 - **Gate** — a command whose job is to fail closed: `pin check`, `audit`,
-  `verify`, `inventory --enforce`, and `gatehouse pre-release`. A base gate passes with a stable terminal
+  `verify`, `inventory --enforce`, `gatehouse policy-check`, and `gatehouse pre-release`. A base gate passes with a stable terminal
   token (`Pin check: PASS`, `Audit: PASS`, `Verify: PASS`, or — under
   `--enforce` — `Inventory: PASS`), blocks and explains why, or — for
   standalone `pin check` only — skips successfully when no reviewed-target
@@ -57,7 +58,8 @@ For exact parser rules and behaviour contracts, see
 - **Gatehouse** — the workflow namespace. `gatehouse candidate` assembles a
   pre-add dossier for an exact crates.io release; `gatehouse pre-release`
   composes the standard whole-repo toolchain, inventory, audit, and verify
-  sequence.
+  sequence. `gatehouse policy-check` runs the same policy subset with strict
+  pins and no workspace execution; see [integration](integration.md#policy-checks-without-buildtest).
 - **Surface** — an execution surface a dependency's code runs through:
   `build-rs` (build scripts), `proc-macro`, or `native-sys` (native linking
   and FFI). Declared per crate under a family's `allowed_surfaces`.

@@ -172,8 +172,8 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
 `cargo barbican gatehouse pre-release` is currently:
 
 - the blessed fail-fast whole-repo composition for release use
-- ordered as the blocking `inventory --enforce` coverage floor, blocking
-  `audit`, then blocking `verify`
+- ordered as exact toolchain conformance, the blocking `inventory --enforce`
+  coverage floor, blocking `audit`, then blocking `verify`
 - fail-fast on uncovered direct dependencies, external direct sources, or
   unavailable graph/policy facts, while leaving transitive backlog and
   undeclared execution surfaces observational
@@ -182,6 +182,19 @@ exit 0 for an invocation-scoped review workflow, but it still fails any
   meanings, exit behaviour, and report bodies
 - text-only in this first slice, with no workflow configuration, policy
   overrides, exception flags, or JSON contract
+
+`cargo barbican gatehouse policy-check` is currently:
+
+- the fixed toolchain → inventory enforcement → audit → strict pin composition
+- non-executing for workspace build/test/check/run, nextest and doctests
+- strict about missing/empty reviewed policy, sharing verify's canonical rule;
+  standalone pin check still permits its documented adoption skip
+- preflight-once, using captured Cargo configuration and invocation time
+- compatible with valid nextest configuration without probing its executable
+- fail-fast with scoped PASS, 0/1/2 exits and the existing stdout-verdict versus
+  stderr-operational-error seam; no new flags, config, JSON or framework
+- non-mutating for manifests, lockfile and reviews, with scratch/cache/advisory
+  updates allowed; not a sandbox, cached-execution proof or universal policy gate
 
 `cargo barbican policy init` is currently:
 

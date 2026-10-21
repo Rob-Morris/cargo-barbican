@@ -344,3 +344,12 @@ crates in the same family's `resolved` map.
 
 Each milestone leaves the repo strictly better gated than the one before; no
 step requires finishing the next to be worth committing.
+
+
+## Fresh policy alongside reusable execution
+
+Use `cargo barbican gatehouse policy-check` when current toolchain, coverage,
+audit and strict pin decisions are needed without workspace build/test. Its PASS
+is scoped to those checks. Execute or reuse locked Rust verification under
+consumer-owned input-identity rules; keep `gatehouse pre-release` for releases.
+See [integration](integration.md#policy-checks-without-buildtest).

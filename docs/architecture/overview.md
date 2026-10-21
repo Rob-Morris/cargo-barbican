@@ -48,7 +48,7 @@ support is explicitly delivered.
 ## Current implemented surface
 
 The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
-`update`, `assess`, `inspect`, `gatehouse candidate`, `gatehouse pre-release`, `policy init`,
+`update`, `assess`, `inspect`, `gatehouse candidate`, `gatehouse pre-release`, `gatehouse policy-check`, `policy init`,
 `inventory`, `pin add`, `pin exception`, `pin check`, `review`, `audit`, and
 `verify` are implemented.
 
@@ -59,6 +59,11 @@ precede policy publication; failures may retain safe PENDING evidence. See
 [DD-004](decisions/dd-004-reviewed-pin-refresh.md).
 
 The current intake layer is:
+
+- `gatehouse policy-check` composes exact toolchain conformance, blocking direct
+  coverage, audit and strict reviewed pins without workspace execution; it shares
+  verify's required-policy rule and captured Cargo configuration, while standalone
+  pin check retains optional adoption. It adds no framework or new policy.
 
 - `assess` remains the post-add diff classifier
 - `gatehouse pre-release` is the blessed fail-fast composition of exact Rust

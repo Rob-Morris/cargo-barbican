@@ -296,13 +296,23 @@ pub(crate) enum GatehouseCommand {
     #[command(
         about = "Run the standard pre-release supply-chain gate",
         long_about = "Runs the standard pre-release workflow over the current Rust workspace: \
-            inventory --enforce for the direct-dependency coverage floor, audit for advisory and \
+            toolchain conformance, inventory --enforce for the direct-dependency coverage floor, audit for advisory and \
             source-policy enforcement, then verify for reviewed-target, locked-build, and \
             locked-test enforcement. The command fails fast at each gate. The base commands \
             remain the canonical policy primitives; this command composes them without adding \
             policy exceptions or changing their verdicts."
     )]
     PreRelease,
+    #[command(
+        about = "Check toolchain, dependency coverage, audit and reviewed pins without build/test",
+        long_about = "Runs the fixed policy-only workflow over the current Rust workspace: \
+            toolchain conformance, inventory --enforce, audit, then strict reviewed pin enforcement. \
+            Requires reviewed-targets.toml with at least one active Rust family. Fails fast, \
+            without building or testing workspace code or rewriting dependencies or review policy. \
+            Advisory databases and caches may update. PASS covers these policy checks only; \
+            gatehouse pre-release remains the full build/test gate."
+    )]
+    PolicyCheck,
     #[command(
         about = "Build a pre-add intake dossier for one exact crates.io candidate",
         long_about = "Builds a human-readable pre-add intake dossier combining exact candidate \

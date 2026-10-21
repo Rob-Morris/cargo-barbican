@@ -257,3 +257,9 @@ inventory, audit and verification workflow. See the
 schema, full-commit requirement, per-package review, source-bound allowances,
 manual intake and advisory/build-input limitations. Registry age/advisory
 exceptions never authorise Git targets; cargo-deny permission remains separate.
+
+
+For fresh policy without workspace execution, `gatehouse policy-check` composes
+existing toolchain, direct coverage, audit and strict pin owners. Its PASS does
+not certify a release or an execution cache. Keep the full `gatehouse pre-release`
+release check and consumer-owned execution identity; see [integration](integration.md#policy-checks-without-buildtest).

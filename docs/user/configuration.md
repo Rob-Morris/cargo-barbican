@@ -547,3 +547,9 @@ inventory, audit and verification workflow. See the
 schema, full-commit requirement, per-package review, source-bound allowances,
 manual intake and advisory/build-input limitations. Registry age/advisory
 exceptions never authorise Git targets; cargo-deny permission remains separate.
+
+
+`gatehouse policy-check` introduces no configuration section. It retains normal
+validation, exact toolchain/configuration controls and selected-nextest alias
+checks, but does not probe or execute a test runner. Nextest installation and
+runtime-version enforcement remain requirements of actual `verify` execution.
