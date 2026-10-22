@@ -15,7 +15,7 @@ name: barbican-evidence-proof
 on:
   pull_request:
   push:
-    branches: [proof/barbican-evidence-base-20261022]
+    branches: [proof/barbican-evidence-no-push-20261022]
 
 permissions:
   contents: read
