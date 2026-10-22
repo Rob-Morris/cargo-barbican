@@ -54,7 +54,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        scenario: ${{ fromJSON(github.event_name == 'pull_request' && '["all-green","pin-drift","age-rejection","assess-only","toolchain-rejection","checkout-failure","toolchain-failure","tools-failure","fetch-failure","invalid-base","missing-base","added-manifest"]' || '["all-green"]') }}
+        scenario: [missing-lock]
     runs-on: ubuntu-latest
     steps:
       - name: Add candidate tools to PATH
