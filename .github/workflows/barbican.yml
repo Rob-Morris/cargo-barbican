@@ -1,0 +1,235 @@
+# Synced from cargo-barbican v0.33.0
+#
+# cargo-barbican enforcement gate (server-side, authoritative).
+#
+# This workflow is the real gate for what enters the dependency graph. The
+# shipped client-side pre-commit hook (templates/hooks/pre-commit) runs a cheap
+# subset and is advisory and skippable (git commit --no-verify); this workflow
+# is not.
+#
+# Third-party actions are pinned by full commit SHA with a version comment.
+# `--locked` installs from committed lockfiles but does not pin the installed
+# tool versions. These installs select the exact reviewed release candidates.
+name: barbican-evidence-proof
+
+on:
+  pull_request:
+  push:
+    branches: [proof/barbican-evidence-base-20261022]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  proof_tools:
+    name: Prepare exact candidate proof tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: bb18219f226c0b72edacc2bccadc607b185e1a90
+      - run: rustup toolchain install 1.95.0 --profile minimal
+      - id: cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ~/.barbican-proof-tools
+          key: barbican-evidence-tools-bb18219f226c0b72edacc2bccadc607b185e1a90-linux-v1
+      - name: Install exact candidate and reviewed scanners
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cargo install --locked --root "$HOME/.barbican-proof-tools" --git https://github.com/Rob-Morris/cargo-barbican --rev bb18219f226c0b72edacc2bccadc607b185e1a90 cargo-barbican
+          cargo install --locked --root "$HOME/.barbican-proof-tools" cargo-deny@0.19.6
+          cargo install --locked --root "$HOME/.barbican-proof-tools" cargo-audit@0.22.1
+  gate:
+    name: cargo-barbican gate (${{ matrix.scenario }})
+    needs: proof_tools
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        scenario: ${{ fromJSON(github.event_name == 'pull_request' && '["all-green","pin-drift","age-rejection","assess-only","toolchain-rejection","checkout-failure","toolchain-failure","tools-failure","fetch-failure","invalid-base","missing-base","added-manifest"]' || '["all-green"]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add candidate tools to PATH
+        run: echo "$HOME/.barbican-proof-tools/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ~/.barbican-proof-tools
+          key: barbican-evidence-tools-bb18219f226c0b72edacc2bccadc607b185e1a90-linux-v1
+      - id: checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Full history so age-lock and assess can diff against the PR base commit.
+          fetch-depth: 0
+          ref: ${{ matrix.scenario == 'checkout-failure' && 'unavailable-evidence-test-ref' || github.sha }}
+      - id: toolchain
+        name: Install the pinned Rust toolchain
+        # Reads rust-toolchain.toml; pin your toolchain there for reproducible gates.
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          if [[ "$SCENARIO" == toolchain-failure ]]; then exit 42; fi
+          rustup toolchain install
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - id: tools
+        name: Install cargo-barbican, cargo-deny, and cargo-audit
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          if [[ "$SCENARIO" == tools-failure ]]; then exit 42; fi
+
+          cargo install --locked --root "$HOME/.barbican-proof-tools" --git https://github.com/Rob-Morris/cargo-barbican --rev bb18219f226c0b72edacc2bccadc607b185e1a90 cargo-barbican
+          cargo install --locked --root "$HOME/.barbican-proof-tools" cargo-deny@0.19.6
+          cargo install --locked --root "$HOME/.barbican-proof-tools" cargo-audit@0.22.1
+      - id: fetch
+        name: Fetch dependencies for every target platform
+        # The gate resolves frozen cross-platform cargo metadata, which needs
+        # every platform's crates in the local cache — including ones a build
+        # on this runner never downloads (e.g. Windows-only crates). Plain
+        # `cargo fetch` with no --target populates them all.
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          if [[ "$SCENARIO" == fetch-failure ]]; then exit 42; fi
+          cargo fetch --locked
+      - name: Prepare controlled disposable scenario
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          printf 'Event=%s base=%s current=%s scenario=%s\n' "$GITHUB_EVENT_NAME" "$EVENT_BASE_SHA" "$GITHUB_SHA" "$SCENARIO"
+          python3 .proof/scenario.py "$SCENARIO"
+      - id: pre_release
+        name: Pre-release supply-chain gate
+        run: cargo barbican gatehouse pre-release
+      - name: Controlled pause before evidence
+        if: ${{ !cancelled() && matrix.scenario == 'cancel-before' }}
+        run: |
+          printf '%s\n' 'Ready for cancellation before evidence'
+          sleep 300
+      - id: evidence_toolchain
+        name: Check toolchain before PR evidence
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' &&
+              steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
+              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' }}
+        run: cargo barbican toolchain check
+      - id: pr_base
+        name: Check explicit PR base availability
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' &&
+              steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
+              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' }}
+        shell: bash
+        env:
+          BASE_SHA: ${{ matrix.scenario == 'invalid-base' && 'invalid-base-for-proof' || matrix.scenario == 'missing-base' && 'ffffffffffffffffffffffffffffffffffffffff' || github.event.pull_request.base.sha }}
+        run: |
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            printf '%s\n' 'FAIL PR evidence unavailable: invalid or missing PR base SHA' >&2
+            exit 1
+          fi
+          if ! git cat-file -e "$BASE_SHA^{commit}"; then
+            printf '%s\n' 'FAIL PR evidence unavailable: PR base commit is not available locally' >&2
+            exit 1
+          fi
+      - id: age_lock
+        name: Check release age against the PR base
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' &&
+              steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
+              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' &&
+              steps.evidence_toolchain.outcome == 'success' && steps.pr_base.outcome == 'success' }}
+        env:
+          BASE_SHA: ${{ matrix.scenario == 'invalid-base' && 'invalid-base-for-proof' || matrix.scenario == 'missing-base' && 'ffffffffffffffffffffffffffffffffffffffff' || github.event.pull_request.base.sha }}
+          CARGO_BARBICAN_CRATES_IO_BASE_URL: ${{ matrix.scenario == 'cancel-age' && 'http://127.0.0.1:38941' || 'https://crates.io' }}
+        run: cargo barbican age-lock --base-ref "$BASE_SHA"
+      - id: assess
+        name: Assess against the PR base
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' &&
+              steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
+              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' &&
+              steps.evidence_toolchain.outcome == 'success' && steps.pr_base.outcome == 'success' }}
+        env:
+          BASE_SHA: ${{ matrix.scenario == 'invalid-base' && 'invalid-base-for-proof' || matrix.scenario == 'missing-base' && 'ffffffffffffffffffffffffffffffffffffffff' || github.event.pull_request.base.sha }}
+        run: cargo barbican assess --base-ref "$BASE_SHA"
+      - name: Summarise PR evidence
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          BASE_SHA: ${{ matrix.scenario == 'invalid-base' && 'invalid-base-for-proof' || matrix.scenario == 'missing-base' && 'ffffffffffffffffffffffffffffffffffffffff' || github.event.pull_request.base.sha }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          TOOLCHAIN_OUTCOME: ${{ steps.toolchain.outcome }}
+          TOOLS_OUTCOME: ${{ steps.tools.outcome }}
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+          GATE_OUTCOME: ${{ steps.pre_release.outcome }}
+          ELIGIBILITY_OUTCOME: ${{ steps.evidence_toolchain.outcome }}
+          BASE_OUTCOME: ${{ steps.pr_base.outcome }}
+          AGE_OUTCOME: ${{ steps.age_lock.outcome }}
+          ASSESS_OUTCOME: ${{ steps.assess.outcome }}
+        run: |
+          native_outcome() {
+            case "$1" in
+              success|failure|skipped|cancelled) printf '%s' "$1" ;;
+              *) printf '%s' 'unavailable' ;;
+            esac
+          }
+          setup_missing=
+          for prerequisite in "checkout:$CHECKOUT_OUTCOME" "toolchain:$TOOLCHAIN_OUTCOME" "tools:$TOOLS_OUTCOME" "fetch:$FETCH_OUTCOME"; do
+            if [[ "$prerequisite" != *:success ]]; then
+              setup_missing="${setup_missing}${setup_missing:+, }${prerequisite%%:*}"
+            fi
+          done
+          unavailable=
+          if [[ -n "$setup_missing" ]]; then
+            unavailable="setup incomplete: $setup_missing"
+          fi
+          if [[ "$ELIGIBILITY_OUTCOME" != success ]]; then
+            unavailable="${unavailable}${unavailable:+; }toolchain conformance $(native_outcome "$ELIGIBILITY_OUTCOME")"
+          fi
+          if [[ "$BASE_OUTCOME" != success ]]; then
+            unavailable="${unavailable}${unavailable:+; }PR base $(native_outcome "$BASE_OUTCOME")"
+          fi
+          evidence_outcome() {
+            case "$1" in
+              success|failure) native_outcome "$1" ;;
+              *) printf 'unavailable — %s' "${unavailable:-did not run}" ;;
+            esac
+          }
+          if [[ "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            base_label=$BASE_SHA
+          else
+            base_label='unavailable (invalid event SHA)'
+          fi
+          if current_revision=$(git rev-parse --verify HEAD 2>/dev/null) && [[ "$current_revision" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            current_label=$current_revision
+          else
+            current_label=unavailable
+          fi
+          {
+            printf '%s\n' '## PR dependency evidence' '' '| Check | Native outcome / availability |' '| --- | --- |'
+            printf '| Requested PR base | %s |\n' "$base_label"
+            printf '| Checked-out revision | %s |\n' "$current_label"
+            printf '| Checkout | %s |\n' "$(native_outcome "$CHECKOUT_OUTCOME")"
+            printf '| Toolchain installation | %s |\n' "$(native_outcome "$TOOLCHAIN_OUTCOME")"
+            printf '| Tool installation | %s |\n' "$(native_outcome "$TOOLS_OUTCOME")"
+            printf '| Dependency fetch | %s |\n' "$(native_outcome "$FETCH_OUTCOME")"
+            printf '| Pre-release gate | %s |\n' "$(native_outcome "$GATE_OUTCOME")"
+            printf '| Evidence toolchain conformance | %s |\n' "$(native_outcome "$ELIGIBILITY_OUTCOME")"
+            printf '| PR base availability | %s |\n' "$(native_outcome "$BASE_OUTCOME")"
+            printf '| age-lock | %s |\n' "$(evidence_outcome "$AGE_OUTCOME")"
+            printf '| assess | %s |\n' "$(evidence_outcome "$ASSESS_OUTCOME")"
+            printf '\n%s\n' 'Failures retain their command logs and keep the job red. Unavailable evidence is not a passing policy verdict.'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Check rejected wrapper stayed unexecuted
+        if: ${{ !cancelled() && matrix.scenario == 'toolchain-rejection' }}
+        run: |
+          test ! -e "$RUNNER_TEMP/wrapper-hit"
+          printf '%s\n' 'Native rejected-wrapper marker absent'

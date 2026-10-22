@@ -1,0 +1,57 @@
+# Synced from cargo-barbican v0.33.0
+# Runtime advisory verdicts are owned by cargo-barbican audit. During audit,
+# cargo-barbican generates a runtime cargo-deny config that forces:
+# - ignore = []
+# - yanked = "deny"
+# - unmaintained = "all"
+# - unsound = "all"
+#
+# IDs in the checked-in ignore list therefore affect direct cargo-deny use but
+# never authorise a Barbican pass. `cargo barbican audit` reports an ID as
+# GOVERNED only when every current occurrence has an active checksum-bound,
+# reviewed, expiring `allowed_advisories` exception; other findings still fail.
+# Keeping governed IDs here lets direct cargo-deny coexist with Barbican, while
+# leaving the list empty (or omitting this table) remains fully supported.
+#
+# This checked-in file carries the non-advisory cargo-deny posture that
+# cargo-barbican preserves for bans, sources, and licenses checks.
+#
+# Declaring a [licenses] policy here is an expressed intent to enforce it:
+# unless barbican.toml sets an explicit delegates.cargo_deny.checks list,
+# audit runs the cargo-deny licenses check whenever this file carries a
+# [licenses] table, and skips it when there is none.
+#
+# [licenses]
+# allow = ["MIT", "Apache-2.0"]
+
+# Optional repo-specific graph scope. cargo-barbican preserves targets/features
+# scope but strips graph exclusion keys that can hide advisories.
+#
+# [graph]
+# targets = [
+#   "aarch64-apple-darwin",
+#   "x86_64-apple-darwin",
+#   "x86_64-unknown-linux-gnu",
+#   "x86_64-pc-windows-msvc",
+# ]
+
+[advisories]
+yanked = "deny"
+unmaintained = "all"
+unsound = "all"
+ignore = []
+
+[bans]
+# Tighten to "deny" once duplicate versions are resolved for this repo.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+# Tighten to "deny" after adding explicit allow-git entries for this repo.
+unknown-git = "warn"
+allow-registry = [
+  "https://github.com/rust-lang/crates.io-index",
+]

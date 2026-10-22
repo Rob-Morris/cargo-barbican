@@ -1,0 +1,8 @@
+[rust]
+[[rust.families]]
+name="inherited-semver-proof"
+review_record="docs/dependency-reviews/2026-07-01-semver-1.0.28.md"
+[rust.families.direct]
+semver="=1.0.28"
+[rust.families.resolved]
+semver={version="1.0.28",checksum_sha256="8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"}
