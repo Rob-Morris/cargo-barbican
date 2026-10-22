@@ -35,6 +35,22 @@ manifest then reports the failure through its own error or degradation path.
 cargo barbican --version
     Print the shipped cargo-barbican version.
 
+cargo barbican toolchain check
+    Check exact Rust toolchain conformance over the discovered current workspace.
+    Validate rust-toolchain.toml, active rustup/Cargo/rustc/rustdoc release/host
+    agreement, executable environment overrides and effective Cargo controls.
+    Validate ordinary config and selected-nextest alias controls without probing
+    nextest installation/version. No additional options or format modes.
+    Reuse the canonical Gatehouse/verify owner and its Toolchain check: PASS/FAIL
+    tokens, stdout evidence/stderr diagnostics and 0/1/2 success/failure/usage
+    convention. Config/operational errors may have only central stderr FAIL.
+    No inventory/audit/pins, metadata, dependency resolution, build/test or policy
+    rewriting. Version probes and workspace discovery remain evidence subprocesses;
+    this is not binary provenance, a sandbox or a persistent eligibility receipt.
+    Use for diagnosis or fresh eligibility before separate evidence. Pre-release,
+    policy-check and verify keep their own internal conformance checks and reuse;
+    users need not run this separately before those gates.
+
 cargo barbican age [--min-age-days N] <crate@version>...
     Check that each crate@version was published at least N days ago
     (default 7). The default comes from `barbican.toml`
@@ -989,3 +1005,26 @@ completeness failure. Git/ambiguous findings have null `remediation` and
 Source text in rejected/unsupported URLs, malformed policy/lock/manifest
 syntax and source-bearing delegate failures is omitted rather than echoed.
 Ordinary terminal control escaping still applies to safe diagnostic text.
+
+
+## Generated PR evidence after gate failure
+
+`policy init --ci github` keeps the authoritative pre-release gate fail-fast.
+PR evidence has two independent steps: `age-lock` and strict `assess`, each with
+`!cancelled()` plus explicit successful checkout/toolchain-install/grouped-tool/
+fetch outcomes, fresh post-gate `toolchain check` and explicit PR-base commit
+availability. Gate or age failure cannot alone suppress assessment. No command
+failure is converted to success. Base SHA passes through a quoted environment
+variable; commit validation never falls back to HEAD, a merge-base or an empty
+lockfile. Missing baseline files remain each command's own failure.
+
+The noncancelled PR summary shows native outcomes and unavailable prerequisites;
+a skipped report is never PASS. Cancellation stops scheduling new evidence once
+recognised, subject to ordinary asynchronous runner cancellation. Main pushes
+keep the normal gate and skip PR-only work. Existing workflow files are refused
+and the intended content reprinted for manual migration; see [CI](../user/ci.md).
+
+This is same-runner diagnostic evidence. Earlier build/test may have modified
+inputs; assess retains ordinary metadata semantics. Fresh conformance prevents
+continuation through rejected executable controls, but does not attest binaries,
+isolate prior executed code or secure the earlier Cargo install/fetch bootstrap.

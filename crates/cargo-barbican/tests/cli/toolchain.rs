@@ -541,3 +541,151 @@ fn verify_rejects_symlinked_toolchain_policy() {
     assert!(stderr.contains("is a symlink; refusing to read"));
     assert_eq!(runner.rustup_active_toolchain_calls(), 0);
 }
+
+fn run_toolchain_fixture(
+    temp_dir: &Path,
+    runner: &FakeCommandRunner,
+) -> (ExitCode, String, String) {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit = run_cli_with_runner(
+        Cli::parse_from(["cargo-barbican", "toolchain", "check"]),
+        temp_dir,
+        &FakeCratesIoClient::default(),
+        runner,
+        &mut stdout,
+        &mut stderr,
+    )
+    .unwrap();
+    (
+        exit,
+        String::from_utf8(stdout).unwrap(),
+        String::from_utf8(stderr).unwrap(),
+    )
+}
+
+#[test]
+fn standalone_toolchain_check_needs_no_dependency_policy_or_test_runtime() {
+    for test_runner in ["cargo-test", "nextest"] {
+        let dir = fresh_temp_dir();
+        write_root_manifest(&dir);
+        write_toolchain_pin(&dir);
+        fs::write(
+            dir.join("barbican.toml"),
+            format!(
+                "[verify]\ntest_runner='{test_runner}'\n{}",
+                if test_runner == "nextest" {
+                    "nextest_version='0.9.146'\n"
+                } else {
+                    ""
+                }
+            ),
+        )
+        .unwrap();
+        let runner = FakeCommandRunner::default();
+        let (exit, stdout, stderr) = run_toolchain_fixture(&dir, &runner);
+        assert_eq!(exit, ExitCode::SUCCESS, "{test_runner}: {stderr}");
+        assert!(stdout.ends_with("Toolchain check: PASS\n"));
+        assert!(stderr.is_empty());
+        assert_eq!(runner.rustup_active_toolchain_calls(), 1);
+        assert!(runner.verification_calls.borrow().is_empty());
+        assert_eq!(runner.frozen_metadata_calls(), 0);
+        assert_eq!(*runner.cargo_metadata_calls.borrow(), 0);
+        assert!(runner.recorded_generate_lockfile_calls().is_empty());
+        assert!(runner.recorded_deny_json_calls().is_empty());
+        assert!(runner.recorded_audit_json_calls().is_empty());
+        assert!(!dir.join("Cargo.lock").exists());
+        assert!(!dir.join("reviewed-targets.toml").exists());
+    }
+}
+
+#[test]
+fn standalone_toolchain_check_retains_canonical_rejections() {
+    for case in [
+        "missing",
+        "floating",
+        "mismatch",
+        "environment",
+        "cargo-config",
+        "nextest-alias",
+        "invalid-config",
+    ] {
+        let dir = fresh_temp_dir();
+        write_root_manifest(&dir);
+        write_toolchain_pin(&dir);
+        let mut runner = FakeCommandRunner::default();
+        let expected = match case {
+            "missing" => {
+                fs::remove_file(dir.join("rust-toolchain.toml")).unwrap();
+                "exact Rust toolchain policy required"
+            }
+            "floating" => {
+                fs::write(
+                    dir.join("rust-toolchain.toml"),
+                    "[toolchain]\nchannel='stable'\n",
+                )
+                .unwrap();
+                "floating or unsupported"
+            }
+            "mismatch" => {
+                runner = runner
+                    .with_active_toolchain("1.96.0-aarch64-apple-darwin (environment override)");
+                "active Rust toolchain mismatch"
+            }
+            "environment" => {
+                runner = runner.with_environment("RUSTC_WRAPPER", "/untrusted-wrapper");
+                "RUSTC_WRAPPER"
+            }
+            "cargo-config" => {
+                fs::create_dir(dir.join(".cargo")).unwrap();
+                fs::write(
+                    dir.join(".cargo/config.toml"),
+                    "[build]\nrustc-wrapper='/untrusted-wrapper'\n",
+                )
+                .unwrap();
+                "build.rustc-wrapper"
+            }
+            "nextest-alias" => {
+                fs::write(
+                    dir.join("barbican.toml"),
+                    "[verify]\ntest_runner='nextest'\nnextest_version='0.9.146'\n",
+                )
+                .unwrap();
+                runner = runner.with_environment("CARGO_ALIAS_NEXTEST", "untrusted");
+                "CARGO_ALIAS_NEXTEST"
+            }
+            "invalid-config" => {
+                fs::write(
+                    dir.join("barbican.toml"),
+                    "[verify]\ntest_runner='unknown'\n",
+                )
+                .unwrap();
+                "barbican.toml"
+            }
+            _ => unreachable!(),
+        };
+        let (exit, stdout, stderr) = run_toolchain_fixture(&dir, &runner);
+        assert_eq!(exit, ExitCode::from(1), "{case}");
+        assert!(stderr.contains(expected), "{case}: {stderr}");
+        assert!(!stdout.contains("Toolchain check: PASS"));
+        assert!(runner.verification_calls.borrow().is_empty());
+        assert!(runner.recorded_deny_json_calls().is_empty());
+    }
+}
+
+#[test]
+fn standalone_toolchain_check_has_a_closed_cli_and_scoped_help() {
+    for args in [
+        vec!["toolchain"],
+        vec!["toolchain", "check", "--skip"],
+        vec!["toolchain", "check", "--format", "json"],
+    ] {
+        let error = Cli::try_parse_from(std::iter::once("cargo-barbican").chain(args)).unwrap_err();
+        assert_eq!(error.exit_code(), 2);
+    }
+    let help = Cli::try_parse_from(["cargo-barbican", "toolchain", "check", "--help"]).unwrap_err();
+    assert_eq!(help.exit_code(), 0);
+    let help = help.to_string();
+    assert!(help.contains("without probing nextest"));
+    assert!(help.contains("full gates retain their own preflight"));
+}

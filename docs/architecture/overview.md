@@ -48,7 +48,7 @@ support is explicitly delivered.
 ## Current implemented surface
 
 The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
-`update`, `assess`, `inspect`, `gatehouse candidate`, `gatehouse pre-release`, `gatehouse policy-check`, `policy init`,
+`update`, `assess`, `inspect`, `gatehouse candidate`, `gatehouse pre-release`, `gatehouse policy-check`, `toolchain check`, `policy init`,
 `inventory`, `pin add`, `pin exception`, `pin check`, `review`, `audit`, and
 `verify` are implemented.
 
@@ -242,3 +242,11 @@ docs/
   dependency-reviews/   review records and policy template
   standards/            adopted documentation standards
 ```
+
+
+`toolchain check` exposes the existing canonical conformance owner for diagnosis
+and generated post-gate PR evidence. Gatehouse and verify continue using the
+internal owner directly; no persisted receipt or subprocess recursion is added.
+Generated evidence keeps independent strict commands, exact base and native
+failures, with fresh eligibility and recognised-cancellation checks. See the
+functional CLI contract and user CI migration guidance.

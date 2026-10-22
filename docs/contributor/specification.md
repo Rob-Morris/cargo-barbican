@@ -447,3 +447,15 @@ inventory, audit and verification workflow. See the
 schema, full-commit requirement, per-package review, source-bound allowances,
 manual intake and advisory/build-input limitations. Registry age/advisory
 exceptions never authorise Git targets; cargo-deny permission remains separate.
+
+
+## Standalone toolchain conformance and PR evidence
+
+`toolchain check` loads normal config and reuses the binary's toolchain owner,
+including selected-nextest aliases but no test-runtime probe. The pure library
+acquires no subprocess or workflow concerns. Existing internal gate preflights
+remain unchanged. Generated GitHub PR diagnostics run after ordinary gate
+rejection only with successful setup, fresh conformance and the explicit base;
+independent command outcomes and original failures remain authoritative.
+Consumer workflows require reviewed manual migration; hosted scheduling proof
+is separate from emitted-string or local summary-rendering tests.

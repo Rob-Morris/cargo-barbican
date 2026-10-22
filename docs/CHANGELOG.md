@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.33.0](changelog/v0.33.0.md) | 2026-10-22 | Keep PR dependency evidence after gate rejection |
 | [v0.32.0](changelog/v0.32.0.md) | 2026-10-22 | Check supply-chain policy without workspace execution |
 | [v0.31.2](changelog/v0.31.2.md) | 2026-10-22 | Run intended scanners directly |
 | [v0.31.1](changelog/v0.31.1.md) | 2026-10-21 | Reject distrusted TLS certificate paths |

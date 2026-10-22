@@ -194,6 +194,7 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
         // crates.
         "cargo fetch --locked",
         "cargo barbican gatehouse pre-release",
+        "cargo barbican toolchain check",
         "cargo barbican age-lock --base-ref",
         "cargo barbican assess --base-ref",
     ] {
@@ -210,7 +211,7 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     );
     assert!(!workflow.contains("cargo barbican inventory --enforce"));
     assert!(workflow.contains("cargo install --locked"));
-    assert!(workflow.contains("--tag v0.32.0"));
+    assert!(workflow.contains("--tag v0.33.0"));
     assert!(workflow.contains("cargo-deny@0.19.6"));
     assert!(workflow.contains("cargo-audit@0.22.1"));
     assert!(
@@ -261,6 +262,8 @@ fn policy_init_ci_github_fails_closed_on_existing_workflow() {
     let workflow_path = temp_dir.join(".github/workflows/barbican.yml");
     let created =
         fs::read_to_string(&workflow_path).expect("workflow should exist after first run");
+    let consumer_workflow = "# Consumer-owned workflow\nname: Custom policy checks\n";
+    fs::write(&workflow_path, consumer_workflow).expect("custom workflow should be written");
 
     let second = Cli::parse_from([
         "cargo-barbican",
@@ -286,7 +289,7 @@ fn policy_init_ci_github_fails_closed_on_existing_workflow() {
     assert_eq!(second_exit, ExitCode::from(1));
     assert_eq!(
         fs::read_to_string(&workflow_path).expect("workflow should still exist"),
-        created,
+        consumer_workflow,
         "an existing workflow must not be overwritten"
     );
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
@@ -296,8 +299,9 @@ fn policy_init_ci_github_fails_closed_on_existing_workflow() {
     assert!(rendered.contains(
         "The .github/workflows/barbican.yml workflow was not written because a file already exists there"
     ));
-    // The fail-closed re-print carries the intended workflow so it can be reconciled.
-    assert!(rendered.contains("cargo barbican gatehouse pre-release"));
+    assert!(rendered.contains(&created));
+    assert!(created.contains("cargo barbican toolchain check"));
+    assert!(created.contains("name: Summarise PR evidence"));
     assert!(stderr.is_empty());
 }
 

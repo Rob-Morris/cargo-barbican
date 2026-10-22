@@ -196,6 +196,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: PolicyCommand,
     },
+    #[command(about = "Check the workspace's pinned Rust toolchain")]
+    Toolchain {
+        #[command(subcommand)]
+        command: ToolchainCommand,
+    },
     #[command(
         about = "Report dependency inventory and reviewed-policy coverage",
         long_about = "Prints a read-only dependency inventory and reviewed-policy coverage \
@@ -270,6 +275,20 @@ pub(crate) enum Command {
             configure an active reviewed family. Ends with Verify: PASS on success."
     )]
     Verify,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ToolchainCommand {
+    #[command(
+        about = "Check exact Rust toolchain conformance without workspace execution",
+        long_about = "Checks rust-toolchain.toml, active rustup/Cargo/rustc/rustdoc release and host \
+            conformance, and prohibited executable overrides and Cargo configuration. Uses the same \
+            preflight as Gatehouse and verify. Validates selected-runner policy and nextest aliases \
+            without probing nextest. Does not run metadata, dependency checks, builds or tests, or \
+            certify binary provenance. Use for diagnosis or fresh eligibility before separate \
+            evidence commands; full gates retain their own preflight."
+    )]
+    Check,
 }
 
 #[derive(Debug, Subcommand)]

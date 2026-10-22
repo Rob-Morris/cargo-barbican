@@ -48,7 +48,7 @@ For exact parser rules and behaviour contracts, see
   `pin check` and `verify` reconcile the current `Cargo.lock` against these
   exact targets.
 - **Gate** — a command whose job is to fail closed: `pin check`, `audit`,
-  `verify`, `inventory --enforce`, `gatehouse policy-check`, and `gatehouse pre-release`. A base gate passes with a stable terminal
+  `verify`, `toolchain check`, `inventory --enforce`, `gatehouse policy-check`, and `gatehouse pre-release`. A base gate passes with a stable terminal
   token (`Pin check: PASS`, `Audit: PASS`, `Verify: PASS`, or — under
   `--enforce` — `Inventory: PASS`), blocks and explains why, or — for
   standalone `pin check` only — skips successfully when no reviewed-target
@@ -1176,3 +1176,20 @@ inventory, audit and verification workflow. See the
 schema, full-commit requirement, per-package review, source-bound allowances,
 manual intake and advisory/build-input limitations. Registry age/advisory
 exceptions never authorise Git targets; cargo-deny permission remains separate.
+
+
+## toolchain check
+
+```bash
+cargo barbican toolchain check
+```
+
+Diagnose the workspace's exact Rust pin, active compiler tools and conflicting
+executable controls without metadata, dependency policy or workspace execution.
+The command also validates configured test-runner policy and nextest aliases,
+but does not require the nextest executable. `Toolchain check: PASS` is scoped
+conformance evidence, not dependency approval or binary attestation.
+
+Pre-release, policy-check and verify already call this same internal owner;
+they retain their own checks. The standalone command serves diagnosis and CI
+composition, including fresh eligibility before post-gate PR evidence.

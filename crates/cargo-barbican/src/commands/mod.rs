@@ -279,6 +279,9 @@ where
             gatehouse::run_gatehouse(command, current_dir, client, runner, now, stdout, stderr)
         }
         Command::Policy { command } => policy::run_policy(command, current_dir, stdout),
+        Command::Toolchain { command } => {
+            toolchain::run_toolchain(command, current_dir, runner, stdout, stderr)
+        }
         Command::Inventory { enforce } => {
             inventory::run_inventory(current_dir, runner, now, enforce, stdout)
         }

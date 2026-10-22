@@ -88,6 +88,7 @@ current implemented surface is:
 - `cargo barbican gatehouse candidate`
 - `cargo barbican gatehouse pre-release`
 - `cargo barbican gatehouse policy-check`
+- `cargo barbican toolchain check`
 - `cargo barbican policy init`
 - `cargo barbican inventory`
 - `cargo barbican pin add`
@@ -248,3 +249,11 @@ For runner changes, also run `sh scripts/verify-nextest.sh` with the reviewed
 minimal-feature cargo-nextest 0.9.146 on PATH. This required real-process proof
 fails if the tool is absent or wrong; CI runs it on macOS and Linux. Keep
 `scripts/verify.sh` as the ordinary dogfooded gate.
+
+
+`toolchain check` exposes the existing canonical conformance owner for diagnosis
+and generated post-gate PR evidence. Gatehouse and verify continue using the
+internal owner directly; no persisted receipt or subprocess recursion is added.
+Generated evidence keeps independent strict commands, exact base and native
+failures, with fresh eligibility and recognised-cancellation checks. See the
+functional CLI contract and user CI migration guidance.

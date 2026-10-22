@@ -510,3 +510,118 @@ fn policy_check_native_failures_never_execute_or_rewrite_workspace() {
         fixture.assert_policy_unchanged(&before);
     }
 }
+
+#[test]
+fn toolchain_check_native_root_and_member_need_no_test_or_dependency_gate() {
+    let fixture = Fixture::new();
+    fixture.policy_workspace();
+    success(
+        fixture
+            .command("cargo", "workspace")
+            .args(["check", "--locked", "--offline"])
+            .output()
+            .unwrap(),
+    );
+    assert!(fixture.root.join("build-hit").exists());
+    fs::remove_file(fixture.root.join("build-hit")).unwrap();
+    fs::remove_dir_all(fixture.root.join("target")).unwrap();
+    fs::remove_file(fixture.root.join("workspace/Cargo.lock")).unwrap();
+    fs::remove_file(fixture.root.join("workspace/reviewed-targets.toml")).unwrap();
+    fixture.write(
+        "workspace/barbican.toml",
+        "[verify]\ntest_runner='nextest'\nnextest_version='0.9.146'\n",
+    );
+    for scanner in ["deny", "audit"] {
+        fs::remove_file(fixture.root.join(format!("bin/cargo-{scanner}"))).unwrap();
+    }
+    let before = fixture.policy_snapshot();
+    for directory in ["workspace", "workspace/member"] {
+        let output = success(
+            fixture
+                .command(env!("CARGO_BIN_EXE_cargo-barbican"), directory)
+                .args(["toolchain", "check"])
+                .output()
+                .unwrap(),
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).ends_with("Toolchain check: PASS\n"));
+        assert!(output.stderr.is_empty());
+        fixture.assert_policy_unchanged(&before);
+    }
+}
+
+#[test]
+fn toolchain_check_rejects_the_wrapper_that_assess_metadata_can_execute() {
+    let fixture = Fixture::new();
+    fixture.policy_workspace();
+    fixture.executable(
+        "wrapper.sh",
+        "#!/bin/sh\nprintf invoked > \"$BARBICAN_SCANNER_FIXTURE/wrapper-hit\"\nexec \"$@\"\n",
+    );
+    fixture.write(
+        "workspace/.cargo/config.toml",
+        &format!(
+            "[build]\nrustc-wrapper={:?}\n",
+            fixture.root.join("wrapper.sh").to_str().unwrap()
+        ),
+    );
+    let before = fixture.policy_snapshot();
+    for args in [vec!["gatehouse", "pre-release"], vec!["toolchain", "check"]] {
+        let output = fixture
+            .command(env!("CARGO_BIN_EXE_cargo-barbican"), "workspace")
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("build.rustc-wrapper"));
+        assert!(!fixture.root.join("wrapper-hit").exists());
+        fixture.assert_policy_unchanged(&before);
+    }
+    let output = success(
+        fixture
+            .command(env!("CARGO_BIN_EXE_cargo-barbican"), "workspace")
+            .args(["assess", "--base-dir", "."])
+            .output()
+            .unwrap(),
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("routine-safe"));
+    assert!(
+        fixture.root.join("wrapper-hit").exists(),
+        "negative control: metadata really executes wrapper"
+    );
+}
+
+#[test]
+fn fresh_toolchain_check_rejects_configuration_changed_by_failed_gate_execution() {
+    let fixture = Fixture::new();
+    fixture.policy_workspace();
+    fixture.executable(
+        "wrapper.sh",
+        "#!/bin/sh\nprintf invoked > \"$BARBICAN_SCANNER_FIXTURE/wrapper-hit\"\nexec \"$@\"\n",
+    );
+    fixture.write("workspace/build.rs", r#"fn main() {
+        let root = std::env::var("BARBICAN_SCANNER_FIXTURE").unwrap();
+        std::fs::create_dir_all(format!("{root}/workspace/.cargo")).unwrap();
+        std::fs::write(format!("{root}/workspace/.cargo/config.toml"), format!("[build]\nrustc-wrapper='{root}/wrapper.sh'\n")).unwrap();
+        panic!("controlled failed build after configuration change");
+    }"#);
+    let gate = fixture
+        .command(env!("CARGO_BIN_EXE_cargo-barbican"), "workspace")
+        .args(["gatehouse", "pre-release"])
+        .output()
+        .unwrap();
+    assert_eq!(gate.status.code(), Some(1), "{gate:?}");
+    assert!(
+        String::from_utf8_lossy(&gate.stdout).contains("Gatehouse pre-release: FAIL (verify)"),
+        "{gate:?}"
+    );
+    assert!(fixture.root.join("workspace/.cargo/config.toml").is_file());
+    assert!(!fixture.root.join("wrapper-hit").exists());
+    let eligibility = fixture
+        .command(env!("CARGO_BIN_EXE_cargo-barbican"), "workspace")
+        .args(["toolchain", "check"])
+        .output()
+        .unwrap();
+    assert_eq!(eligibility.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&eligibility.stderr).contains("build.rustc-wrapper"));
+    assert!(!fixture.root.join("wrapper-hit").exists());
+}

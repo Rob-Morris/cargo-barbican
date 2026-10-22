@@ -254,6 +254,7 @@ pub(crate) struct FakeCommandRunner {
     pub(crate) git_show_results: HashMap<String, Result<String, String>>,
     pub(crate) environment: HashMap<String, OsString>,
     pub(crate) cargo_metadata_result: Result<String, String>,
+    pub(crate) cargo_metadata_calls: RefCell<u64>,
     pub(crate) cargo_locate_project_result: Option<Result<String, String>>,
     pub(crate) cargo_update_result: Result<(), String>,
     pub(crate) cargo_update_lockfile_text: Option<String>,
@@ -314,6 +315,7 @@ impl Default for FakeCommandRunner {
             git_show_results: HashMap::new(),
             environment: HashMap::from([("CARGO_HOME".to_owned(), OsString::from(".cargo-home"))]),
             cargo_metadata_result: Ok(metadata_with_packages(&[])),
+            cargo_metadata_calls: RefCell::new(0),
             cargo_locate_project_result: None,
             cargo_update_result: Ok(()),
             cargo_update_lockfile_text: None,
@@ -687,6 +689,7 @@ impl CommandRunner for FakeCommandRunner {
     }
 
     fn cargo_metadata(&self, _current_dir: &Path) -> Result<String, cargo_barbican::RunnerError> {
+        *self.cargo_metadata_calls.borrow_mut() += 1;
         self.cargo_metadata_result.clone().map_err(runner_exit)
     }
 

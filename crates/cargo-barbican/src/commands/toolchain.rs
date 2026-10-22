@@ -10,6 +10,7 @@ use barbican::{
     evaluate_rust_toolchain_conformance, parse_rust_toolchain_toml,
 };
 
+use crate::cli::ToolchainCommand;
 use crate::command_runner::{CommandRunner, cargo_home_from_environment};
 
 use super::loaders::{
@@ -40,6 +41,30 @@ impl CompletedToolchainPreflight {
 pub(super) enum ToolchainCheckOutcome {
     Passed(CompletedToolchainPreflight),
     Failed(ExitCode),
+}
+
+pub(super) fn run_toolchain<R: CommandRunner + ?Sized>(
+    command: ToolchainCommand,
+    current_dir: &Path,
+    runner: &R,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError> {
+    match command {
+        ToolchainCommand::Check => {
+            let config = super::load_config(current_dir)?;
+            match run_toolchain_check(
+                current_dir,
+                runner,
+                config.verify.test_runner,
+                stdout,
+                stderr,
+            )? {
+                ToolchainCheckOutcome::Passed(_) => Ok(ExitCode::SUCCESS),
+                ToolchainCheckOutcome::Failed(exit) => Ok(exit),
+            }
+        }
+    }
 }
 
 pub(super) fn inspect_toolchain_pin(current_dir: &Path) -> ToolchainPinState {

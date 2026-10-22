@@ -37,7 +37,7 @@ const GITHUB_WORKFLOW_PATH: &str = ".github/workflows/barbican.yml";
 /// so the workflow's own `${{ ... }}` expressions pass through verbatim rather
 /// than colliding with Rust's format braces. Third-party actions are pinned by
 /// full commit SHA to match the repo's own dogfooded `ci.yml`.
-const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.32.0
+const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.33.0
 #
 # cargo-barbican enforcement gate (server-side, authoritative).
 #
@@ -71,34 +71,145 @@ jobs:
     name: cargo-barbican gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - id: checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           # Full history so age-lock and assess can diff against the PR base commit.
           fetch-depth: 0
-      - name: Install the pinned Rust toolchain
+      - id: toolchain
+        name: Install the pinned Rust toolchain
         # Reads rust-toolchain.toml; pin your toolchain there for reproducible gates.
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - name: Install cargo-barbican, cargo-deny, and cargo-audit
+      - id: tools
+        name: Install cargo-barbican, cargo-deny, and cargo-audit
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.32.0 cargo-barbican
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.33.0 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
-      - name: Fetch dependencies for every target platform
+      - id: fetch
+        name: Fetch dependencies for every target platform
         # The gate resolves frozen cross-platform cargo metadata, which needs
         # every platform's crates in the local cache — including ones a build
         # on this runner never downloads (e.g. Windows-only crates). Plain
         # `cargo fetch` with no --target populates them all.
         run: cargo fetch --locked
-      - name: Pre-release supply-chain gate
+      - id: pre_release
+        name: Pre-release supply-chain gate
         run: cargo barbican gatehouse pre-release
-      - name: Age-lock and assess against the PR base
-        if: github.event_name == 'pull_request'
+      - id: evidence_toolchain
+        name: Check toolchain before PR evidence
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' &&
+              steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
+              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' }}
+        run: cargo barbican toolchain check
+      - id: pr_base
+        name: Check explicit PR base availability
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' &&
+              steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
+              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' }}
+        shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          cargo barbican age-lock --base-ref "$BASE_SHA"
-          cargo barbican assess --base-ref "$BASE_SHA"
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            printf '%s\n' 'FAIL PR evidence unavailable: invalid or missing PR base SHA' >&2
+            exit 1
+          fi
+          if ! git cat-file -e "$BASE_SHA^{commit}"; then
+            printf '%s\n' 'FAIL PR evidence unavailable: PR base commit is not available locally' >&2
+            exit 1
+          fi
+      - id: age_lock
+        name: Check release age against the PR base
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' &&
+              steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
+              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' &&
+              steps.evidence_toolchain.outcome == 'success' && steps.pr_base.outcome == 'success' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: cargo barbican age-lock --base-ref "$BASE_SHA"
+      - id: assess
+        name: Assess against the PR base
+        if: >-
+          ${{ !cancelled() && github.event_name == 'pull_request' &&
+              steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
+              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' &&
+              steps.evidence_toolchain.outcome == 'success' && steps.pr_base.outcome == 'success' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: cargo barbican assess --base-ref "$BASE_SHA"
+      - name: Summarise PR evidence
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          TOOLCHAIN_OUTCOME: ${{ steps.toolchain.outcome }}
+          TOOLS_OUTCOME: ${{ steps.tools.outcome }}
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+          GATE_OUTCOME: ${{ steps.pre_release.outcome }}
+          ELIGIBILITY_OUTCOME: ${{ steps.evidence_toolchain.outcome }}
+          BASE_OUTCOME: ${{ steps.pr_base.outcome }}
+          AGE_OUTCOME: ${{ steps.age_lock.outcome }}
+          ASSESS_OUTCOME: ${{ steps.assess.outcome }}
+        run: |
+          native_outcome() {
+            case "$1" in
+              success|failure|skipped|cancelled) printf '%s' "$1" ;;
+              *) printf '%s' 'unavailable' ;;
+            esac
+          }
+          setup_missing=
+          for prerequisite in "checkout:$CHECKOUT_OUTCOME" "toolchain:$TOOLCHAIN_OUTCOME" "tools:$TOOLS_OUTCOME" "fetch:$FETCH_OUTCOME"; do
+            if [[ "$prerequisite" != *:success ]]; then
+              setup_missing="${setup_missing}${setup_missing:+, }${prerequisite%%:*}"
+            fi
+          done
+          unavailable=
+          if [[ -n "$setup_missing" ]]; then
+            unavailable="setup incomplete: $setup_missing"
+          fi
+          if [[ "$ELIGIBILITY_OUTCOME" != success ]]; then
+            unavailable="${unavailable}${unavailable:+; }toolchain conformance $(native_outcome "$ELIGIBILITY_OUTCOME")"
+          fi
+          if [[ "$BASE_OUTCOME" != success ]]; then
+            unavailable="${unavailable}${unavailable:+; }PR base $(native_outcome "$BASE_OUTCOME")"
+          fi
+          evidence_outcome() {
+            case "$1" in
+              success|failure) native_outcome "$1" ;;
+              *) printf 'unavailable — %s' "${unavailable:-did not run}" ;;
+            esac
+          }
+          if [[ "$BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            base_label=$BASE_SHA
+          else
+            base_label='unavailable (invalid event SHA)'
+          fi
+          if current_revision=$(git rev-parse --verify HEAD 2>/dev/null) && [[ "$current_revision" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            current_label=$current_revision
+          else
+            current_label=unavailable
+          fi
+          {
+            printf '%s\n' '## PR dependency evidence' '' '| Check | Native outcome / availability |' '| --- | --- |'
+            printf '| Requested PR base | %s |\n' "$base_label"
+            printf '| Checked-out revision | %s |\n' "$current_label"
+            printf '| Checkout | %s |\n' "$(native_outcome "$CHECKOUT_OUTCOME")"
+            printf '| Toolchain installation | %s |\n' "$(native_outcome "$TOOLCHAIN_OUTCOME")"
+            printf '| Tool installation | %s |\n' "$(native_outcome "$TOOLS_OUTCOME")"
+            printf '| Dependency fetch | %s |\n' "$(native_outcome "$FETCH_OUTCOME")"
+            printf '| Pre-release gate | %s |\n' "$(native_outcome "$GATE_OUTCOME")"
+            printf '| Evidence toolchain conformance | %s |\n' "$(native_outcome "$ELIGIBILITY_OUTCOME")"
+            printf '| PR base availability | %s |\n' "$(native_outcome "$BASE_OUTCOME")"
+            printf '| age-lock | %s |\n' "$(evidence_outcome "$AGE_OUTCOME")"
+            printf '| assess | %s |\n' "$(evidence_outcome "$ASSESS_OUTCOME")"
+            printf '\n%s\n' 'Failures retain their command logs and keep the job red. Unavailable evidence is not a passing policy verdict.'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 "#;
 
 pub(super) fn run_policy(
@@ -514,6 +625,7 @@ mod tests {
             // even on a cold runner cache.
             "cargo fetch --locked",
             "cargo barbican gatehouse pre-release",
+            "cargo barbican toolchain check",
             "cargo barbican age-lock --base-ref",
             "cargo barbican assess --base-ref",
         ] {
@@ -530,7 +642,7 @@ mod tests {
         );
         assert!(!GITHUB_CI_WORKFLOW.contains("cargo barbican inventory --enforce"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo install --locked"));
-        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.32.0"));
+        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.33.0"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-deny@0.19.6"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-audit@0.22.1"));
         // Third-party actions must stay pinned by full commit SHA with a
@@ -576,5 +688,159 @@ mod tests {
     fn embedded_default_config_parses() {
         barbican::BarbicanConfig::from_toml_str(DEFAULT_BARBICAN_CONFIG)
             .expect("embedded default config should parse");
+    }
+    fn workflow_step(id: &str) -> &str {
+        GITHUB_CI_WORKFLOW
+            .split_once(&format!("      - id: {id}\n"))
+            .unwrap()
+            .1
+            .split("      - ")
+            .next()
+            .unwrap()
+    }
+
+    #[test]
+    fn pr_evidence_steps_are_independent_and_require_complete_eligibility() {
+        for id in ["evidence_toolchain", "pr_base", "age_lock", "assess"] {
+            let step = workflow_step(id);
+            assert!(step.contains("!cancelled()"), "{id}");
+            assert!(step.contains("github.event_name == 'pull_request'"), "{id}");
+            for prerequisite in ["checkout", "toolchain", "tools", "fetch"] {
+                assert!(
+                    step.contains(&format!("steps.{prerequisite}.outcome == 'success'")),
+                    "{id}/{prerequisite}"
+                );
+            }
+            assert!(!step.contains("steps.pre_release.outcome"), "{id}");
+            assert!(!step.contains("steps.age_lock.outcome"), "{id}");
+            assert!(!step.contains("steps.assess.outcome"), "{id}");
+        }
+        for id in ["age_lock", "assess"] {
+            let step = workflow_step(id);
+            for prerequisite in ["evidence_toolchain", "pr_base"] {
+                assert!(step.contains(&format!("steps.{prerequisite}.outcome == 'success'")));
+            }
+            assert!(step.contains("BASE_SHA: ${{ github.event.pull_request.base.sha }}"));
+            assert!(step.contains("--base-ref \"$BASE_SHA\""));
+        }
+        assert_eq!(
+            GITHUB_CI_WORKFLOW
+                .matches("run: cargo barbican toolchain check")
+                .count(),
+            1
+        );
+        for forbidden in [
+            "continue-on-error",
+            "always()",
+            "|| true",
+            "--policy-mode",
+            "pull_request_target",
+        ] {
+            assert!(!GITHUB_CI_WORKFLOW.contains(forbidden), "{forbidden}");
+        }
+        assert!(workflow_step("pr_base").contains("git cat-file -e \"$BASE_SHA^{commit}\""));
+    }
+
+    #[test]
+    fn generated_pr_summary_reports_native_failures_and_unavailable_evidence() {
+        use std::fs;
+        use std::process::Command;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let summary = GITHUB_CI_WORKFLOW
+            .split_once("      - name: Summarise PR evidence\n")
+            .unwrap()
+            .1;
+        let script = summary
+            .split_once("        run: |\n")
+            .unwrap()
+            .1
+            .lines()
+            .map(|line| line.strip_prefix("          ").unwrap_or(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let cases: &[(&[(&str, &str)], &str)] = &[
+            (&[], "| assess | success |"),
+            (
+                &[("GATE_OUTCOME", "failure"), ("AGE_OUTCOME", "failure")],
+                "| assess | success |",
+            ),
+            (
+                &[
+                    ("CHECKOUT_OUTCOME", "failure"),
+                    ("TOOLS_OUTCOME", "skipped"),
+                    ("AGE_OUTCOME", "skipped"),
+                    ("ASSESS_OUTCOME", "skipped"),
+                ],
+                "setup incomplete: checkout, tools",
+            ),
+            (
+                &[
+                    ("ELIGIBILITY_OUTCOME", "failure"),
+                    ("BASE_OUTCOME", "failure"),
+                    ("AGE_OUTCOME", "skipped"),
+                ],
+                "toolchain conformance failure; PR base failure",
+            ),
+            (
+                &[("BASE_OUTCOME", "failure"), ("ASSESS_OUTCOME", "skipped")],
+                "unavailable — PR base failure",
+            ),
+            (&[("AGE_OUTCOME", "skipped")], "unavailable — did not run"),
+            (
+                &[
+                    ("BASE_SHA", "unsafe|\n\u{1b}[31mINJECTED"),
+                    ("GATE_OUTCOME", "INJECTED"),
+                ],
+                "unavailable (invalid event SHA)",
+            ),
+        ];
+        for (overrides, expected) in cases {
+            let root = std::env::temp_dir().join(format!(
+                "barbican-pr-summary-{}-{}",
+                std::process::id(),
+                SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&root).unwrap();
+            let path = root.join("summary.md");
+            let mut command = Command::new("bash");
+            command
+                .args(["-e", "-o", "pipefail", "-c", &script])
+                .current_dir(&root)
+                .env("GITHUB_STEP_SUMMARY", &path)
+                .env("BASE_SHA", "1".repeat(40));
+            for name in [
+                "CHECKOUT_OUTCOME",
+                "TOOLCHAIN_OUTCOME",
+                "TOOLS_OUTCOME",
+                "FETCH_OUTCOME",
+                "GATE_OUTCOME",
+                "ELIGIBILITY_OUTCOME",
+                "BASE_OUTCOME",
+                "AGE_OUTCOME",
+                "ASSESS_OUTCOME",
+            ] {
+                command.env(name, "success");
+            }
+            for (name, value) in *overrides {
+                command.env(name, value);
+            }
+            let output = command.output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let text = fs::read_to_string(&path).unwrap();
+            assert_eq!(output.stdout, text.as_bytes());
+            assert!(text.contains(expected), "{expected}: {text}");
+            assert!(!text.contains("INJECTED"));
+            if overrides.contains(&("GATE_OUTCOME", "failure")) {
+                assert!(text.contains("| Pre-release gate | failure |"));
+                assert!(text.contains("| age-lock | failure |"));
+            }
+            let failed = command.env("GITHUB_STEP_SUMMARY", &root).output().unwrap();
+            assert!(
+                !failed.status.success(),
+                "summary write errors must stay visible"
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 }
