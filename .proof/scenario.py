@@ -4,7 +4,9 @@ s=sys.argv[1]
 if s=='pin-drift':
  p=Path('reviewed-targets.toml');p.write_text(p.read_text().replace('checksum_sha256="8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"','checksum_sha256="'+'0'*64+'"'))
 if s in ('age-rejection','cancel-age'):
- p=Path('Cargo.toml');p.write_text(p.read_text()+'unicode-ident="=1.0.24"\n')
+ p=Path('Cargo.toml');extra='unicode-ident="=1.0.24"\n'
+ if s=='cancel-age':extra+='sha2="=0.10.9"\ntoml="=1.1.2"\n'
+ p.write_text(p.read_text()+extra)
  subprocess.run(['cargo','generate-lockfile'],check=True)
  Path('barbican.toml').write_text('[release_age]\nminimum_days=365000\n')
 if s in ('assess-only','added-manifest'):

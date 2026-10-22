@@ -54,7 +54,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        scenario: [all-green]
+        scenario: [cancel-age]
     runs-on: ubuntu-latest
     steps:
       - name: Add candidate tools to PATH
@@ -149,7 +149,10 @@ jobs:
         env:
           BASE_SHA: ${{ matrix.scenario == 'invalid-base' && 'invalid-base-for-proof' || matrix.scenario == 'missing-base' && 'ffffffffffffffffffffffffffffffffffffffff' || github.event.pull_request.base.sha }}
           CARGO_BARBICAN_CRATES_IO_BASE_URL: ${{ matrix.scenario == 'cancel-age' && 'http://127.0.0.1:38941' || 'https://crates.io' }}
-        run: cargo barbican age-lock --base-ref "$BASE_SHA"
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          if [[ "$SCENARIO" == cancel-age ]]; then python3 -u .proof/age-witness.py & fi
+          cargo barbican age-lock --base-ref "$BASE_SHA"
       - id: assess
         name: Assess against the PR base
         if: >-
