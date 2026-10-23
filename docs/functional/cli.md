@@ -64,7 +64,9 @@ cargo barbican age [--min-age-days N] <crate@version>...
 
 cargo barbican age-lock [--base-ref REF | --base-lockfile PATH] [--lockfile Cargo.lock] [--min-age-days N]
     Diff Cargo.lock against a baseline lockfile. By default the baseline is
-    `HEAD:<lockfile>`. `--base-lockfile` provides an explicit non-git baseline
+    the requested workspace file at captured `HEAD`. Blob paths are mapped
+    into the Git worktree even for nested Cargo workspaces. `--base-lockfile`
+    provides an explicit non-git baseline
     file instead. For every newly selected crates.io version, verify release
     age. Catches too-fresh transitive selections.
     When `--min-age-days` is absent, the command uses the same
@@ -91,13 +93,18 @@ cargo barbican pick [--min-age-days N] <crate|crate@range>
     Pure HTTP GET to the crates.io API.
 
 cargo barbican resolve [--min-age-days N]
-    1. Snapshot the current `Cargo.lock`.
+    1. Capture valid regular `Cargo.lock` bytes/permissions or genuine absence.
     2. Run `cargo generate-lockfile` against the current manifests.
     3. Recheck newly selected crates.io versions against the pre-resolve
-       `Cargo.lock` snapshot.
-    4. Restore the original `Cargo.lock` and exit 1 if any newly selected
-       crates.io version is too fresh, yanked, or otherwise violates release-age
-       policy.
+       graph. First creation checks every selected crates.io version.
+    4. On supported returned failures restore original bytes/permissions or
+       prior absence when the last safely observed output still matches.
+       Detected external changes are preserved and fail; no stale success.
+    Existing invalid/unreadable, symlinked, nonregular or multiply-linked
+    lockfiles cannot become bootstrap. Generation is in place; no build/test
+    is requested and ordinary Cargo executable/configuration trust applies.
+    First-resolution provenance is explicit; this prepares review facts, not
+    dependency approval or an empty historical baseline.
     When `--min-age-days` is absent, the command uses the same
     `barbican.toml` release-age default as `age`.
     The post-resolution lockfile recheck honours the same reviewed release-age
@@ -111,6 +118,15 @@ cargo barbican update [--dry-run] [--min-age-days N] <crate@version>...
        for each spec.
     4. Recheck newly selected crates.io versions against the pre-update
        `Cargo.lock` snapshot.
+    Update requires a valid existing lockfile before HTTP/mutating-delegate work.
+    Metadata and every precise update have separate before/after checkpoints,
+    including write-then-error. Later failures restore the original graph and
+    original permissions, never an intermediate graph. Both mutation commands
+    explicitly finalise delegate, parse, policy, HTTP and output failures.
+    They require one writer; observable conflicts are preserved. This does not
+    close hostile check/write races or transact across manifests/config/caches.
+    Drop recovery is conditional best effort after safe output capture; no
+    guarantee applies during unobserved delegate panic, abort or power loss.
     With `--dry-run`, perform the update in an internal temp workspace and
     print a summary/diff preview of the would-be `Cargo.lock` change instead
     of mutating the repo.
@@ -136,6 +152,12 @@ cargo barbican assess [--base-ref REF | --base-dir PATH] [--policy-mode strict|e
     `policy-violating`. By default the baseline is the current workspace
     state at `HEAD`. `--base-dir` provides an explicit non-git baseline
     directory containing the comparison `Cargo.lock` and workspace manifests.
+    Git lockfile/manifests share one captured commit and workspace prefix.
+    Absolute current paths inside the workspace map to their logical relative
+    file under the selected baseline; outside absolute paths have no implicit
+    parallel layout. Explicit filesystem routes do not require Git. Missing
+    refs, object-read failures and parse corruption remain distinct failures;
+    there is no empty-baseline or alternative-ref fallback.
     The first slice is post-add Rust assessment only. It checks:
     - new direct dependencies across workspace Cargo.toml files
     - new non-crates.io direct dependency specs

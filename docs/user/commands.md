@@ -334,6 +334,20 @@ cargo barbican review --base-dir /path/to/base/workspace
 The explicit baseline directory for `assess` and `review` should contain the
 comparison `Cargo.lock` and workspace manifests.
 
+Git comparisons resolve the requested ref to one immutable commit. Blob paths
+are mapped from the discovered Cargo workspace into its Git worktree, including
+nested workspaces. Absolute current lockfile paths inside the workspace map to
+the same relative file beneath `--base-dir`; an outside absolute path has no
+implied parallel layout. `age-lock --base-lockfile` selects its baseline file
+independently. Filesystem baseline routes do not require Git. Review baselines
+may omit individual files to represent additions, while retaining their
+workspace manifest layout.
+
+An unavailable ref, missing historical lockfile and malformed historical
+lockfile are distinct failures. Unavailable ref/object errors retain the cause
+and name existing recovery alternatives; corruption retains its parse error
+and captured provenance. None assumes an empty baseline or substitutes HEAD.
+
 ## How Results Work
 
 ### Classifications
@@ -646,12 +660,19 @@ cargo barbican resolve --min-age-days 30
 
 What it does:
 
-- snapshots the current `Cargo.lock`
+- captures valid current `Cargo.lock` bytes/permissions, or genuine absence
 - runs `cargo generate-lockfile` against the current manifests
 - rechecks newly selected crates.io versions against the pre-resolve
-  `Cargo.lock`
-- restores the original `Cargo.lock` and exits 1 when the selected versions
-  violate release-age policy
+  graph; first resolution checks every selected crates.io version
+- restores original bytes/permissions or prior absence on supported returned
+  failures, including delegate, parse, age, HTTP and output failures
+
+First resolution is labelled explicitly and prepares a graph for human review,
+not approval to build. See [new-project adoption](adoption.md#starting-a-new-project).
+Unsafe or invalid initial lockfiles fail before lockfile generation/update.
+Mutations require one writer; detected changes after Cargo returns are preserved and fail rather
+than being overwritten or accepted as stale success. See
+[recovery and limits](operations.md#lockfile-mutation-and-baseline-recovery).
 
 ### `cargo barbican update`
 
@@ -679,6 +700,11 @@ What it does:
 - runs `cargo update --workspace -p <package-id> --precise <version>`
 - rechecks newly selected crates.io versions against the pre-update
   `Cargo.lock`
+
+Update requires a valid existing lockfile. Metadata and each precise update
+have their own output checkpoint; a later failure restores the original
+pre-command graph, not an intermediate graph. It shares resolve's original-mode
+restoration and conflict/recovery rules.
 
 `--dry-run` performs the update in a temporary workspace and prints a summary
 and diff preview instead of mutating the repo.

@@ -95,10 +95,12 @@ pub(crate) enum Command {
     },
     #[command(
         about = "Generate Cargo.lock for current manifests under release-age policy",
-        long_about = "Snapshots the current Cargo.lock, runs cargo generate-lockfile against \
-            the current manifests, rechecks newly selected crates.io versions against the \
-            pre-resolve snapshot, and restores the original Cargo.lock if release-age policy \
-            fails."
+        long_about = "Generates Cargo.lock for current manifests, including its first creation. \
+            Checks every selected crates.io version on first resolution, or newly selected \
+            versions against the pre-resolve snapshot. Supported returned failures restore \
+            original bytes/permissions or prior absence when the observed output is unchanged. \
+            Use one writer; detected external changes are preserved and fail. This prepares \
+            a graph for review, not approval to build, and creates no historical baseline."
     )]
     Resolve {
         #[arg(long, value_parser = min_age_days_parser(), help = MIN_AGE_DAYS_HELP)]

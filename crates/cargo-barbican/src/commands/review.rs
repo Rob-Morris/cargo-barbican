@@ -31,7 +31,13 @@ where
         (render_non_git_review_diff(&base_root, current_dir)?, None)
     } else {
         let paths = review_paths(current_dir)?;
-        let diff = match runner.git_diff(current_dir, &paths) {
+        let baseline = super::baseline::CapturedCommit::capture(
+            current_dir,
+            runner,
+            "HEAD",
+            "use --base-dir with an actual baseline directory, or create an intentional initial commit after review",
+        )?;
+        let diff = match runner.git_diff(current_dir, &baseline.commit, &paths) {
             Ok(diff) => diff,
             Err(error) => return fail(stderr, format!("git diff: {error}")),
         };

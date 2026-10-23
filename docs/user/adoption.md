@@ -1,7 +1,7 @@
 # Adopting Cargo-Barbican
 
-This guide is for an existing Rust repository adopting cargo-barbican as a
-dependency policy gate.
+This guide covers existing Rust repositories and new projects adopting
+cargo-barbican as a dependency policy gate.
 
 `cargo barbican policy init` creates policy scaffolding. It does not review,
 approve, or certify the dependencies already in the repository.
@@ -67,6 +67,35 @@ not hidden runtime default state.
 `.github/workflows/barbican.yml` enforcement workflow (it fails closed rather
 than overwriting an existing one). See [ci.md](ci.md) for the CI gate and the
 client-side pre-commit hook.
+
+## Starting a new project
+
+After creating the Rust project and choosing the policy/toolchain scaffold in
+step 1, generate its first dependency graph through the normal command:
+
+```bash
+cargo barbican resolve
+cargo barbican inventory
+```
+
+`resolve` accepts genuine absence of the workspace-root `Cargo.lock` and checks
+every selected crates.io version, including transitive selections, under the
+same age/yank/exception policy as ordinary resolution. A graph with no registry
+dependencies needs no release HTTP requests. Invalid, unreadable, symlinked or
+multiply-linked lockfiles are refused; they are not treated as new projects.
+
+Continue with the review steps below: inventory, `pin add` scaffolds, completed
+human review and explicit source permission, then `gatehouse pre-release`.
+Resolution prepares a graph for review; it does not approve dependencies or run
+workspace build/test. Ordinary Cargo executable/configuration/credential trust
+still applies. See [lockfile recovery](operations.md#lockfile-mutation-and-baseline-recovery).
+
+Comparative commands still need the actual baseline requested. With no usable
+Git commit or no committed baseline lockfile, choose their explicit baseline
+options only when you have real prior evidence. Establish an intentional
+reviewed initial commit at the appropriate point; do not fabricate an empty
+lockfile or commit unreviewed dependencies just to silence a comparison.
+Generated first-PR evidence has no empty-baseline fallback.
 
 ## 2. Review Current Dependencies
 

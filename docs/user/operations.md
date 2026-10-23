@@ -131,6 +131,36 @@ binding, or deadline itself. `inventory` tracks each Barbican exception's
 expiry status (active, soon-to-expire within 30 days, expired, or stale)
 without running the scanners.
 
+## Lockfile mutation and baseline recovery
+
+Run `resolve`/`update` with one writer: do not run another Cargo/Barbican command
+or edit `Cargo.lock` concurrently. Each mutating delegate is checked before and
+after it runs. Known failures restore exact original bytes/permissions or the
+genuine absence that preceded first resolution, provided the last observed
+output still matches. Dry-run owns only its scratch copy and detects a changed
+source lockfile while copying.
+
+A detected external change is left intact and exits 1, including when policy
+checks otherwise passed. If cleanup fails, diagnostics retain the primary
+failure and restoration/conflict context. Stop other writers, preserve and
+inspect the affected file and changes, then deliberately recover from your
+pre-command backup or reviewed baseline before retrying. HEAD may not contain
+your pre-command uncommitted edits. Never recursively remove an unsafe output
+path or follow a symlink as an automatic recovery step.
+
+These checks detect observable conflicts; they do not defeat hostile writers
+during Cargo or the final check/write interval. Panic recovery is best effort
+only after safe output capture. There is no restoration guarantee during an
+unobserved delegate panic, abort, SIGKILL, power loss or filesystem loss, and no
+transaction across manifests, configuration or Cargo caches.
+
+If `age-lock`, `assess` or `review` cannot read their requested baseline, keep
+that failure visible. Use the command's existing explicit baseline option with
+actual evidence, or establish an intentional reviewed initial commit. First
+lockfile generation belongs to `resolve`; an empty comparative baseline and
+first-PR fallback are not implied. See
+[baseline selection](commands.md#comparing-against-non-git-baselines).
+
 ## Routine Update Cadence
 
 Run a periodic update pass — weekly or fortnightly works well with the default

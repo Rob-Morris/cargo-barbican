@@ -92,7 +92,12 @@ The current baseline rules for comparative commands are:
   `--base-dir <path>` as an explicit non-git review baseline
 - `resolve` generates `Cargo.lock` for the current manifests and rechecks newly
   selected crates.io versions against an internal pre-resolve `Cargo.lock`
-  snapshot, restoring the snapshot on release-age failure
+  snapshot, or every registry selection for genuine first creation. The shared
+  resolve/update guard restores original bytes/permissions or prior absence on
+  supported returned failures and preserves detected external changes. Every
+  metadata/precise mutation is checkpointed; unsafe initial leaves fail before
+  reads. Single-writer/static-filesystem limits remain, with no general
+  transaction or unobserved-delegate panic guarantee
 - `update` no longer depends on `HEAD`; it rechecks against an internal
   pre-update `Cargo.lock` snapshot
 - `update` also supports `--dry-run`, which executes the targeted update in an

@@ -43,6 +43,7 @@ pub trait CommandRunner {
         reference: &str,
     ) -> Result<String, RunnerError>;
     fn git_show(&self, current_dir: &Path, object: &str) -> Result<String, RunnerError>;
+    fn git_workspace_prefix(&self, current_dir: &Path) -> Result<String, RunnerError>;
     /// Runtime command policy reads environment through this boundary so test
     /// runners never inherit unrelated toolchain controls from the test host.
     fn environment_variable(&self, name: &str) -> Option<OsString>;
@@ -70,7 +71,12 @@ pub trait CommandRunner {
     ) -> Result<(), RunnerError>;
     fn cargo_generate_lockfile(&self, current_dir: &Path) -> Result<(), RunnerError>;
     fn cargo_tree(&self, current_dir: &Path) -> Result<String, RunnerError>;
-    fn git_diff(&self, current_dir: &Path, paths: &[PathBuf]) -> Result<String, RunnerError>;
+    fn git_diff(
+        &self,
+        current_dir: &Path,
+        commit: &str,
+        paths: &[PathBuf],
+    ) -> Result<String, RunnerError>;
     fn git_untracked(&self, current_dir: &Path, paths: &[PathBuf]) -> Result<String, RunnerError>;
     fn cargo_audit(&self, current_dir: &Path) -> Result<String, RunnerError>;
     fn cargo_audit_json(
@@ -187,6 +193,10 @@ impl CommandRunner for RealCommandRunner {
         run_command(current_dir, "git", ["show", object])
     }
 
+    fn git_workspace_prefix(&self, current_dir: &Path) -> Result<String, RunnerError> {
+        run_command(current_dir, "git", ["rev-parse", "--show-prefix"])
+    }
+
     fn environment_variable(&self, name: &str) -> Option<OsString> {
         env::var_os(name)
     }
@@ -262,11 +272,16 @@ impl CommandRunner for RealCommandRunner {
         )
     }
 
-    fn git_diff(&self, current_dir: &Path, paths: &[PathBuf]) -> Result<String, RunnerError> {
+    fn git_diff(
+        &self,
+        current_dir: &Path,
+        commit: &str,
+        paths: &[PathBuf],
+    ) -> Result<String, RunnerError> {
         let mut command = ProcessCommand::new("git");
         command
             .current_dir(current_dir)
-            .args(["diff", "HEAD", "--"]);
+            .args(["diff", commit, "--"]);
         for path in paths {
             command.arg(path);
         }

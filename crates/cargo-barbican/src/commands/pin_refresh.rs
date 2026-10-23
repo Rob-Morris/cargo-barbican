@@ -79,22 +79,12 @@ pub(super) fn run_re_pin<C: CratesIoClient + ?Sized, R: CommandRunner + ?Sized>(
     let context = Context::load(&inputs)?;
     let root = inputs.root().to_path_buf();
     let pinned_ref = match (base_ref, base_dir) {
-        (Some(reference), None) => {
-            let result = runner
-                .git_resolve_commit(&root, reference)
-                .map_err(|source| {
-                    error(format!("unable to resolve explicit Git baseline: {source}"))
-                })?;
-            let commit = result.trim();
-            if !matches!(commit.len(), 40 | 64)
-                || !commit.bytes().all(|byte| byte.is_ascii_hexdigit())
-            {
-                return Err(error(
-                    "Git baseline did not resolve to a complete commit identity",
-                ));
-            }
-            Some(commit.to_owned())
-        }
+        (Some(reference), None) => Some(super::baseline::GitBaseline::capture(
+            &root,
+            runner,
+            reference,
+            "gatehouse re-pin requires an available explicit Git baseline or --base-dir",
+        )?),
         (None, Some(_)) => None,
         _ => {
             return Err(error(
@@ -114,7 +104,7 @@ pub(super) fn run_re_pin<C: CratesIoClient + ?Sized, R: CommandRunner + ?Sized>(
         load_git_base_lockfile(
             &root,
             runner,
-            pinned_ref.as_deref().expect("baseline selector validated"),
+            pinned_ref.as_ref().expect("baseline selector validated"),
             Path::new("Cargo.lock"),
         )?
     };
@@ -125,7 +115,7 @@ pub(super) fn run_re_pin<C: CratesIoClient + ?Sized, R: CommandRunner + ?Sized>(
     if requests.is_empty() {
         let exit = evidence(
             &inputs,
-            pinned_ref.as_deref(),
+            pinned_ref.as_ref(),
             baseline_directory.as_deref(),
             &memoized,
             runner,
@@ -148,7 +138,7 @@ pub(super) fn run_re_pin<C: CratesIoClient + ?Sized, R: CommandRunner + ?Sized>(
     let prepared = prepare(inputs, &context.policy, &plan, now, stdout)?;
     let exit = evidence(
         &prepared.inputs,
-        pinned_ref.as_deref(),
+        pinned_ref.as_ref(),
         baseline_directory.as_deref(),
         &memoized,
         runner,
@@ -171,7 +161,7 @@ pub(super) fn run_re_pin<C: CratesIoClient + ?Sized, R: CommandRunner + ?Sized>(
 
 fn evidence<C: CratesIoClient + ?Sized, R: CommandRunner + ?Sized>(
     inputs: &Inputs,
-    base_ref: Option<&str>,
+    baseline: Option<&super::baseline::GitBaseline>,
     base_dir: Option<&Path>,
     client: &C,
     runner: &R,
@@ -182,8 +172,9 @@ fn evidence<C: CratesIoClient + ?Sized, R: CommandRunner + ?Sized>(
     inputs.check()?;
     let baseline_lock = base_dir.map(|directory| directory.join("Cargo.lock"));
     writeln!(stdout, "Gatehouse re-pin: age-lock (explicit baseline)").map_err(CommandError::Io)?;
-    let exit = age_lock::run_age_lock(
-        base_ref,
+    let exit = age_lock::run_age_lock_with_baseline(
+        baseline,
+        None,
         baseline_lock.as_deref(),
         None,
         Path::new("Cargo.lock"),
@@ -204,8 +195,9 @@ fn evidence<C: CratesIoClient + ?Sized, R: CommandRunner + ?Sized>(
     }
     inputs.check()?;
     writeln!(stdout, "Gatehouse re-pin: assess (strict)").map_err(CommandError::Io)?;
-    let exit = assess::run_assess(
-        base_ref,
+    let exit = assess::run_assess_with_baseline(
+        baseline,
+        None,
         base_dir,
         AssessPolicyMode::Strict,
         None,

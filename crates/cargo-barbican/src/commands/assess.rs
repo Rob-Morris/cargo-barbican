@@ -38,6 +38,40 @@ where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
+    run_assess_with_baseline(
+        None,
+        base_ref,
+        base_dir,
+        policy_mode,
+        min_age_days,
+        lockfile,
+        current_dir,
+        client,
+        runner,
+        now,
+        stdout,
+        stderr,
+    )
+}
+
+pub(super) fn run_assess_with_baseline<C, R>(
+    captured: Option<&super::baseline::GitBaseline>,
+    base_ref: Option<&str>,
+    base_dir: Option<&Path>,
+    policy_mode: AssessPolicyMode,
+    min_age_days: Option<u64>,
+    lockfile: &Path,
+    current_dir: &Path,
+    client: &C,
+    runner: &R,
+    now: OffsetDateTime,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError>
+where
+    C: CratesIoClient + ?Sized,
+    R: CommandRunner + ?Sized,
+{
     let config = load_config(current_dir)?;
     let minimum_days = min_age_days.unwrap_or(config.release_age.minimum_days);
     let reviewed_targets =
@@ -58,11 +92,23 @@ where
         Ok(lockfile) => lockfile,
         Err(error) => return fail(stderr, error),
     };
+    let owned = if base_root.is_none() && captured.is_none() {
+        Some(super::baseline::GitBaseline::capture(
+            current_dir,
+            runner,
+            base_ref.unwrap_or(DEFAULT_BASE_REF),
+            "use --base-ref with an available commit, or --base-dir containing actual baseline lockfile and manifests",
+        )?)
+    } else {
+        None
+    };
+    let baseline = captured.or(owned.as_ref());
     let base_lockfile = if let Some(base_root) = &base_root {
-        let base_lockfile_path = base_root.join(lockfile);
+        let logical = super::baseline::workspace_relative(current_dir, lockfile)?;
+        let base_lockfile_path = base_root.join(&logical);
         let display = base_dir
             .expect("base_root implies base_dir")
-            .join(lockfile)
+            .join(&logical)
             .display()
             .to_string();
 
@@ -71,8 +117,12 @@ where
             Err(error) => return fail(stderr, error),
         }
     } else {
-        let base_ref = base_ref.unwrap_or(DEFAULT_BASE_REF);
-        match load_git_base_lockfile(current_dir, runner, base_ref, lockfile) {
+        match load_git_base_lockfile(
+            current_dir,
+            runner,
+            baseline.expect("Git baseline selected"),
+            lockfile,
+        ) {
             Ok(lockfile) => lockfile,
             Err(error) => return fail(stderr, error),
         }
@@ -87,8 +137,11 @@ where
             Err(error) => return fail(stderr, error),
         }
     } else {
-        let base_ref = base_ref.unwrap_or(DEFAULT_BASE_REF);
-        match load_base_manifest_dependencies(current_dir, runner, base_ref) {
+        match load_base_manifest_dependencies(
+            current_dir,
+            runner,
+            baseline.expect("Git baseline selected"),
+        ) {
             Ok(manifests) => manifests,
             Err(error) => return fail(stderr, error),
         }

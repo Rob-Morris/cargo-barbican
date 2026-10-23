@@ -50,6 +50,8 @@ fn ref_pins_one_commit_and_post_move_head_cannot_explain_drift() {
         &runner,
     );
     assert_eq!(exit, ExitCode::SUCCESS, "{out}\n{err}");
+    assert_eq!(*runner.git_resolve_calls.borrow(), ["pre-move"]);
+    assert_eq!(*runner.git_prefix_calls.borrow(), 1);
 }
 
 #[test]

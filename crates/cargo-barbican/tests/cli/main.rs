@@ -3,6 +3,7 @@ mod age_lock;
 mod anchoring;
 mod assess;
 mod audit;
+mod bootstrap;
 mod common;
 mod gatehouse;
 mod gatehouse_policy;

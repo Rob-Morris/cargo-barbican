@@ -103,7 +103,12 @@ The current intake layer is:
   instead of relying on `HEAD`
 - `resolve` generates `Cargo.lock` for the current manifests with `cargo
   generate-lockfile`, then rechecks newly selected crates.io versions against
-  the pre-resolve `Cargo.lock` snapshot and restores the snapshot on failure
+  the original graph; genuine prior absence selects the first graph and checks
+  every registry selection. Resolve/update share one observed-output guard:
+  original bytes/permissions or absence are restored on supported returned
+  failures, while detected conflicts are preserved and fail. Metadata and each
+  precise update are checkpointed separately. This is single-writer recovery,
+  not a race-free transaction or an executable sandbox
 - `update` also supports a non-mutating `--dry-run` preview that shows the
   would-be `Cargo.lock` diff without changing the working tree
   - the copied workspace preserves relative symlinks only when their resolved
@@ -207,6 +212,14 @@ isolation. See [functional contract](../functional/cli.md) and
 [user configuration](../user/configuration.md#verify).
 
 ## Architectural boundary
+
+Git comparisons capture one validated immutable commit; blob readers also
+capture the workspace's Git prefix and map logical workspace paths into actual
+Git objects. Re-pin shares that context with its primitive checks, while review
+needs only captured HEAD. Explicit filesystem comparisons stay independent of
+Git and map absolute current paths into the requested baseline. Missing evidence
+fails without an empty graph or alternative-ref fallback. Current-path parent
+aliases are reconciled without requiring a baseline file to exist on disk.
 
 The codebase is split into a library crate and a Cargo-subcommand binary from
 the start:

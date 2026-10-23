@@ -3,9 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use barbican::{
-    CratesIoClient, OffsetDateTime, parse_cargo_metadata, parse_lockfile, select_package_id,
-};
+use barbican::{CratesIoClient, OffsetDateTime, parse_cargo_metadata, select_package_id};
 
 use crate::command_runner::CommandRunner;
 
@@ -15,8 +13,7 @@ use super::lockfile_ops::{LockfileRestoreGuard, MemoizingCratesIoClient};
 use super::scratch_dir::ScratchDir;
 use super::{
     CommandError, escape_diagnostic_for_terminal, fail, finish_release_age_checks,
-    load_current_lockfile_text, load_current_lockfile_with_text, load_release_age_context,
-    parse_specs, release_age_override_note,
+    load_release_age_context, parse_specs, release_age_override_note,
 };
 
 pub(super) fn run_update<C, R>(
@@ -34,6 +31,11 @@ where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
+    let mut source = LockfileRestoreGuard::capture(current_dir, false)?;
+    let (base_lockfile, original_text) = source.original();
+    let base_lockfile_text = original_text
+        .expect("update requires an existing lockfile")
+        .to_owned();
     let memoized_client = MemoizingCratesIoClient::new(client);
     let (minimum_days, reviewed_release_age_exceptions) =
         load_release_age_context(current_dir, min_age_days)?;
@@ -41,8 +43,8 @@ where
         writeln!(stdout, "{note}").map_err(CommandError::Io)?;
     }
     let parse_result = parse_specs(raw_specs, stderr)?;
-    if let Ok((lockfile, _)) = load_current_lockfile_with_text(current_dir, Path::new("Cargo.lock"))
     {
+        let lockfile = &base_lockfile;
         for spec in &parse_result.specs {
             if lockfile
                 .packages()
@@ -73,26 +75,20 @@ where
     if parse_result.failed || age_exit != ExitCode::SUCCESS {
         return Ok(ExitCode::from(1));
     }
-    let base_lockfile_text = match load_current_lockfile_text(current_dir, Path::new("Cargo.lock"))
-    {
-        Ok(text) => text,
-        Err(error) => return fail(stderr, error),
-    };
-    let base_lockfile = match parse_lockfile(&base_lockfile_text) {
-        Ok(lockfile) => lockfile,
-        Err(source) => {
-            return fail(
-                stderr,
-                CommandError::LockfileParse {
-                    path: "Cargo.lock".to_owned(),
-                    source,
-                },
-            );
-        }
-    };
     let dry_run_workspace = if dry_run {
+        source.check_unchanged()?;
         match DryRunWorkspace::create(current_dir) {
-            Ok(workspace) => Some(workspace),
+            Ok(workspace) => {
+                source.check_unchanged()?;
+                if fs::read(workspace.path().join("Cargo.lock")).map_err(CommandError::Io)?
+                    != base_lockfile_text.as_bytes()
+                {
+                    return Err(CommandError::Io(std::io::Error::other(
+                        "Cargo.lock changed while copying the dry-run workspace",
+                    )));
+                }
+                Some(workspace)
+            }
             Err(error) => {
                 return fail(
                     stderr,
@@ -107,119 +103,83 @@ where
         .as_ref()
         .map(DryRunWorkspace::path)
         .unwrap_or(current_dir);
-    // Dry runs mutate the scratch copy at resolve_dir, never current_dir, so
-    // the guard stays disarmed for the whole dry-run path: there is nothing
-    // in the working tree to restore.
-    let mut restore_guard = LockfileRestoreGuard::new(current_dir, &base_lockfile_text);
-    if dry_run {
-        restore_guard.disarm();
-    }
-
-    let metadata_text = match runner.cargo_metadata(resolve_dir) {
-        Ok(text) => text,
-        Err(error) => return fail(stderr, format!("cargo metadata: {error}")),
+    let mut guard = if dry_run {
+        LockfileRestoreGuard::capture(resolve_dir, false)?
+    } else {
+        source
     };
-    let metadata = match parse_cargo_metadata(&metadata_text) {
-        Ok(metadata) => metadata,
-        Err(error) => return fail(stderr, format!("cargo metadata: {error}")),
-    };
-    let mut selections = Vec::new();
+    let result = (|| {
+        let metadata_text =
+            match guard.mutate("cargo metadata", || runner.cargo_metadata(resolve_dir)) {
+                Ok(text) => text,
+                Err(error) => return fail(stderr, format!("cargo metadata: {error}")),
+            };
+        let metadata = match parse_cargo_metadata(&metadata_text) {
+            Ok(metadata) => metadata,
+            Err(error) => return fail(stderr, format!("cargo metadata: {error}")),
+        };
+        let mut selections = Vec::new();
 
-    for spec in &parse_result.specs {
-        match select_package_id(&metadata, spec.crate_name()) {
-            Ok(package_id) => selections.push((spec.clone(), package_id)),
-            Err(error) => return fail(stderr, format!("{}: {error}", spec.crate_name())),
-        }
-    }
-
-    for (spec, package_id) in selections {
-        if let Err(error) = runner.cargo_update_precise(resolve_dir, &package_id, spec.version()) {
-            if !dry_run {
-                restore_guard.restore_now()?;
+        for spec in &parse_result.specs {
+            match select_package_id(&metadata, spec.crate_name()) {
+                Ok(package_id) => selections.push((spec.clone(), package_id)),
+                Err(error) => return fail(stderr, format!("{}: {error}", spec.crate_name())),
             }
-            return fail(
-                stderr,
-                format!(
-                    "{spec}: unable to update package spec {package_id} to {}: {error}",
+        }
+
+        for (spec, package_id) in selections {
+            guard.mutate(
+                &format!(
+                    "{spec}: cargo update {package_id} --precise {}",
                     spec.version()
                 ),
-            );
+                || runner.cargo_update_precise(resolve_dir, &package_id, spec.version()),
+            )?;
         }
-    }
 
-    let (current_lockfile, current_lockfile_text) =
-        match load_current_lockfile_with_text(resolve_dir, Path::new("Cargo.lock")) {
-            Ok(lockfile_with_text) => lockfile_with_text,
-            Err(error) => {
-                if !dry_run {
-                    restore_guard.restore_now()?;
-                }
-                return fail(stderr, error);
-            }
-        };
-    let current_lockfile_text = if dry_run {
-        Some(current_lockfile_text)
-    } else {
-        None
-    };
-
-    writeln!(stdout, "Release-age recheck for newly selected versions:")
-        .map_err(CommandError::Io)?;
-    let age_recheck_exit = match recheck_lockfile_age_against_lockfiles(
-        &current_lockfile,
-        &base_lockfile,
-        "Cargo.lock",
-        "pre-update Cargo.lock",
-        minimum_days,
-        &reviewed_release_age_exceptions,
-        &memoized_client,
-        now,
-        stdout,
-        stderr,
-    ) {
-        Ok(exit_code) => exit_code,
-        Err(error) => {
-            if !dry_run {
-                restore_guard.restore_now()?;
-            }
-            return Err(error);
-        }
-    };
-
-    if !dry_run {
-        if age_recheck_exit == ExitCode::SUCCESS {
-            restore_guard.disarm();
-        } else {
-            restore_guard.restore_now()?;
-        }
-        return Ok(age_recheck_exit);
-    }
-
-    if age_recheck_exit != ExitCode::SUCCESS {
-        return Ok(age_recheck_exit);
-    }
-
-    let current_lockfile_text =
-        current_lockfile_text.expect("dry-run path retains current lockfile text");
-
-    if base_lockfile_text == current_lockfile_text {
-        writeln!(stdout, "Dry run: no Cargo.lock changes would be made.")
+        let (current_lockfile, current_lockfile_text) = guard.current()?;
+        writeln!(stdout, "Release-age recheck for newly selected versions:")
             .map_err(CommandError::Io)?;
-    } else {
-        let diff = render_unified_file_diff(
-            Path::new("Cargo.lock"),
-            Some(&base_lockfile_text),
-            Some(&current_lockfile_text),
-        );
-        writeln!(
+        let age_recheck_exit = recheck_lockfile_age_against_lockfiles(
+            &current_lockfile,
+            &base_lockfile,
+            "Cargo.lock",
+            "pre-update Cargo.lock",
+            minimum_days,
+            &reviewed_release_age_exceptions,
+            &memoized_client,
+            now,
             stdout,
-            "Dry run preview:\n{}",
-            escape_diagnostic_for_terminal(&diff)
-        )
-        .map_err(CommandError::Io)?;
-    }
+            stderr,
+        )?;
+        if !dry_run {
+            return Ok(age_recheck_exit);
+        }
 
-    Ok(ExitCode::SUCCESS)
+        if age_recheck_exit != ExitCode::SUCCESS {
+            return Ok(age_recheck_exit);
+        }
+
+        if base_lockfile_text == current_lockfile_text {
+            writeln!(stdout, "Dry run: no Cargo.lock changes would be made.")
+                .map_err(CommandError::Io)?;
+        } else {
+            let diff = render_unified_file_diff(
+                Path::new("Cargo.lock"),
+                Some(&base_lockfile_text),
+                Some(&current_lockfile_text),
+            );
+            writeln!(
+                stdout,
+                "Dry run preview:\n{}",
+                escape_diagnostic_for_terminal(&diff)
+            )
+            .map_err(CommandError::Io)?;
+        }
+
+        Ok(ExitCode::SUCCESS)
+    })();
+    guard.finish(result)
 }
 
 struct DryRunWorkspace {

@@ -28,6 +28,38 @@ where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
+    run_age_lock_with_baseline(
+        None,
+        base_ref,
+        base_lockfile,
+        min_age_days,
+        lockfile,
+        current_dir,
+        client,
+        runner,
+        now,
+        stdout,
+        stderr,
+    )
+}
+
+pub(super) fn run_age_lock_with_baseline<C, R>(
+    captured: Option<&super::baseline::GitBaseline>,
+    base_ref: Option<&str>,
+    base_lockfile: Option<&Path>,
+    min_age_days: Option<u64>,
+    lockfile: &Path,
+    current_dir: &Path,
+    client: &C,
+    runner: &R,
+    now: OffsetDateTime,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError>
+where
+    C: CratesIoClient + ?Sized,
+    R: CommandRunner + ?Sized,
+{
     let (minimum_days, reviewed_release_age_exceptions) =
         load_release_age_context(current_dir, min_age_days)?;
     if let Some(note) = release_age_override_note(current_dir, min_age_days)? {
@@ -49,13 +81,24 @@ where
 
         (base, display)
     } else {
-        let base_ref = base_ref.unwrap_or(DEFAULT_BASE_REF);
-        let base = match load_git_base_lockfile(current_dir, runner, base_ref, lockfile) {
+        let owned;
+        let baseline = if let Some(captured) = captured {
+            captured
+        } else {
+            owned = super::baseline::GitBaseline::capture(
+                current_dir,
+                runner,
+                base_ref.unwrap_or(DEFAULT_BASE_REF),
+                "use --base-ref with an available commit, or --base-lockfile with an actual baseline file",
+            )?;
+            &owned
+        };
+        let base = match load_git_base_lockfile(current_dir, runner, baseline, lockfile) {
             Ok(lockfile) => lockfile,
             Err(error) => return fail(stderr, error),
         };
 
-        (base, base_ref.to_owned())
+        (base, baseline.identity.requested.clone())
     };
 
     recheck_lockfile_age_against_lockfiles(

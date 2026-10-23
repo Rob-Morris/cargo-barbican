@@ -255,6 +255,11 @@ pub(crate) struct FakeCommandRunner {
     pub(crate) environment: HashMap<String, OsString>,
     pub(crate) cargo_metadata_result: Result<String, String>,
     pub(crate) cargo_metadata_calls: RefCell<u64>,
+    pub(crate) cargo_metadata_lockfile_text: Option<String>,
+    pub(crate) cargo_update_steps: Vec<(Option<String>, Result<(), String>)>,
+    pub(crate) git_resolve_calls: RefCell<Vec<String>>,
+    pub(crate) git_prefix_result: Result<String, String>,
+    pub(crate) git_prefix_calls: RefCell<u64>,
     pub(crate) cargo_locate_project_result: Option<Result<String, String>>,
     pub(crate) cargo_update_result: Result<(), String>,
     pub(crate) cargo_update_lockfile_text: Option<String>,
@@ -293,6 +298,7 @@ pub(crate) struct FakeCommandRunner {
     pub(crate) generate_lockfile_calls: RefCell<Vec<PathBuf>>,
     pub(crate) cargo_tree_calls: RefCell<Vec<PathBuf>>,
     pub(crate) git_diff_paths: RefCell<Vec<PathBuf>>,
+    pub(crate) git_diff_commits: RefCell<Vec<String>>,
     pub(crate) git_untracked_paths: RefCell<Vec<PathBuf>>,
     pub(crate) audit_calls: RefCell<Vec<PathBuf>>,
     pub(crate) audit_json_calls: RefCell<Vec<(PathBuf, PathBuf)>>,
@@ -316,6 +322,11 @@ impl Default for FakeCommandRunner {
             environment: HashMap::from([("CARGO_HOME".to_owned(), OsString::from(".cargo-home"))]),
             cargo_metadata_result: Ok(metadata_with_packages(&[])),
             cargo_metadata_calls: RefCell::new(0),
+            cargo_metadata_lockfile_text: None,
+            cargo_update_steps: Vec::new(),
+            git_resolve_calls: RefCell::new(Vec::new()),
+            git_prefix_result: Ok("\n".to_owned()),
+            git_prefix_calls: RefCell::new(0),
             cargo_locate_project_result: None,
             cargo_update_result: Ok(()),
             cargo_update_lockfile_text: None,
@@ -360,6 +371,7 @@ impl Default for FakeCommandRunner {
             generate_lockfile_calls: RefCell::new(Vec::new()),
             cargo_tree_calls: RefCell::new(Vec::new()),
             git_diff_paths: RefCell::new(Vec::new()),
+            git_diff_commits: RefCell::new(Vec::new()),
             git_untracked_paths: RefCell::new(Vec::new()),
             audit_calls: RefCell::new(Vec::new()),
             audit_json_calls: RefCell::new(Vec::new()),
@@ -433,12 +445,25 @@ impl FakeCommandRunner {
     pub(crate) fn with_git_show(mut self, object: &str, text: &str) -> Self {
         self.git_show_results
             .insert(object.to_owned(), Ok(text.to_owned()));
+        if let Some((reference, path)) = object.split_once(':') {
+            self.git_show_results.insert(
+                format!("{}:{path}", fake_commit(reference)),
+                Ok(text.to_owned()),
+            );
+        }
         self
     }
 
     pub(crate) fn with_git_show_error(mut self, object: &str, detail: &str) -> Self {
         self.git_show_results
             .insert(object.to_owned(), Err(detail.to_owned()));
+        if let Some((reference, path)) = object.split_once(':') {
+            let commit = fake_commit(reference);
+            self.git_show_results.insert(
+                format!("{commit}:{path}"),
+                Err(detail.replace(&format!("'{reference}'"), &format!("'{commit}'"))),
+            );
+        }
         self
     }
 
@@ -620,7 +645,22 @@ impl CommandRunner for FakeCommandRunner {
         current_dir: &Path,
         reference: &str,
     ) -> Result<String, cargo_barbican::RunnerError> {
-        self.git_show(current_dir, &format!("{reference}^{{commit}}"))
+        let _ = current_dir;
+        self.git_resolve_calls
+            .borrow_mut()
+            .push(reference.to_owned());
+        self.git_show_results
+            .get(&format!("{reference}^{{commit}}"))
+            .cloned()
+            .unwrap_or_else(|| Ok(fake_commit(reference)))
+            .map_err(runner_exit)
+    }
+    fn git_workspace_prefix(
+        &self,
+        _current_dir: &Path,
+    ) -> Result<String, cargo_barbican::RunnerError> {
+        *self.git_prefix_calls.borrow_mut() += 1;
+        self.git_prefix_result.clone().map_err(runner_exit)
     }
     fn environment_variable(&self, name: &str) -> Option<OsString> {
         self.environment.get(name).cloned()
@@ -688,8 +728,12 @@ impl CommandRunner for FakeCommandRunner {
             .map_err(runner_exit)
     }
 
-    fn cargo_metadata(&self, _current_dir: &Path) -> Result<String, cargo_barbican::RunnerError> {
+    fn cargo_metadata(&self, current_dir: &Path) -> Result<String, cargo_barbican::RunnerError> {
         *self.cargo_metadata_calls.borrow_mut() += 1;
+        if let Some(text) = &self.cargo_metadata_lockfile_text {
+            fs::write(current_dir.join("Cargo.lock"), text)
+                .map_err(cargo_barbican::RunnerError::Spawn)?;
+        }
         self.cargo_metadata_result.clone().map_err(runner_exit)
     }
 
@@ -733,11 +777,18 @@ impl CommandRunner for FakeCommandRunner {
         self.cargo_updates
             .borrow_mut()
             .push((package_id.to_owned(), version.to_owned()));
-        let result = self.cargo_update_result.clone().map_err(runner_exit);
-
-        if result.is_ok()
-            && let Some(lockfile_text) = &self.cargo_update_lockfile_text
-        {
+        let (text, result) = self
+            .cargo_update_steps
+            .get(self.cargo_updates.borrow().len() - 1)
+            .cloned()
+            .unwrap_or_else(|| {
+                (
+                    self.cargo_update_lockfile_text.clone(),
+                    self.cargo_update_result.clone(),
+                )
+            });
+        let result = result.map_err(runner_exit);
+        if let Some(lockfile_text) = &text {
             fs::write(current_dir.join("Cargo.lock"), lockfile_text)
                 .map_err(cargo_barbican::RunnerError::Spawn)?;
         }
@@ -757,7 +808,7 @@ impl CommandRunner for FakeCommandRunner {
             .clone()
             .map_err(runner_exit);
 
-        if result.is_ok() {
+        if result.is_ok() || self.cargo_generate_lockfile_text.is_some() {
             let lockfile_text = self
                 .cargo_generate_lockfile_text
                 .as_deref()
@@ -779,8 +830,10 @@ impl CommandRunner for FakeCommandRunner {
     fn git_diff(
         &self,
         _current_dir: &Path,
+        commit: &str,
         paths: &[PathBuf],
     ) -> Result<String, cargo_barbican::RunnerError> {
+        self.git_diff_commits.borrow_mut().push(commit.to_owned());
         self.git_diff_paths.borrow_mut().extend_from_slice(paths);
         self.git_diff_result.clone().map_err(runner_exit)
     }
@@ -2632,4 +2685,17 @@ pub(crate) fn section_between<'a>(text: &'a str, start: &str, end: &str) -> &'a 
     let section_end = after_start.find(end).expect("section should end");
 
     &after_start[..section_end]
+}
+
+pub(crate) fn fake_commit(reference: &str) -> String {
+    if matches!(reference.len(), 40 | 64) && reference.bytes().all(|b| b.is_ascii_hexdigit()) {
+        reference.to_owned()
+    } else {
+        format!(
+            "{:040x}",
+            reference.bytes().fold(0_u128, |value, byte| value
+                .wrapping_mul(31)
+                .wrapping_add(u128::from(byte)))
+        )
+    }
 }

@@ -24,6 +24,7 @@ pub enum CommandError {
     GitRead {
         object: String,
         source: RunnerError,
+        guidance: String,
     },
     InvalidEnvironment {
         name: &'static str,
@@ -118,12 +119,16 @@ impl fmt::Display for CommandError {
                     escape_diagnostic_for_terminal(&format!("unable to read {path}: {source}"))
                 )
             }
-            Self::GitRead { object, source } => {
+            Self::GitRead {
+                object,
+                source,
+                guidance,
+            } => {
                 write!(
                     formatter,
                     "{}",
                     escape_diagnostic_for_terminal(&format!(
-                        "unable to read {object} from git: {source}"
+                        "unable to read {object} from git: {source}; {guidance}"
                     ))
                 )
             }

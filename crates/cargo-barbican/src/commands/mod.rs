@@ -2,6 +2,7 @@ mod age;
 mod age_lock;
 mod assess;
 mod audit;
+mod baseline;
 mod diff_render;
 mod errors;
 mod gatehouse;
@@ -50,7 +51,6 @@ pub(crate) use loaders::{
     NativeDelegatedIgnore, ReviewRecordStatusCache, ReviewedReleaseAgeExceptions,
     check_review_record_paths, collect_reviewed_release_age_exceptions,
     load_base_manifest_dependencies, load_config, load_current_lockfile,
-    load_current_lockfile_text, load_current_lockfile_with_text,
     load_current_manifest_direct_and_workspace_requirements,
     load_current_manifest_direct_requirements, load_effective_cargo_configs,
     load_git_base_lockfile, load_lockfile_from_path, load_manifest_dependencies_from_root,

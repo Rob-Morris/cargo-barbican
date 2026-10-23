@@ -16,6 +16,9 @@ fn review_prints_no_changes_message_for_empty_diff() {
 
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(stderr.is_empty());
+    assert_eq!(*runner.git_resolve_calls.borrow(), ["HEAD"]);
+    assert_eq!(*runner.git_diff_commits.borrow(), [fake_commit("HEAD")]);
+    assert_eq!(*runner.git_prefix_calls.borrow(), 0);
     assert_eq!(
         String::from_utf8(stdout).expect("stdout should be utf8"),
         "No Rust dependency policy changes detected.\n"

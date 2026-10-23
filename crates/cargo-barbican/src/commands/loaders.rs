@@ -231,22 +231,6 @@ pub(crate) fn load_current_lockfile(
     load_lockfile_from_path(&current_dir.join(lockfile), &display)
 }
 
-pub(crate) fn load_current_lockfile_with_text(
-    current_dir: &Path,
-    lockfile: &Path,
-) -> Result<(barbican::Lockfile, String), CommandError> {
-    let display = lockfile.display().to_string();
-    load_lockfile_with_text_from_path(&current_dir.join(lockfile), &display)
-}
-
-pub(crate) fn load_current_lockfile_text(
-    current_dir: &Path,
-    lockfile: &Path,
-) -> Result<String, CommandError> {
-    let display = lockfile.display().to_string();
-    load_lockfile_text_from_path(&current_dir.join(lockfile), &display)
-}
-
 pub(crate) fn load_lockfile_text_from_path(
     path: &Path,
     display: &str,
@@ -291,22 +275,23 @@ fn load_lockfile_with_text_from_path(
 pub(crate) fn load_git_base_lockfile<R>(
     current_dir: &Path,
     runner: &R,
-    base_ref: &str,
+    baseline: &super::baseline::GitBaseline,
     lockfile: &Path,
 ) -> Result<barbican::Lockfile, CommandError>
 where
     R: CommandRunner + ?Sized,
 {
-    let base_object = format!("{base_ref}:{}", lockfile.display());
+    let base_object = baseline.object(current_dir, lockfile)?;
     let base_lockfile_text = runner
         .git_show(current_dir, &base_object)
         .map_err(|source| CommandError::GitRead {
-            object: base_object,
+            object: baseline.describe(&base_object),
             source,
+            guidance: baseline.alternatives.clone(),
         })?;
 
     parse_lockfile(&base_lockfile_text).map_err(|source| CommandError::LockfileParse {
-        path: format!("{base_ref}:{}", lockfile.display()),
+        path: baseline.describe(&base_object),
         source,
     })
 }
@@ -409,7 +394,7 @@ pub(crate) fn load_manifest_texts_from_root(
 pub(crate) fn load_base_manifest_dependencies<R>(
     current_dir: &Path,
     runner: &R,
-    base_ref: &str,
+    baseline: &super::baseline::GitBaseline,
 ) -> Result<Vec<barbican::CargoManifestDependency>, CommandError>
 where
     R: CommandRunner + ?Sized,
@@ -419,7 +404,7 @@ where
 
     for manifest_path in manifest_paths {
         let relative_display = manifest_path.display().to_string();
-        let text = match read_base_manifest_text(current_dir, runner, base_ref, &relative_display)?
+        let text = match read_base_manifest_text(current_dir, runner, baseline, &relative_display)?
         {
             Some(text) => text,
             None => continue,
@@ -433,20 +418,34 @@ where
 fn read_base_manifest_text<R>(
     current_dir: &Path,
     runner: &R,
-    base_ref: &str,
+    baseline: &super::baseline::GitBaseline,
     relative_path: &str,
 ) -> Result<Option<String>, CommandError>
 where
     R: CommandRunner + ?Sized,
 {
-    let object = format!("{base_ref}:{relative_path}");
+    let object = baseline.object(current_dir, Path::new(relative_path))?;
+    let actual_path = object
+        .split_once(':')
+        .expect("captured object has commit separator")
+        .1;
 
     match runner.git_show(current_dir, &object) {
         Ok(text) => Ok(Some(text)),
-        Err(error) if git_show_reports_missing_path_at_ref(&error, relative_path, base_ref) => {
+        Err(error)
+            if git_show_reports_missing_path_at_ref(
+                &error,
+                actual_path,
+                &baseline.identity.commit,
+            ) =>
+        {
             Ok(None)
         }
-        Err(source) => Err(CommandError::GitRead { object, source }),
+        Err(source) => Err(CommandError::GitRead {
+            object: baseline.describe(&object),
+            source,
+            guidance: baseline.alternatives.clone(),
+        }),
     }
 }
 

@@ -115,7 +115,9 @@ The current comparative baseline behaviour is:
   explicit baseline directory with `--base-dir`
 - `resolve` generates `Cargo.lock` for the current manifests and rechecks newly
   selected crates.io versions against an internal pre-resolve `Cargo.lock`
-  snapshot
+  snapshot; genuine first creation checks every registry selection. Its shared
+  update guard captures every mutation, restores original bytes/permissions or
+  prior absence on supported failures, and preserves detected external changes
 - `update` rechecks against an internal pre-update `Cargo.lock` snapshot
   rather than a git ref
 - `update --dry-run` now previews the would-be `Cargo.lock` diff without

@@ -9,7 +9,7 @@ pub const CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates
 const GIT_SOURCE_PREFIX: &str = "git+";
 const SOURCE_PRECISE_SEPARATOR: char = '#';
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Lockfile {
     packages: Vec<LockedPackage>,
 }

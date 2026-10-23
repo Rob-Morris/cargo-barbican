@@ -722,9 +722,16 @@ fn assess_reports_non_missing_git_show_errors_for_base_manifests() {
 
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stdout.is_empty());
-    assert!(String::from_utf8(stderr).expect("stderr should be utf8").contains(
-        "FAIL unable to read HEAD:Cargo.toml from git: command exited with status 1; stderr: fatal: bad object HEAD"
-    ));
+    let error = String::from_utf8(stderr).expect("stderr should be utf8");
+    assert!(
+        error.contains(&format!(
+            "FAIL unable to read {}:Cargo.toml",
+            fake_commit("HEAD")
+        )),
+        "{error}"
+    );
+    assert!(error.contains("requested baseline \"HEAD\""), "{error}");
+    assert!(error.contains("stderr: fatal: bad object HEAD"), "{error}");
 }
 
 #[test]
