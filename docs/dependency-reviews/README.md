@@ -180,3 +180,9 @@ YYYY-MM-DD-short-subject.md
 
 - Remaining risks or next actions:
 ```
+
+
+Consumer projects receive a separate reusable
+[record template](../../templates/dependency-reviews/record-template.md) with a
+pending marker. Our local conventions above remain deliberate repo policy;
+never cite a template as completed evidence or remove its marker before review.

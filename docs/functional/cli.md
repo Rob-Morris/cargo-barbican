@@ -312,14 +312,15 @@ cargo barbican gatehouse candidate [--preserve-sandbox] <crate@version>
     manual inspection and prints the sandbox path. Any failed required evidence
     step returns exit 1 after rendering the failure in the dossier.
 
-cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>]
+cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>] [--pre-commit-hook]
     Create the explicit policy scaffold for adopting cargo-barbican in a repo.
-    The first slice creates missing:
+    It creates missing:
     - `barbican.toml`
     - `deny.toml`
     - `reviewed-targets.toml`
     - `docs/dependency-reviews/`
     - `docs/dependency-reviews/README.md`
+    - `docs/dependency-reviews/record-template.md` — reusable PENDING starting point
     - `rust-toolchain.toml`, only when absent and `--toolchain` supplies an
       exact full release, numbered beta prerelease, or dated nightly; the
       generated file uses rustup's `minimal` profile and reports that choice
@@ -357,14 +358,31 @@ cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>]
     For Windows, see the project-level Platform Support posture in
     `docs/architecture/overview.md`; until full Windows support lands, run
     from trusted checkouts without junctions in scaffold paths.
-    The command prints an action report and next-step guidance pointing to
-    the manual adoption guide, offering the CI enforcement workflow (or
-    confirming it when `--ci` wrote one), and offering the advisory
-    client-side pre-commit hook shipped at `templates/hooks/pre-commit`
-    (installable via `git config core.hooksPath` or by copying it into
-    `.git/hooks/pre-commit`), which runs the cheap `pin check` and
-    `inventory --enforce` subset and is skippable with `git commit
-    --no-verify`.
+    `--pre-commit-hook` optionally copies the embedded advisory helper to
+    `.barbican/hooks/pre-commit` at the discovered Cargo workspace root without
+    executable bits. Plain init creates no hook directory. Both routes link the
+    version-matched manual-install/existing-hook integration guide. No chmod,
+    Git configuration, hook execution or additional metadata/scanner/fetch work
+    is added inside init after ordinary workspace discovery.
+    The template follows usable config/review-directory gating; a separately
+    blocked toolchain does not suppress review docs. Requested hook copying is
+    independent of report-level config/toolchain blocks, which still return
+    non-zero. Fatal discovery/I/O failures can stop later work.
+    Both new outputs use exclusive creation: late existing leaves fail without
+    overwrite. Existing regular bytes/modes remain, unsafe initial types fail.
+    Write failure after creation identifies a potentially partial file for
+    manual inspection/removal before rerun; presence is not completeness.
+    Static single-writer containment remains; no hostile-race guarantee.
+    Process/template files are consumer-owned; completed records are untouched.
+    The pure composer remains canonical; Markdown headings are not parsed as
+    policy. The actual pending marker keeps copied templates unapproved.
+    The report names created/preserved/blocked paths and conditional next steps.
+    Stable package versions link to matching vX.Y.Z docs; prereleases label a
+    development/main fallback. These references are not binary attestation;
+    unpublished candidates use matching checkout docs if no tag exists. No
+    runtime URL probe/fallback occurs. Hook activation needs Cargo-root cwd,
+    usable preinstalled tooling/PATH/cache and explicit consumer integration.
+    CI requires owner-configured required checks/protection; hooks are advisory.
 
 cargo barbican inventory [--enforce]
     Print a read-only, whole-repo dependency inventory and policy-coverage

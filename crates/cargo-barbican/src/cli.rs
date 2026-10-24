@@ -355,7 +355,9 @@ pub(crate) enum PolicyCommand {
             created only from an explicit exact --toolchain value. Does not review or certify \
             existing dependencies. With \
             --ci, also emits a ready-to-run CI enforcement workflow, failing closed rather than \
-            overwriting an existing workflow file."
+            overwriting an existing workflow file. With --pre-commit-hook, copies a disabled \
+            advisory hook to .barbican/hooks/pre-commit; review and explicitly activate it. \
+            See the version-matched adoption and manual hook guides printed by init."
     )]
     Init {
         #[arg(
@@ -370,6 +372,11 @@ pub(crate) enum PolicyCommand {
             help = "Also emit a CI enforcement workflow that runs the gate (fails closed if the workflow file already exists)"
         )]
         ci: Option<CiSystem>,
+        #[arg(
+            long,
+            help = "Copy an optional non-executable hook to .barbican/hooks/pre-commit (requires explicit activation)"
+        )]
+        pre_commit_hook: bool,
     },
 }
 

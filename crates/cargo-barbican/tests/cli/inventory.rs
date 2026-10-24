@@ -708,6 +708,7 @@ fn plain_inventory_stays_informational_on_uncovered_direct_dependency() {
         stdout.contains("observational uncovered transitive crates.io packages: 0"),
         "{stdout}"
     );
+    assert!(stdout.contains("cargo barbican pin add sneaky@3.0.0"));
     // The uncovered direct dependency is still visible as a policy gap.
     assert!(stdout.contains(
         "resolved crates.io package is not covered by any reviewed family: sneaky@3.0.0"
@@ -1226,4 +1227,65 @@ fn inventory_fails_when_lockfile_is_missing() {
         String::from_utf8(stderr).expect("stderr should be utf8"),
         "FAIL Cargo.lock: lockfile not found\n"
     );
+}
+
+#[test]
+fn informational_next_actions_distinguish_registry_version_and_checksum_drift_from_source_conflicts()
+ {
+    for change in ["version", "checksum", "git-source"] {
+        let root = fresh_temp_dir();
+        write_covered_enforce_fixture(&root);
+        let path = root.join("reviewed-targets.toml");
+        let mut policy = fs::read_to_string(&path).unwrap();
+        match change {
+            "version" => policy = policy.replace("1.0.228", "1.0.227"),
+            "checksum" => policy = policy.replace("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            "git-source" => policy = policy.replace(r#"{ version = "1.0.228", checksum_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }"#, r#"{ source = "git", version = "1.0.228", url = "https://example.invalid/serde.git", rev = "0123456789abcdef0123456789abcdef01234567" }"#),
+            _ => unreachable!(),
+        }
+        fs::write(path, policy).unwrap();
+        let runner =
+            FakeCommandRunner::default().with_frozen_metadata(covered_enforce_metadata(&[], &[]));
+        let (exit, output, stderr) = run_inventory_with_runner(&root, &runner);
+        assert_eq!(exit, ExitCode::SUCCESS);
+        assert!(stderr.is_empty());
+        let actions = output.split("Suggested next actions:").nth(1).unwrap();
+        assert!(!actions.contains("pin add serde@"), "{change}: {actions}");
+        if change == "git-source" {
+            assert!(
+                actions.contains("review source/target policy manually"),
+                "{actions}"
+            );
+            assert!(!actions.contains("use `pin refresh`"));
+        } else {
+            assert!(
+                actions.contains("serde: existing-family drift"),
+                "{change}: {actions}"
+            );
+            assert!(actions.contains("use `pin refresh`"));
+        }
+    }
+}
+
+#[test]
+fn pending_records_and_degraded_graphs_do_not_suggest_duplicate_pin_add() {
+    let root = fresh_temp_dir();
+    write_covered_enforce_fixture(&root);
+    fs::write(
+        root.join("docs/dependency-reviews/serde.md"),
+        "BARBICAN-REVIEW-PENDING",
+    )
+    .unwrap();
+    let runner =
+        FakeCommandRunner::default().with_frozen_metadata(covered_enforce_metadata(&[], &[]));
+    let (_, output, _) = run_inventory_with_runner(&root, &runner);
+    let actions = output.split("Suggested next actions:").nth(1).unwrap();
+    assert!(actions.contains("Complete the existing review for family serde-family"));
+    assert!(!actions.contains("pin add serde@"));
+    let runner = FakeCommandRunner::default().with_frozen_metadata_error("cold frozen inputs");
+    let (_, output, _) = run_inventory_with_runner(&root, &runner);
+    let actions = output.split("Suggested next actions:").nth(1).unwrap();
+    assert!(actions.contains("Resolve live graph surface collection"));
+    assert!(!actions.contains("pin add"));
+    assert!(!actions.contains("use `pin refresh`"));
 }

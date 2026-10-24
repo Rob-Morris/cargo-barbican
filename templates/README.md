@@ -13,14 +13,16 @@ documentation that *uses* cargo-barbican.
   consumer repo root when checked-pin enforcement is needed. The current Rust
   gate supports structured crates.io `resolved` entries with reviewed
   `checksum_sha256` digests.
-- `dependency-reviews/README.md` — record template + naming conventions.
-  Copy to consumer's `docs/dependency-reviews/`.
-- `hooks/pre-commit` — advisory client-side git pre-commit hook. It runs the
-  cheap subset of the gate (`cargo barbican pin check` and
-  `cargo barbican inventory --enforce`) and is skippable with
-  `git commit --no-verify`. Install it by pointing `git config core.hooksPath`
-  at this directory, or by copying it to `.git/hooks/pre-commit`. The
-  server-side CI workflow is the authoritative gate, not this hook.
+- `dependency-reviews/README.md` — consumer-owned process and naming conventions.
+- `dependency-reviews/record-template.md` — reusable PENDING record; complete
+  evidence and the decision before removing the marker. Copy both review files
+  to the consumer's `docs/dependency-reviews/`; preserve existing content.
+- `hooks/pre-commit` — optional advisory helper (`pin check` and
+  `inventory --enforce`). `policy init --pre-commit-hook` copies it to
+  `.barbican/hooks/pre-commit` without executable bits. Plain init links the
+  [manual installation/existing-hook guide](../docs/user/ci.md#pre-commit-hook).
+  Activation stays explicit; review PATH, Cargo cwd and existing hooks first.
+  CI needs operator-configured required checks/branch protection.
 
 `barbican.toml`, `deny.toml`, `reviewed-targets.toml`, and the
 `docs/dependency-reviews/` scaffold are also created directly by
@@ -40,7 +42,7 @@ additionally emits a ready-to-run enforcement workflow to
 Each template file shipped to a consumer should include a header comment:
 
 ```
-# Synced from cargo-barbican v0.34.0
+# Synced from cargo-barbican v0.35.0
 ```
 
 Template-specific follow-up comments may differ. Some copied templates, such

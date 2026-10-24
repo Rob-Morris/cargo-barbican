@@ -21,9 +21,17 @@ Adoption requires a rustup-managed Rust installation with `rustup`, `cargo`,
 because the active toolchain cannot then be reconciled with native
 `rust-toolchain.toml` policy.
 
-## 1. Create The Policy Scaffold
+## 1. Choose the toolchain and scaffold policy
 
-From the consumer repository root:
+After the [reviewed installation](integration.md#consumer-flow) and
+[configured prerequisites](integration.md#prerequisites), work from the intended
+Cargo workspace root. Choose an exact channel, rather than copying a default:
+
+```sh
+cargo barbican policy init --toolchain <exact-channel>
+```
+
+For example, **only if 1.95.0 is the compiler you deliberately selected**:
 
 ```bash
 cargo barbican policy init --toolchain 1.95.0
@@ -35,7 +43,8 @@ The command creates missing scaffold files:
 - `deny.toml`
 - `reviewed-targets.toml`
 - `docs/dependency-reviews/`
-- `docs/dependency-reviews/README.md`
+- `docs/dependency-reviews/README.md` — consumer-owned process
+- `docs/dependency-reviews/record-template.md` — reusable pending starting point
 - `rust-toolchain.toml`, when and only when `--toolchain` supplies an exact
   stable release, numbered beta prerelease such as `1.96.0-beta.2`, or dated
   nightly; generated files use rustup's `minimal` profile, which the init
@@ -48,13 +57,33 @@ and bare versioned beta channels such as `1.96.0-beta` are not accepted. A
 missing or invalid pin blocks `--ci github`, because the
 generated gate must not start from an unpinned compiler.
 
+Install the chosen compiler explicitly, then diagnose agreement:
+
+```sh
+rustup toolchain install 1.95.0
+cargo barbican toolchain check
+```
+
+The numeric channel above belongs to the same worked example, not a universal
+recommendation. Ordinary Cargo/rustup bootstrap and configuration still apply;
+init is not an executable sandbox or a promise to suppress rustup downloads.
+
 Scaffold items are created independently in dependency order. For example,
 dependency-review docs may still be created while a malformed existing
 `reviewed-targets.toml` is reported as blocked.
 
-Existing regular files are preserved. Wrong-type scaffold paths, including
+The record template follows usable config/review-directory gating; a blocked
+toolchain does not suppress those docs. Requested `--pre-commit-hook` copying
+is independent of report-level config/toolchain blocks, but those blocks still
+make init fail. Fatal workspace/I/O errors can stop later outputs.
+
+Existing regular files and modes are preserved. Wrong-type scaffold paths, including
 symlinks at scaffold locations or existing scaffold ancestors, fail closed and
 must be resolved manually.
+
+New template/hook writes use exclusive creation. If a write fails after creating
+its file, inspect/remove the retained partial file manually before rerunning;
+init preserves an existing regular file without certifying its completeness.
 
 For Windows, see the project-level
 [Platform Support](../architecture/overview.md#platform-support) posture before
@@ -97,6 +126,14 @@ reviewed initial commit at the appropriate point; do not fabricate an empty
 lockfile or commit unreviewed dependencies just to silence a comparison.
 Generated first-PR evidence has no empty-baseline fallback.
 
+## Existing locked projects
+
+Start with `cargo barbican inventory`; do not resolve a valid existing graph
+merely to adopt policy. Review the labelled direct/source/execution backlog.
+Existing registry-family drift uses `pin refresh` or explicit-baseline
+`gatehouse re-pin`, followed by the reopened review, rather than duplicate
+`pin add`. Preserve custom process, templates, hooks, workflows and records.
+
 ## 2. Review Current Dependencies
 
 Treat the existing dependency graph as inventory to review, not as already
@@ -127,6 +164,36 @@ resolved `Cargo.lock` facts: it appends the family stub (version plus
 `checksum_sha256`) to `reviewed-targets.toml` and creates the review-record
 stub under `docs/dependency-reviews/`. The scaffold is not the review itself —
 complete the record before treating the family as reviewed.
+
+Every new stub is PENDING. The sibling `record-template.md` is also PENDING
+when copied as a record; never cite that reusable template as completed evidence.
+Complete the review and record the decision **before** removing the pending
+marker. The classifier checks text/marker presence, not review authenticity.
+For manual records, tailor the template; first-principles reviews need no
+inherited corpus, and tool installs need no fictional graph family.
+
+### Evidence without a historical baseline
+
+For each exact registry selection, gather independent evidence even before a
+first reviewed Git commit exists. For example, substituting the selected exact
+crate/version:
+
+```sh
+cargo barbican age semver@1.0.28
+cargo barbican inspect semver@1.0.28
+cargo barbican audit
+```
+
+Install the configured scanners before `audit`. Review the output and native
+exit status of each command independently; do not chain them with `&&` if that
+would hide later evidence after a finding. A non-zero inspect can be useful
+evidence of execution surfaces or IOC findings, not permission to proceed.
+Investigate IOC signals separately: later gates do not automatically accept or
+re-run them. Record source/release notes, exact checksum, advisory results,
+execution surfaces, reasoned decisions and commands before completing review.
+`inspect` is registry-only; Git uses the [source review guide](git-sources.md),
+full commit/URL identity for every locked Git package and separate native
+source permission. Tool-install trust remains independent of graph coverage.
 
 Use structured crates.io `resolved` entries with `checksum_sha256` wherever
 possible so `pin check` can reconcile the reviewed artefact against
@@ -187,22 +254,21 @@ checks. A repo-local
 
 ## 4. Run The Enforcement Gate
 
-`audit` delegates to `cargo-deny` (and `cargo-audit` when configured), so
-install both before running it, following the same review-then-pin approach the
-tool asks of its own dependents:
+Install the scanners chosen by `[delegates]`, using the reviewed
+[prerequisite instructions](integration.md#prerequisites). The default selects
+cargo-deny; cargo-audit is needed only when configured. After deliberate review:
 
-```bash
-cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
-```
-
-A missing delegate fails `audit` closed with an actionable install line; see
-[integration.md](integration.md#prerequisites) for the detail. When
-reviewed-target policy is ready, run the direct coverage floor and the
-pre-release workflow:
-
-```bash
+```sh
+cargo barbican gatehouse policy-check
 cargo barbican gatehouse pre-release
 ```
+
+`policy-check` checks toolchain, direct coverage, audit and strict pins without
+workspace build/test. `pre-release` also runs locked execution. Both require
+at least one active reviewed Rust family **even with no dependencies**; a
+successful standalone `pin check` skip is not completed adoption. Do not add a
+dummy family to get a dependency-free project green. Genuine empty-graph
+strict admission remains a separate policy decision.
 
 `audit` and `verify` stay separate primitives on purpose. After toolchain
 conformance, the reviewed-target portion of `verify` is derived from checked-in
@@ -235,22 +301,34 @@ coverage; declared execution-surface enforcement is a documented follow-up.
 The pre-commit template runs the cheaper standalone floor alongside `pin check`
 for earlier feedback.
 
-## Manual Template Adoption
+## 5. Activate CI and optional local feedback
 
-If `policy init` is not available, copy the templates from the pinned
-cargo-barbican version instead. Review the copied files before committing them.
+After adoption, review generated CI and configure required status checks,
+branch protection and policy/workflow review. Keep scheduled audit to detect
+advisories published after merge. Workflow presence alone does not prevent
+bypass. See [CI](ci.md).
 
-```bash
-cp templates/barbican.toml /path/to/consumer/barbican.toml
-cp templates/deny.toml /path/to/consumer/deny.toml
-cp templates/reviewed-targets.toml /path/to/consumer/reviewed-targets.toml
-mkdir -p /path/to/consumer/docs/dependency-reviews
-cp templates/dependency-reviews/README.md /path/to/consumer/docs/dependency-reviews/README.md
-```
+`policy init --pre-commit-hook` optionally copies `.barbican/hooks/pre-commit`
+without executable bits. Plain init creates no hook directory and links to the
+same [manual install/existing-hook integration instructions](ci.md#pre-commit-hook).
+No hook activation, Git configuration or execution occurs in init. Review first;
+local checks remain advisory and skippable.
 
-If the consumer repo already has a `deny.toml`, keep it and review the diff
-against `templates/deny.toml` manually. `policy init` follows the same
-create-if-missing rule and never overwrites an existing regular file.
+## Recovery at a handoff
+
+| Symptom | Next action |
+|---|---|
+| Frozen metadata lacks cached inputs for a consistent manifest/lock graph | Explicitly review/run `cargo fetch --locked` without `--target`, then retry inventory; include all platform inputs. |
+| Manifest and lockfile intentionally disagree | Use Barbican `resolve`, review new facts and reopen affected reviews. Repeated fetch cannot repair a stale graph. |
+| Toolchain/conformance/executable-control rejection | Run `toolchain check`, preinstall the selected exact toolchain and resolve the reported executable/configuration input. |
+| PENDING/incomplete record | Complete the actual evidence and decision, not just marker removal. |
+| Existing family version/checksum drift | Review the change, then `pin refresh` or explicit-baseline `gatehouse re-pin`; complete reopened evidence. |
+| External path/alternate registry or unavailable Git comparison | Follow the supported source/baseline boundary; no fake baseline, dummy policy or automatic fallback. |
+| Scaffold write failure / wrong-type path | Inspect the named path and any retained partial output; repair manually before rerunning. |
+
+For manual setup and safe upgrades, use the
+[matching-tag scratch-copy workflow](integration.md#manual-template-adoption).
+For day-2 lockfile and baseline diagnostics, see [operations](operations.md#lockfile-mutation-and-baseline-recovery).
 
 ## Exact Git sources
 

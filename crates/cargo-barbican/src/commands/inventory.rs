@@ -86,6 +86,15 @@ pub(super) fn run_inventory<R: CommandRunner + ?Sized>(
         delegation_report,
     )?;
 
+    render_next_actions(
+        stdout,
+        &inventory,
+        reviewed_targets.as_ref(),
+        reviewed_report.as_ref(),
+        &lockfile,
+        &manifest_requirements,
+    )?;
+
     if !enforce {
         return Ok(ExitCode::SUCCESS);
     }
@@ -576,9 +585,35 @@ fn render_inventory(
         writeln!(stdout, "  - {}", render_gap(gap)).map_err(CommandError::Io)?;
     }
 
+    Ok(())
+}
+
+fn render_next_actions(
+    stdout: &mut dyn Write,
+    inventory: &Inventory,
+    reviewed_targets: Option<&barbican::ReviewedTargets>,
+    reviewed_report: Option<&barbican::RustReviewedTargetsReport>,
+    lockfile: &barbican::Lockfile,
+    manifest_requirements: &[CargoManifestDirectRequirement],
+) -> Result<(), CommandError> {
+    let mut drifted = BTreeSet::new();
+    if let Some(report) = reviewed_report {
+        for family in report.families() {
+            for check in family.resolved_checks() {
+                if !check.is_success() {
+                    drifted.insert(check.crate_name());
+                }
+            }
+            for check in family.direct_checks() {
+                if !check.is_success() {
+                    drifted.insert(check.crate_name());
+                }
+            }
+        }
+    }
     writeln!(stdout).map_err(CommandError::Io)?;
     writeln!(stdout, "Suggested next actions:").map_err(CommandError::Io)?;
-    if surfaces_not_collected {
+    if inventory.live_surfaces().is_none() {
         writeln!(
             stdout,
             "  - Resolve live graph surface collection before trusting this inventory report."
@@ -590,13 +625,55 @@ fn render_inventory(
             "  - Run `cargo barbican policy init` to create the reviewed-target scaffold."
         )
         .map_err(CommandError::Io)?;
-    } else if inventory.gaps().is_empty() {
+    } else if inventory.gaps().is_empty() && drifted.is_empty() {
         writeln!(
             stdout,
             "  - Run `cargo barbican gatehouse pre-release` for the complete release gate."
         )
         .map_err(CommandError::Io)?;
     } else {
+        for gap in inventory.gaps() {
+            match gap {
+                InventoryGap::UncoveredResolvedCrate { spec } => {
+                    let already_named = reviewed_targets.is_some_and(|targets| {
+                        targets
+                            .rust_families()
+                            .iter()
+                            .any(|family| family.resolved().contains_key(spec.crate_name()))
+                    });
+                    if !already_named {
+                        writeln!(stdout, "  - {spec}: scaffold uncovered registry coverage with `cargo barbican pin add {spec}`, then complete deliberate review.")
+                            .map_err(CommandError::Io)?;
+                    }
+                }
+                InventoryGap::IncompleteReviewRecord {
+                    family,
+                    review_record,
+                } => {
+                    writeln!(stdout, "  - Complete the existing review for family {} at {}; remove its pending marker only after recording the decision.", escape_render_field(family), escape_render_field(review_record))
+                        .map_err(CommandError::Io)?;
+                }
+                _ => {}
+            }
+        }
+        for crate_name in drifted {
+            let refreshable = reviewed_targets.is_some_and(|targets| {
+                barbican::plan_pin_refresh(
+                    targets,
+                    lockfile,
+                    manifest_requirements,
+                    &[crate_name.to_owned()],
+                )
+                .is_ok()
+            });
+            if refreshable {
+                writeln!(stdout, "  - {crate_name}: existing-family drift; review the change, then use `pin refresh` or `gatehouse re-pin` for registry facts and complete the reopened record.")
+                    .map_err(CommandError::Io)?;
+            } else {
+                writeln!(stdout, "  - {crate_name}: registry refresh cannot reconcile this existing family; run `cargo barbican pin check` and review source/target policy manually.")
+                    .map_err(CommandError::Io)?;
+            }
+        }
         writeln!(
             stdout,
             "  - Review the labelled backlog, update reviewed-targets.toml and review records, then run `cargo barbican gatehouse pre-release`."

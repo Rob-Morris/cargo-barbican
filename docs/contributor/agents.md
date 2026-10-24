@@ -259,3 +259,9 @@ internal owner directly; no persisted receipt or subprocess recursion is added.
 Generated evidence keeps independent strict commands, exact base and native
 failures, with fresh eligibility and recognised-cancellation checks. See the
 functional CLI contract and user CI migration guidance.
+
+
+For adoption changes, run `sh scripts/verify-adoption.sh` in addition to the
+ordinary gate. It requires the reviewed cargo-deny scanner and executes the
+network/scanner journey explicitly on both verify CI platforms. Ordinary cargo
+test covers the hermetic native hook/scaffold subset only.

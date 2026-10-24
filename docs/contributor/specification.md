@@ -464,3 +464,10 @@ rejection only with successful setup, fresh conformance and the explicit base;
 independent command outcomes and original failures remain authoritative.
 Consumer workflows require reviewed manual migration; hosted scheduling proof
 is separate from emitted-string or local summary-rendering tests.
+
+
+Adoption scaffolds preserve consumer-owned process/templates and completed
+evidence. The two new copy-only outputs use exclusive creation and report
+retained partial writes; existing callers retain their own write contracts.
+The optional hook is disabled until explicit activation; no Git/config/runtime
+installer belongs in init.

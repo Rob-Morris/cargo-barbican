@@ -6,19 +6,33 @@ How a consumer repo adopts cargo-barbican.
 
 ## Prerequisites
 
-`cargo barbican audit` delegates to `cargo-deny` and (depending on
-`[delegates]` in `barbican.toml`) `cargo-audit`. Install both with a pinned,
-`--locked` install before relying on `audit`, following the same
-review-then-pin dogma cargo-barbican asks of its own dependents:
+Install a rustup-managed Rust environment with `rustup`, `cargo`, `rustc` and
+`rustdoc` on PATH. `cargo install --git ... --locked` compiles Barbican and its
+locked dependencies from source; allow build time and disk space for that
+bootstrap. Choose/preinstall the consumer's exact compiler separately.
+
+Review the release, source, build options and install identity of each tool,
+including Barbican itself, before installing it. Tool-install records are
+separate from graph-family records. First-principles review is the default;
+inherit only matching, explicitly trusted prior evidence.
+
+Install only what `[delegates]` in `barbican.toml` selects. For the default
+cargo-deny scanner/checks:
 
 ```bash
-cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
+cargo install --locked cargo-deny@0.19.6
 ```
 
-Review each tool's own release before pinning it, the same way you would
-review any other dependency. Both tools are also the first review records a
-consumer repo typically writes — see the manual onboarding guide
-([adoption.md](adoption.md)) and step 3 below.
+When cargo-audit is selected as scanner (or both scanners are selected):
+
+```bash
+cargo install --locked cargo-audit@0.22.1
+```
+
+Cargo-deny is also needed when its non-advisory check groups are configured.
+These are this release's reviewed examples; an adopter owns its tool trust
+choices. Optional nextest has its own setup below; the advisory hook requires
+none of these scanners or a hook framework.
 
 If a required delegate is missing from `PATH`, `cargo barbican audit` detects
 this before delegating and fails closed, naming the tool and the exact install
@@ -75,130 +89,60 @@ See [the command contract](../functional/cli.md) for exact scope and tokens.
 
 ## Consumer flow
 
-1. Install:
+Follow [Adoption](adoption.md) for the ordered new/existing project journey.
+Install this release using its immutable identity:
 
-   ```bash
-   cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.34.0
-   ```
+```bash
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.35.0 cargo-barbican
+```
 
-2. Create the policy scaffold in the consumer repo:
+Init preserves regular policy/process/template files and completed records.
+Optional hook copying and CI generation remain separate choices. See
+[CI](ci.md) for activation, required checks and scheduled audit.
 
-   ```bash
-   cargo barbican policy init --toolchain 1.95.0
-   ```
+## Manual template adoption
 
-   Choose the exact channel for the consumer repo; the example is not a
-   universal recommendation. This creates `rust-toolchain.toml` from that
-   explicit choice with rustup's `minimal` profile (reported in the action
-   output), plus the policy files in the current template set:
-   `barbican.toml`, `deny.toml`, `reviewed-targets.toml`, and
-   `docs/dependency-reviews/README.md`. It preserves existing regular files,
-   reports issues, and does not review or certify existing dependencies.
+From any consumer repository, obtain the source matching the installed
+release into a scratch area. This does not assume an upstream checkout:
 
-   `cargo barbican policy init --toolchain 1.95.0 --ci github` additionally emits a ready-to-run
-   `.github/workflows/barbican.yml` enforcement gate (it fails closed rather
-   than overwriting an existing workflow at that path) and points at the shipped
-   client-side pre-commit hook. See [ci.md](ci.md) for both.
+```sh
+barbican_source=$(mktemp -d)
+git clone --depth 1 --branch v0.35.0 \
+  https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream"
+# Review templates in "$barbican_source/upstream/templates" before copying.
+```
 
-   If you need to adopt manually, check out the same cargo-barbican branch, then
-   copy the available templates:
+Create the missing files only: `barbican.toml`, `deny.toml`,
+`reviewed-targets.toml`, `docs/dependency-reviews/README.md`, and
+`docs/dependency-reviews/record-template.md` from the corresponding template
+paths. Use exclusive creation (for example shell `set -C` plus redirection)
+for an absent destination. Compare any existing files and merge desired changes
+manually. Never copy over local policy, completed records or custom process.
+The shipped deny template includes `[advisories]`; Barbican forces disclosure
+and neutralises native ignores at runtime. Choose `rust-toolchain.toml`
+explicitly; templates cannot decide a compiler for the consumer.
 
-   ```bash
-   git clone https://github.com/Rob-Morris/cargo-barbican /tmp/cargo-barbican
-   cd /tmp/cargo-barbican
-   git checkout main
-
-   cp templates/barbican.toml /path/to/consumer/barbican.toml
-   cp templates/deny.toml /path/to/consumer/deny.toml
-   cp templates/reviewed-targets.toml /path/to/consumer/reviewed-targets.toml
-   mkdir -p /path/to/consumer/docs/dependency-reviews
-   cp templates/dependency-reviews/README.md /path/to/consumer/docs/dependency-reviews/README.md
-   ```
-
-   If the consumer repo already has a `deny.toml`, keep it and review the
-   shipped template manually. `policy init` creates `deny.toml` only when it is
-   absent. The template carries bans/sources posture only; Barbican forces
-   `[advisories]` at runtime during `audit`.
-
-3. Follow the manual onboarding guide:
-
-   - [adoption.md](adoption.md)
-
-   A new project without `Cargo.lock` starts with the
-   [first-lockfile recipe](adoption.md#starting-a-new-project): policy/toolchain
-   setup, `resolve`, inventory and review scaffolds, completed human review,
-   then the pre-release gate. Resolution does not approve the graph or invent a
-   historical comparison baseline.
-
-   In short, write the first inherited review records:
-   - `cargo-barbican` itself, as the tool install
-   - `cargo-audit` and `cargo-deny`, as prerequisite tooling
-
-   Then add active reviewed families to `reviewed-targets.toml` only for
-   dependencies that have been deliberately reviewed. The template starts as
-   scaffolding; it does not certify the existing dependency graph by itself.
-
-4. Run the smoke checks:
-
-   ```bash
-   cargo barbican gatehouse pre-release
-   ```
-
-   `gatehouse pre-release` first proves exact toolchain conformance, enforces
-   the direct-dependency inventory coverage floor, then runs `audit` and
-   `verify`; `verify` reuses the default `pin check` gate before locked
-   build/test execution. `audit` and `verify` stay separate commands because
-   audit also depends on the changing advisory landscape, so scheduled audit
-   runs remain necessary — see
-   [ci.md](ci.md). The reviewed-target gate also
-   expects each active family to point at a real checked-in review record. For
-   crates.io reviewed families, prefer the structured `resolved` form in
-   `reviewed-targets.toml` so `pin check` can verify both the reviewed version
-   and the reviewed tarball `checksum_sha256` against `Cargo.lock`.
-   Intentional too-fresh exceptions can be recorded under
-   `allowed_age_exceptions`, but only for exact crates already present in the
-   same family `resolved` map with `checksum_sha256`.
-   Reviewed advisory findings can be recorded under `allowed_advisories` with
-   the `RUSTSEC-*` id and a `review_by` re-review deadline; `audit` accepts
-   them only while the bound resolved target, checksum, review record, and
-   deadline still hold. Configure `[delegates]` in `barbican.toml` to choose
-   the advisory scanner and delegated `cargo-deny` checks.
-
-5. Update the consumer repo's `AGENTS.md` so dependency-gate instructions
-   point at `cargo barbican` instead of a manual process.
-
-6. Wire the gates into CI. `cargo barbican policy init --ci github` emits a
-   ready-to-run `.github/workflows/barbican.yml` gate, and the shipped
-   `templates/hooks/pre-commit` hook (`pin check` + `inventory --enforce`)
-   installs via `git config core.hooksPath` or a copy into
-   `.git/hooks/pre-commit` for fast local feedback. See [ci.md](ci.md) for the
-   worked GitHub Actions example, which gates belong on pull requests versus
-   scheduled runs, and the hook install instructions.
+The independent [manual hook recipe](ci.md#pre-commit-hook) uses this same
+matching-tag scratch checkout. Remove the scratch directory after reviewing
+and copying desired files.
 
 ## Versioning and re-sync
 
-During the insiders window, consumers install from the immutable release tag.
-Template files still include a synced version header so copied policy
-files can be compared against the cargo-barbican repo version they came from.
-Only the version line is common to every template; the review-record template
-is the strictest, telling you not to edit the copy directly:
+Every shipped template carries `Synced from cargo-barbican v0.35.0` provenance.
+The process README and record template are consumer-owned and may be tailored.
+On upgrade, install the reviewed immutable release, obtain its templates in a
+scratch checkout as above, and review diffs before merging desired changes.
+Rerun init to add missing outputs; it preserves existing regular files and
+modes, so presence is not a claim of completeness or current upstream parity.
+Update the tool-install review with the actual version/build decision. Existing
+completed dependency reviews are not invalidated by a template upgrade.
 
-```text
-# Synced from cargo-barbican v0.34.0
-# Edit upstream and re-sync; do not edit this file directly.
-```
-
-The policy files you are meant to tailor — `barbican.toml` and
-`reviewed-targets.toml` — instead carry a header inviting local edits after
-copying.
-
-When cargo-barbican releases a new version, the consumer:
-
-1. Re-runs the copy step from the updated immutable tag.
-2. Reviews the diff.
-3. Updates the tool-install review record to cite the new version.
-
-There is no automatic sync mechanism today. Re-sync is deliberate and reviewed.
+Generated documentation references use the compiled package version's tag.
+They are navigation, not binary attestation. An unpublished ordinary-version
+candidate may have no tag yet: use those paths in its matching local source
+checkout. A prerelease prints a labelled development/main link which may
+differ from the build. There is no runtime URL probe or silent fallback, and
+release install/CI pins remain immutable.
 
 ## Exact Git sources
 

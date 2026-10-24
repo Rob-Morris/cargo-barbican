@@ -73,6 +73,10 @@ pub enum CommandError {
         path: String,
         source: io::Error,
     },
+    ScaffoldPartialWrite {
+        path: String,
+        source: io::Error,
+    },
     WorkspaceRootNotFound {
         start_dir: String,
     },
@@ -229,6 +233,15 @@ impl fmt::Display for CommandError {
                     ))
                 )
             }
+            Self::ScaffoldPartialWrite { path, source } => {
+                write!(
+                    formatter,
+                    "{}",
+                    escape_diagnostic_for_terminal(&format!(
+                        "unable to finish policy scaffold {path}: {source}; a partial file may remain: inspect it and remove it manually before rerunning init; an existing regular file is preserved, not certified complete"
+                    ))
+                )
+            }
             Self::WorkspaceRootNotFound { start_dir } => {
                 write!(
                     formatter,
@@ -315,7 +328,9 @@ impl std::error::Error for CommandError {
             Self::ManifestRead { source, .. } => Some(source),
             Self::ReviewedTargetsParse { source, .. } => Some(source),
             Self::ReviewedTargetsRead { source, .. } => Some(source),
-            Self::ScaffoldIo { source, .. } => Some(source),
+            Self::ScaffoldIo { source, .. } | Self::ScaffoldPartialWrite { source, .. } => {
+                Some(source)
+            }
             Self::WorkspaceRootNotFound { .. } => None,
             Self::WorkspaceRootDiscovery { source, .. } => Some(source),
             Self::WorkspaceRootOutput { .. } => None,

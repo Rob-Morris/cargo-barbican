@@ -92,3 +92,5 @@ jobs:
         # `cargo fetch` with no --target populates them all.
         run: cargo fetch --locked
       - run: sh scripts/verify.sh
+      - name: Required real-scanner adoption journey
+        run: sh scripts/verify-adoption.sh

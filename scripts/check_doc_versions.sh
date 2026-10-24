@@ -90,9 +90,9 @@ assert_not_contains() {
 assert_contains README.md "badge/version-$crate_version-blue" "current version badge"
 assert_contains README.md "--tag v$crate_version" "immutable release install tag"
 assert_contains README.md "badge/Rust-$rust_version-" "current Rust badge"
-assert_contains README.md "cargo-deny@0.19.6 cargo-audit@0.22.1" "reviewed delegate versions"
 assert_contains docs/user/integration.md "--tag v$crate_version" "immutable release install tag"
-assert_contains docs/user/integration.md "cargo-deny@0.19.6 cargo-audit@0.22.1" "reviewed delegate versions"
+assert_contains docs/user/integration.md "cargo-deny@0.19.6" "reviewed cargo-deny pin"
+assert_contains docs/user/integration.md "cargo-audit@0.22.1" "reviewed cargo-audit pin"
 assert_contains docs/user/ci.md "--tag v$crate_version" "immutable release install tag"
 assert_contains docs/user/ci.md "cargo-deny@0.19.6 cargo-audit@0.22.1" "reviewed delegate versions"
 assert_contains docs/user/ci.md "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10" "pinned checkout action"
@@ -130,3 +130,9 @@ for template in $template_files; do
   assert_contains "$template" "$sync_header" "template sync header"
 done
 IFS=$old_ifs
+
+assert_contains templates/dependency-reviews/record-template.md "BARBICAN-REVIEW-PENDING" "pending reusable record"
+assert_contains templates/dependency-reviews/README.md "blob/v$crate_version/docs/user/adoption.md" "version-matched adoption reference"
+assert_contains docs/user/ci.md "--branch v$crate_version" "matching-tag manual hook source"
+assert_contains docs/user/integration.md "--branch v$crate_version" "matching-tag manual template source"
+assert_not_contains docs/user/integration.md "git checkout main" "mutable template-copy recipe"

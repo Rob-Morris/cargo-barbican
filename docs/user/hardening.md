@@ -263,3 +263,10 @@ For fresh policy without workspace execution, `gatehouse policy-check` composes
 existing toolchain, direct coverage, audit and strict pin owners. Its PASS does
 not certify a release or an execution cache. Keep the full `gatehouse pre-release`
 release check and consumer-owned execution identity; see [integration](integration.md#policy-checks-without-buildtest).
+
+
+Optional local-hook copying never activates enforcement. Review existing hook
+configuration, Cargo cwd and GUI PATH before [manual integration](ci.md#pre-commit-hook).
+Required CI checks, branch protection and policy/workflow review remain
+repository-owner controls; neither a copied hook nor a workflow alone prevents
+bypass.

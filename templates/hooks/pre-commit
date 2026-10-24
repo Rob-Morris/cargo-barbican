@@ -1,5 +1,5 @@
 #!/bin/sh
-# Synced from cargo-barbican v0.34.0
+# Synced from cargo-barbican v0.35.0
 #
 # Advisory client-side pre-commit hook for cargo-barbican.
 #
@@ -11,13 +11,16 @@
 # It deliberately does NOT run `cargo barbican verify` (a full build and test),
 # which is too slow to run on every commit.
 #
-# This hook is advisory and skippable with `git commit --no-verify`. It is a
-# convenience, not the gate: the authoritative gate is the server-side
-# .github/workflows/barbican.yml workflow, which cannot be skipped.
+# Advisory and skippable with git commit --no-verify. CI enforcement requires
+# operator-configured required checks, branch protection and policy review.
+# Run from the intended Cargo workspace root, with the selected toolchain and
+# cargo-barbican on PATH and frozen metadata inputs cached. No scanner or hook
+# framework is required. Preinstall the toolchain; rustup semantics still apply.
 #
-# Install with either:
-#   git config core.hooksPath <directory containing this hook>
-#   # or copy this file to .git/hooks/pre-commit and: chmod +x .git/hooks/pre-commit
+# policy init --pre-commit-hook copies this file without executable bits.
+# Review before explicit activation. For existing hooks, nested workspaces,
+# manual installation and all-hook hooksPath effects, see the matching release's
+# docs/user/ci.md#pre-commit-hook. Init changes no Git configuration.
 set -eu
 
 cargo barbican pin check

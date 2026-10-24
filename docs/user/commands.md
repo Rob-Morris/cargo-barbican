@@ -761,7 +761,7 @@ It is not a permanent policy exception.
 Creates the explicit policy scaffold for adopting cargo-barbican.
 
 ```bash
-cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>]
+cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>] [--pre-commit-hook]
 ```
 
 The command creates missing files:
@@ -771,15 +771,15 @@ The command creates missing files:
 - `reviewed-targets.toml`
 - `docs/dependency-reviews/`
 - `docs/dependency-reviews/README.md`
+- `docs/dependency-reviews/record-template.md` — reusable PENDING starting point
 - `rust-toolchain.toml` only when it is absent and an exact `--toolchain`
   value is supplied
 
 It preserves existing regular files, validates existing `barbican.toml`, and
 fails closed on wrong-type scaffold paths or ancestors such as directories in
 file positions and symlinks that would otherwise be followed. The generated
-`deny.toml` carries the non-advisory `cargo-deny` bans/sources posture only;
-it does not contain `[advisories]`, because `cargo barbican audit` forces the
-advisory section at runtime.
+`deny.toml` includes `[advisories]` alongside bans/sources posture. Audit forces
+disclosure and neutralises native ignores at runtime.
 
 An existing `rust-toolchain.toml` is validated and preserved. Without an
 existing valid pin, init reports the item blocked until the operator supplies
@@ -813,10 +813,23 @@ pin. Unlike the idempotent base scaffold, an existing
 (exit `1`), reports the path as blocked, and re-prints the intended workflow so
 the difference can be reconciled by hand.
 
-`policy init` also points at the shipped advisory client-side pre-commit hook
-(`templates/hooks/pre-commit`), which runs the cheap `pin check` /
-`inventory --enforce` subset. See [ci.md](ci.md#pre-commit-hook) for install
-instructions and [integration.md](integration.md) for the full consumer flow.
+`--pre-commit-hook` optionally copies a non-executable helper to
+`.barbican/hooks/pre-commit` at the discovered Cargo root. Plain init creates no
+hook directory and also links the matching release's manual installation and
+existing-hook integration guide. No Git config, activation or execution occurs.
+Review docs follow usable config/review-directory gating; a blocked toolchain
+does not suppress them. Requested hook copying is independent of report-level
+config/toolchain blocks; overall failure remains. Fatal I/O/discovery can stop
+later work. Exclusive creation protects both new outputs from late-leaf
+clobbering. On partial-write failure inspect/remove the named file before
+rerunning; existing regular files are preserved, not certified complete.
+
+The process README and sibling record template are consumer-owned and can be
+tailored. Copied records start PENDING; complete review before marker removal.
+Version-matched links are navigation, not build provenance. For unpublished
+candidates use the matching checkout; prerelease/main guidance is labelled as
+development. See [Adoption](adoption.md), [safe upgrades](integration.md) and
+[manual hook integration](ci.md#pre-commit-hook), including nested workspaces.
 
 ### `cargo barbican inventory`
 

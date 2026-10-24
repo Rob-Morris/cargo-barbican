@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/Rob-Morris/cargo-barbican/security/policy
+    about: Use the private reporting or email channels in SECURITY.md; do not file a public issue.

@@ -383,3 +383,9 @@ audit and strict pin decisions are needed without workspace build/test. Its PASS
 is scoped to those checks. Execute or reuse locked Rust verification under
 consumer-owned input-identity rules; keep `gatehouse pre-release` for releases.
 See [integration](integration.md#policy-checks-without-buildtest).
+
+
+For adoption handoffs, use the [recovery table](adoption.md#recovery-at-a-handoff):
+cold frozen-metadata caches need explicit reviewed fetch; intentionally stale
+graphs need resolve/review; executable controls need toolchain diagnosis.
+Scaffold partial files require manual inspection/removal before rerun.

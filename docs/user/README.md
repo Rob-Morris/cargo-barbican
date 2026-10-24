@@ -4,8 +4,8 @@ How to adopt and use cargo-barbican from a consumer repo: installation, command
 workflows, policy configuration, CI and re-sync, day-2 operations, and
 hardening.
 
+- [Adoption](adoption.md) — start here: new/existing projects, review, activation and recovery
 - [Command Guide](commands.md) — workflows and per-command usage reference
-- [Adoption](adoption.md) — existing/new-project onboarding and first-lockfile resolution after policy scaffolding
 - [Configuration](configuration.md) — `barbican.toml`, verification runner and `reviewed-targets.toml` reference
 - [Reviewed Git Sources](git-sources.md) — exact source review, offline admission and scanner limits
 - [Integration](integration.md) — install, template, and re-sync model

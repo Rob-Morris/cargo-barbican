@@ -263,3 +263,9 @@ internal owner directly; no persisted receipt or subprocess recursion is added.
 Generated evidence keeps independent strict commands, exact base and native
 failures, with fresh eligibility and recognised-cancellation checks. See the
 functional CLI contract and user CI migration guidance.
+
+
+Policy init also creates a consumer-owned PENDING record template and optionally
+copies a disabled advisory hook with exclusive creation. Activation/Git config
+stay consumer-owned; the library composer and policy verdicts are unchanged.
+See the [adoption guide](../user/adoption.md).

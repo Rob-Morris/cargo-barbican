@@ -500,21 +500,12 @@ mod tests {
     fn scaffolded_review_record_sections_match_the_shipped_record_template() {
         let spec =
             barbican::ExactCrateSpec::from_parts("serde", "1.0.228").expect("spec should parse");
-        let template_readme_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../templates/dependency-reviews/README.md");
-        let template_readme = std::fs::read_to_string(template_readme_path)
-            .expect("shipped record template README should be readable");
-
-        let fence_start = template_readme
-            .find("```md\n")
-            .expect("record template README should contain a ```md template block");
-        let template_body = &template_readme[fence_start + "```md\n".len()..];
-        let fence_end = template_body
-            .rfind("\n```")
-            .expect("record template block should be closed");
-        let template = &template_body[..fence_end];
-
-        assert!(template.starts_with("# Dependency Review:"));
+        let template = include_str!("../../../../templates/dependency-reviews/record-template.md");
+        assert!(template.contains("# Dependency Review:"));
+        assert_eq!(
+            barbican::classify_review_record(Some(template)),
+            barbican::ReviewRecordStatus::ScaffoldPlaceholder
+        );
 
         let scaffolded = compose_pin_review_record(
             &spec,

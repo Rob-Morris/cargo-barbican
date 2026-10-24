@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.34.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.35.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -88,36 +88,30 @@ support is explicitly delivered.
 Install the insiders release candidate from its immutable git tag:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.34.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.35.0
 ```
 
 The tag is the install identity; do not replace it with a moving branch in
 consumer CI.
 
-Set up the minimal policy files in the repository that will use the gate:
+Start with the [adoption guide](docs/user/adoption.md). In the consumer Cargo
+workspace, choose an exact Rust channel deliberately:
 
 ```bash
-cargo barbican policy init --toolchain 1.95.0
+cargo barbican policy init --toolchain <exact-channel>
 ```
 
-Then follow the manual adoption guide to review current dependencies, create
-review records, and populate `reviewed-targets.toml`.
+Install that selected toolchain, run `cargo barbican toolchain check`, then
+prepare the graph and complete dependency review before enforcing it. Init
+creates policy and a reusable pending review template; it does not approve the
+graph. Optional `--pre-commit-hook` copies a disabled local helper. Plain init
+also links the [manual installation/integration guide](docs/user/ci.md#pre-commit-hook).
 
-`cargo barbican audit` shells out to `cargo-deny` (and `cargo-audit` when
-configured), so install those before running it — a fresh machine without them
-fails closed with an install hint:
-
-```bash
-cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
-```
-
-The execution gates also require `rustup` on `PATH`; the native toolchain file
-is rustup policy, and an installation that provides only `cargo`, `rustc`, and `rustdoc`
-cannot establish the active-toolchain fact.
-
-When policy is ready, run the standard pre-release gate:
+Install only the scanners selected by `barbican.toml`; see
+[prerequisites](docs/user/integration.md#prerequisites). After review:
 
 ```bash
+cargo barbican gatehouse policy-check
 cargo barbican gatehouse pre-release
 ```
 
@@ -291,8 +285,8 @@ tools instead of becoming a cross-ecosystem package-management framework.
 
 ## Documentation
 
+- [docs/user/adoption.md](docs/user/adoption.md) — start here: staged adoption and recovery
 - [docs/README.md](docs/README.md) — documentation index
-- [docs/user/adoption.md](docs/user/adoption.md) — adoption and manual onboarding guide
 - [docs/user/commands.md](docs/user/commands.md) — command workflows and usage reference
 - [docs/user/configuration.md](docs/user/configuration.md) — `barbican.toml` and `reviewed-targets.toml` reference
 - [docs/user/integration.md](docs/user/integration.md) — install and template integration

@@ -29,7 +29,7 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.34.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.35.0
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -59,6 +59,9 @@ remain red; recognised cancellation stops further evidence. A PR job summary
 shows each outcome and explains unavailable reports. If the file already exists it is never
 overwritten: the command fails closed and re-prints the intended contents so
 you can reconcile the difference by hand.
+
+Configure required CI status checks, branch protection and policy/workflow
+review separately; the generated file alone cannot prevent bypass.
 
 Choose the exact channel for the consumer repo; `1.95.0` is only an example.
 If a valid exact `rust-toolchain.toml` already exists, omit `--toolchain`.
@@ -112,7 +115,7 @@ jobs:
       - id: tools
         name: Install cargo-barbican, cargo-deny, and cargo-audit
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.34.0 cargo-barbican
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.35.0 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
       - id: fetch
@@ -250,7 +253,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.34.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.35.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -291,40 +294,125 @@ Notes on this layout:
 
 ## Pre-commit hook
 
-For fast local feedback before a commit reaches CI, cargo-barbican ships an
-advisory client-side pre-commit hook at `templates/hooks/pre-commit`. It runs
-the cheap subset of the gate — `pin check` and `inventory --enforce` — so
-obvious policy breaks surface at commit time:
+The optional helper runs only `cargo barbican pin check`, then
+`cargo barbican inventory --enforce`. It provides fast advisory feedback; no
+build/test, audit, tool installation or fetch command is run by the helper.
+It can be skipped with `git commit --no-verify`. CI needs separately configured
+required checks, branch protection and policy/workflow review; a workflow file
+alone cannot make checks unskippable. Keep the scheduled audit too.
+
+### Prerequisites and working directory
+
+Complete adoption before activation. Git and POSIX `sh`, `cargo-barbican` and
+the usable selected Rust/Cargo toolchain must be on the hook's PATH, including
+in GUI Git clients. Preinstall that exact toolchain; ordinary rustup bootstrap
+semantics still apply. Policy, completed records and a consistent lockfile must
+exist, together with cached inputs for frozen inventory metadata. A cold but
+consistent graph may require explicit reviewed `cargo fetch --locked` without
+`--target`; a stale manifest/lock requires Barbican resolve/review instead.
+Missing tools/facts fail visibly. No hook framework, cargo-deny, cargo-audit or
+nextest is needed for these two checks.
+
+Native Git pre-commit runs from the **Git worktree root**, which may differ
+from the intended Cargo workspace root. A nested hooksPath does not change
+that working directory. Relative hooksPath values resolve against Git's hook
+invocation context, not the shell directory where you set the configuration.
+
+### Optional disabled copy
+
+From the intended Cargo workspace:
 
 ```sh
-#!/bin/sh
-set -eu
-cargo barbican pin check
-cargo barbican inventory --enforce
+cargo barbican policy init --pre-commit-hook
 ```
 
-The hook ships in the template set but is not auto-installed; `policy init`
-points at it. Get the file into the repo, then enable it one of two ways:
+Init copies `.barbican/hooks/pre-commit` only when absent, without executable
+bits even under permissive umask. Existing regular bytes/modes are preserved;
+that can include an already-enabled custom hook. Check the per-item report.
+No Git configuration, chmod, activation or execution occurs. Plain init creates
+no hook directory and directs you here for manual installation/integration.
 
-```bash
-# Option A: point git at the directory holding the hook
-git config core.hooksPath <directory containing the hook>
+### Manual installation without an upstream checkout
 
-# Option B: copy it into the repo's git hooks and make it executable
-cp templates/hooks/pre-commit .git/hooks/pre-commit
-chmod +x .git/hooks/pre-commit
+Use the same immutable release as your installed binary. From the intended
+Cargo workspace, retrieve into a scratch directory, inspect the script, and
+copy only to an absent destination:
+
+```sh
+barbican_source=$(mktemp -d) &&
+git clone --depth 1 --branch v0.35.0 \
+  https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream" &&
+cat "$barbican_source/upstream/templates/hooks/pre-commit"
 ```
 
-The hook is advisory and skippable with `git commit --no-verify`, and coding
-agents skip hooks routinely — so it is a convenience, not the gate. The
-authoritative, unskippable gate is the server-side workflow above. The hook
-deliberately leaves out `verify` (a full `cargo build` and `cargo test`, too
-slow for every commit) and `audit` (slower, and its verdict can change
-independently of what the commit touches, which makes a commit-time failure
-confusing when nothing in the commit is at fault). Run those two in CI, where an
-advisory-driven failure is expected and actionable rather than surprising at
-commit time.
+Stop on any retrieval error. Review the displayed script before the next step.
+Preserve an existing destination and merge manually. This copy stage verifies
+and reads the source before opening an absent destination; failure stays visible
+and retains the scratch source for inspection:
 
+```sh
+(
+  set -eu
+  hook_source="${barbican_source:?}/upstream/templates/hooks/pre-commit"
+  test -s "$hook_source" &&
+  test ! -e .barbican/hooks/pre-commit &&
+  test ! -L .barbican/hooks/pre-commit &&
+  hook_contents=$(cat "$hook_source") &&
+  mkdir -p .barbican/hooks &&
+  (set -C; umask 077; printf '%s\n' "$hook_contents" > .barbican/hooks/pre-commit)
+) && rm -rf "$barbican_source"
+```
+
+The new copy is non-executable. These commands assume trusted static scaffold
+directories without symlinks; init performs the supported path checks itself.
+An unpublished candidate uses its matching source checkout; do not silently
+replace a missing tag with main. Review upstream diffs on upgrades and retain
+consumer-owned changes.
+
+### Integrate an existing hook or hook manager
+
+First inspect `git config --get core.hooksPath` and the current hooks/manager.
+Preserve their paths and steps, including other hook types. From the intended
+Cargo workspace root, a consumer-owned POSIX shell hook can include:
+
+```sh
+# Existing steps remain before/after this check.
+sh .barbican/hooks/pre-commit || exit $?
+```
+
+Adding this invocation is explicit activation; the copied helper can remain
+non-executable. Keep failure propagation. Hook managers use their existing
+local-command facility and PATH; install no new framework for Barbican.
+
+For a Cargo workspace in `app/` inside the Git repository, integrate this
+wrapper into the existing hook, which Git starts at its own worktree root:
+
+```sh
+(cd app && sh .barbican/hooks/pre-commit) || exit $?
+```
+
+The subshell preserves the parent hook's cwd for subsequent existing steps.
+Use the actual relative workspace path; do not guess `.git/hooks` (worktrees,
+submodules and configured managers need their existing route).
+
+### Direct activation for coincident Git and Cargo roots
+
+Only when the Git worktree root **is** the intended Cargo workspace root, and
+after inspecting/preserving existing hooks and any manager, an operator can
+choose the dedicated directory:
+
+```sh
+chmod u+x .barbican/hooks/pre-commit
+git config core.hooksPath .barbican/hooks
+```
+
+Setting core.hooksPath redirects **all hook types**, not just pre-commit.
+Choose existing-hook integration above if that would displace another hook or
+manager. An already-selected hooksPath does not execute the newly copied
+non-executable file; chmod here is the explicit activation. For nested Cargo
+workspaces, use the wrapper route rather than pointing Git directly at the
+nested helper. After any route, test both a passing commit and an intentional
+policy failure with the actual CLI/GUI environment.
 
 ## Policy-only consumers
 

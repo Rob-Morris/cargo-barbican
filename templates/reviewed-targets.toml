@@ -1,11 +1,13 @@
-# Synced from cargo-barbican v0.34.0
+# Synced from cargo-barbican v0.35.0
 # Copy this template into a consumer repo, then edit that repo's
 # reviewed-targets.toml to declare reviewed dependency families.
 
 # Active reviewed Rust dependency families.
 #
-# Leave this file absent or with no active families when no checked-pin gate is
-# required.
+# Standalone pin check can skip when this file is absent or has no active
+# families. Strict verify/Gatehouse gates require at least one active reviewed
+# Rust family, including for a dependency-free graph; an empty scaffold is not
+# completed adoption. Do not invent a dummy family to bypass that requirement.
 #
 # Each active family entry carries:
 # - `name`: stable family label used in review records and tooling output

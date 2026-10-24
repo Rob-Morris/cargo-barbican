@@ -133,7 +133,7 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
     assert!(rendered.contains("- docs/dependency-reviews: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews/README.md: created\n"));
     assert!(rendered.contains(
-        "Review the manual adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/main/docs/user/adoption.md"
+        "Adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/v0.35.0/docs/user/adoption.md"
     ));
     assert!(rendered.contains("Review current dependencies"));
     assert!(stderr.is_empty());
@@ -156,7 +156,7 @@ fn policy_init_without_ci_does_not_emit_workflow() {
     assert!(!temp_dir.join(".github/workflows/barbican.yml").exists());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("policy init --ci github"));
-    assert!(rendered.contains("templates/hooks/pre-commit"));
+    assert!(rendered.contains("blob/v0.35.0/docs/user/ci.md#pre-commit-hook"));
     assert!(stderr.is_empty());
 }
 
@@ -211,7 +211,7 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     );
     assert!(!workflow.contains("cargo barbican inventory --enforce"));
     assert!(workflow.contains("cargo install --locked"));
-    assert!(workflow.contains("--tag v0.34.0"));
+    assert!(workflow.contains("--tag v0.35.0"));
     assert!(workflow.contains("cargo-deny@0.19.6"));
     assert!(workflow.contains("cargo-audit@0.22.1"));
     assert!(
@@ -225,7 +225,7 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     assert!(rendered.contains("- .github/workflows/barbican.yml: created\n"));
     assert!(
         rendered
-            .contains("A CI enforcement workflow was written to .github/workflows/barbican.yml")
+            .contains("Review .github/workflows/barbican.yml, then configure required CI checks")
     );
     assert!(stderr.is_empty());
 }
@@ -632,4 +632,106 @@ fn policy_init_does_not_write_through_symlinked_scaffold_ancestors() {
     );
     assert!(!temp_dir.join("outside-docs/dependency-reviews").exists());
     assert!(stderr.is_empty());
+}
+
+#[test]
+fn requested_hook_is_independent_of_report_level_config_and_pin_blocks() {
+    for invalid_config in [false, true] {
+        let root = fresh_temp_dir();
+        write_root_manifest(&root);
+        if invalid_config {
+            fs::write(root.join("barbican.toml"), "[broken").unwrap();
+        }
+        let runner = FakeCommandRunner::default();
+        let client = FakeCratesIoClient::default();
+        let mut stdout = Vec::new();
+        let exit = run_cli_with_runner(
+            Cli::parse_from([
+                "cargo-barbican",
+                "policy",
+                "init",
+                "--pre-commit-hook",
+                "--ci",
+                "github",
+            ]),
+            &root,
+            &client,
+            &runner,
+            &mut stdout,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(exit, ExitCode::from(1));
+        assert_eq!(
+            fs::read_to_string(root.join(".barbican/hooks/pre-commit")).unwrap(),
+            include_str!("../../../../templates/hooks/pre-commit")
+        );
+        assert_eq!(
+            root.join("docs/dependency-reviews/record-template.md")
+                .exists(),
+            !invalid_config
+        );
+        assert!(!root.join(".github/workflows/barbican.yml").exists());
+        assert_eq!(*runner.cargo_metadata_calls.borrow(), 0);
+        assert!(runner.generate_lockfile_calls.borrow().is_empty());
+        assert!(runner.audit_json_calls.borrow().is_empty());
+        assert!(runner.deny_json_calls.borrow().is_empty());
+        assert!(runner.verification_calls.borrow().is_empty());
+        assert!(client.fetches.borrow().is_empty());
+        let output = String::from_utf8(stdout).unwrap();
+        assert!(output.contains("pre-commit: created"));
+        assert!(output.contains("ci.md#pre-commit-hook"));
+        assert!(!output.contains("Next steps:"));
+    }
+}
+
+#[test]
+fn missing_template_is_added_alongside_custom_process_and_records() {
+    let root = fresh_temp_dir();
+    write_root_manifest(&root);
+    write_toolchain_pin(&root);
+    fs::create_dir_all(root.join("docs/dependency-reviews")).unwrap();
+    fs::write(
+        root.join("docs/dependency-reviews/README.md"),
+        "Our own process\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("docs/dependency-reviews/done.md"),
+        "Reviewed evidence\n",
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let mut stdout = Vec::new();
+        let exit = run_cli_with_runner(
+            Cli::parse_from(["cargo-barbican", "policy", "init"]),
+            &root,
+            &FakeCratesIoClient::default(),
+            &FakeCommandRunner::default(),
+            &mut stdout,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(exit, ExitCode::SUCCESS);
+        assert!(!root.join(".barbican").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("docs/dependency-reviews/README.md")).unwrap(),
+            "Our own process\n"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("docs/dependency-reviews/done.md")).unwrap(),
+            "Reviewed evidence\n"
+        );
+        let template =
+            fs::read_to_string(root.join("docs/dependency-reviews/record-template.md")).unwrap();
+        assert_eq!(
+            barbican::classify_review_record(Some(&template)),
+            barbican::ReviewRecordStatus::ScaffoldPlaceholder
+        );
+        assert!(
+            String::from_utf8(stdout)
+                .unwrap()
+                .contains("ci.md#pre-commit-hook")
+        );
+    }
 }
