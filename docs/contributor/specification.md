@@ -471,3 +471,12 @@ evidence. The two new copy-only outputs use exclusive creation and report
 retained partial writes; existing callers retain their own write contracts.
 The optional hook is disabled until explicit activation; no Git/config/runtime
 installer belongs in init.
+
+
+## Reviewed Family Management
+
+`pin list`/`pin show` render safely collected declarations and optional parity;
+`pin add --family` plans explicit additions independently from refresh. Share
+only identical source/direct rules and publication safeguards. No new grants,
+review approval or source permission follows from membership. See the
+[functional contract](../functional/cli.md) and [family guide](../user/families.md).

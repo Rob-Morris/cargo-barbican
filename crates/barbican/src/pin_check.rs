@@ -259,6 +259,10 @@ pub struct ObservedDirectDependency {
 }
 
 impl ObservedDirectDependency {
+    pub fn git(&self) -> Option<&GitSourceIdentity> {
+        self.git.as_ref()
+    }
+
     pub fn manifest_path(&self) -> &str {
         &self.manifest_path
     }

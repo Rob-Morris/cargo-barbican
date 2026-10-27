@@ -3,15 +3,30 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use barbican::{Date, PinRefreshChange, PinRefreshPlan, ReviewedTargets, compose_refresh_record};
+use barbican::{
+    Date, FamilyAdditionPlan, PinRefreshChange, PinRefreshPlan, ReviewedTargets,
+    compose_refresh_record,
+};
 
-use super::super::lockfile_ops::write_file_atomically;
-use super::super::scaffold_fs::{ScaffoldState, confined_scaffold_state};
-use super::super::{CommandError, load_effective_cargo_configs, workspace_manifest_paths};
+use super::lockfile_ops::write_file_atomically;
+use super::scaffold_fs::{ScaffoldState, confined_scaffold_state};
+use super::{CommandError, load_effective_cargo_configs, workspace_manifest_paths};
 use crate::command_runner::{CommandRunner, cargo_home_from_environment};
 
+pub(super) const PROTECTED_INPUTS: &[&str] = &[
+    "Cargo.lock",
+    "reviewed-targets.toml",
+    "barbican.toml",
+    "deny.toml",
+    "rust-toolchain.toml",
+    "rust-toolchain",
+    ".cargo/audit.toml",
+    ".cargo/config",
+    ".cargo/config.toml",
+];
+
 pub(super) fn error(detail: impl Into<String>) -> CommandError {
-    CommandError::PinRefresh(detail.into())
+    CommandError::PinEdit(detail.into())
 }
 
 #[derive(Clone)]
@@ -91,7 +106,7 @@ impl Input {
         };
         if current.text != self.text || !same_identity {
             return Err(error(format!(
-                "input changed during refresh: {}; inspect the diff before retrying",
+                "input changed during pin edit: {}; inspect the diff before retrying",
                 self.path.display()
             )));
         }
@@ -122,17 +137,7 @@ impl Inputs {
             configs: Vec::new(),
         };
         let root = inputs.root.clone();
-        for path in [
-            "Cargo.lock",
-            "reviewed-targets.toml",
-            "barbican.toml",
-            "deny.toml",
-            "rust-toolchain.toml",
-            "rust-toolchain",
-            ".cargo/audit.toml",
-            ".cargo/config",
-            ".cargo/config.toml",
-        ] {
+        for path in PROTECTED_INPUTS {
             inputs.add_confined(&root, Path::new(path))?;
         }
         inputs.add_manifests(&root)?;
@@ -217,20 +222,48 @@ impl Inputs {
         for (root, paths) in &self.manifest_paths {
             if workspace_manifest_paths(root)? != *paths {
                 return Err(error(format!(
-                    "workspace manifest inventory changed during refresh: {}; inspect the diff before retrying",
+                    "workspace manifest inventory changed during pin edit: {}; inspect the diff before retrying",
                     root.display()
                 )));
             }
         }
         if self.read_configs()? != self.configs {
             return Err(error(
-                "effective Cargo configuration changed during refresh",
+                "effective Cargo configuration changed during pin edit",
             ));
         }
         Ok(())
     }
     pub fn root(&self) -> &Path {
         &self.root
+    }
+}
+
+pub(super) struct PolicyInputs {
+    pub policy: ReviewedTargets,
+    pub lockfile: barbican::Lockfile,
+    pub requirements: Vec<barbican::CargoManifestDirectRequirement>,
+}
+impl PolicyInputs {
+    pub fn load(inputs: &Inputs) -> Result<Self, CommandError> {
+        let root = inputs.root();
+        let policy =
+            barbican::parse_reviewed_targets_toml(inputs.text(root, "reviewed-targets.toml")?)
+                .map_err(|source| error(source.to_string()))?;
+        let lockfile = barbican::parse_lockfile(inputs.text(root, "Cargo.lock")?)
+            .map_err(|source| error(source.to_string()))?;
+        let manifests = inputs.manifests();
+        let requirements = barbican::resolve_workspace_requirements(
+            &super::loaders::parse_manifest_requirements(&manifests)?,
+            &super::loaders::parse_workspace_requirements(&manifests)?,
+        )
+        .map_err(|source| error(source.to_string()))?;
+        inputs.check()?;
+        Ok(Self {
+            policy,
+            lockfile,
+            requirements,
+        })
     }
 }
 
@@ -253,25 +286,56 @@ impl Prepared {
         plan: &PinRefreshPlan,
         date: Date,
     ) -> Result<Self, CommandError> {
-        let root = &inputs.root;
-        let policy_path = root.join("reviewed-targets.toml");
-        if fs::metadata(&policy_path)
-            .map_err(CommandError::Io)?
-            .permissions()
-            .readonly()
-        {
-            return Err(error("reviewed-targets.toml is read-only"));
-        }
-        let original = inputs.text(root, "reviewed-targets.toml")?;
+        let original = inputs.text(inputs.root(), "reviewed-targets.toml")?;
         let updated_policy = plan
             .edit_policy(original)
             .map_err(|source| error(source.to_string()))?;
         let mut grouped = BTreeMap::<PathBuf, Vec<&PinRefreshChange>>::new();
         for change in plan.changes() {
             grouped
-                .entry(record_path(root, change.record())?)
+                .entry(record_path(inputs.root(), change.record())?)
                 .or_default()
                 .push(change);
+        }
+        let paths = grouped.keys().cloned().collect::<Vec<_>>();
+        Self::prepare(
+            inputs,
+            policy,
+            updated_policy,
+            paths,
+            |text, path, families| compose_refresh_record(text, &grouped[path], families, date),
+        )
+    }
+
+    pub fn addition(
+        inputs: Inputs,
+        policy: &ReviewedTargets,
+        plan: &FamilyAdditionPlan,
+        date: Date,
+    ) -> Result<Self, CommandError> {
+        let updated = plan
+            .edit_policy(inputs.text(inputs.root(), "reviewed-targets.toml")?)
+            .map_err(|source| error(source.to_string()))?;
+        let path = record_path(inputs.root(), plan.record())?;
+        Self::prepare(inputs, policy, updated, vec![path], |text, _, families| {
+            plan.compose_record(text, families, date)
+        })
+    }
+
+    fn prepare(
+        inputs: Inputs,
+        policy: &ReviewedTargets,
+        updated_policy: String,
+        paths: Vec<PathBuf>,
+        compose: impl Fn(&str, &Path, &[String]) -> String,
+    ) -> Result<Self, CommandError> {
+        let root = &inputs.root;
+        if fs::metadata(root.join("reviewed-targets.toml"))
+            .map_err(CommandError::Io)?
+            .permissions()
+            .readonly()
+        {
+            return Err(error("reviewed-targets.toml is read-only"));
         }
         let mut family_records = BTreeMap::<PathBuf, (Vec<String>, Option<FileIdentity>)>::new();
         for family in policy.rust_families() {
@@ -282,7 +346,7 @@ impl Prepared {
             families.push(family.name().to_owned());
         }
         let mut records: Vec<Record> = Vec::new();
-        for (path, changes) in grouped {
+        for path in paths {
             let relative = path.strip_prefix(root).expect("record path confined");
             if !matches!(
                 confined_scaffold_state(root, relative)?,
@@ -345,7 +409,7 @@ impl Prepared {
                     ));
                 }
             }
-            let updated = compose_refresh_record(text, &changes, &families, date);
+            let updated = compose(text, &path, &families);
             records.push(Record {
                 path,
                 original,
@@ -439,7 +503,7 @@ fn ensure_record_path(root: &Path, path: &Path) -> Result<(), CommandError> {
     Ok(())
 }
 
-fn record_path(root: &Path, path: &str) -> Result<PathBuf, CommandError> {
+pub(super) fn record_path(root: &Path, path: &str) -> Result<PathBuf, CommandError> {
     let mut relative = PathBuf::new();
     for component in Path::new(path).components() {
         match component {
@@ -462,6 +526,19 @@ fn record_path(root: &Path, path: &str) -> Result<PathBuf, CommandError> {
         return Err(error("record path is empty"));
     }
     Ok(root.join(relative))
+}
+
+pub(super) fn reject_protected_alias(
+    path: &Path,
+    protected: &[PathBuf],
+) -> Result<(), CommandError> {
+    let identity = FileIdentity::at(path).map_err(CommandError::Io)?;
+    for input in protected {
+        if *input == path || FileIdentity::at(input).is_ok_and(|other| identity.aliases(&other)) {
+            return Err(error("review record aliases a protected input"));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -504,8 +581,14 @@ mod tests {
         }
         fn prepared(&self) -> Prepared {
             let inputs = Inputs::capture(&self.0, &RealCommandRunner).unwrap();
-            let context = super::super::Context::load(&inputs).unwrap();
-            let plan = context.plan(&["demo".into(), "aux".into()]).unwrap();
+            let context = PolicyInputs::load(&inputs).unwrap();
+            let plan = barbican::plan_pin_refresh(
+                &context.policy,
+                &context.lockfile,
+                &context.requirements,
+                &["demo".into(), "aux".into()],
+            )
+            .unwrap();
             Prepared::new(
                 inputs,
                 &context.policy,
@@ -703,8 +786,14 @@ mod tests {
                 .replace("demo.md", &format!("{git_dir}/config"));
             fs::write(&policy_path, &policy).unwrap();
             let inputs = Inputs::capture(&fixture.0, &RealCommandRunner).unwrap();
-            let context = super::super::Context::load(&inputs).unwrap();
-            let plan = context.plan(&["demo".into()]).unwrap();
+            let context = PolicyInputs::load(&inputs).unwrap();
+            let plan = barbican::plan_pin_refresh(
+                &context.policy,
+                &context.lockfile,
+                &context.requirements,
+                &["demo".into()],
+            )
+            .unwrap();
             let error = Prepared::new(
                 inputs,
                 &context.policy,

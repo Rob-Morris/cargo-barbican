@@ -100,3 +100,11 @@ hash cached/materialised build inputs, sandbox Git/Cargo, or certify auxiliary
 downloaded bytes. Existing local-tooling/build-input trust boundaries continue
 to apply. Alternate registries and mutable external paths have no positive
 reviewed admission form in this release.
+
+
+## Existing Family Management
+
+Use [Reviewed Families](families.md) to discover exact names and shared review
+scope before an explicit `pin add --family=<name> <crate>...` extension.
+Shared evidence becomes PENDING before policy publication; new members gain
+no permissions, and successful diagnostics/no-ops never substitute for gates.

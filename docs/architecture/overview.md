@@ -269,3 +269,12 @@ Policy init also creates a consumer-owned PENDING record template and optionally
 copies a disabled advisory hook with exclusive creation. Activation/Git config
 stay consumer-owned; the library composer and policy verdicts are unchanged.
 See the [adoption guide](../user/adoption.md).
+
+
+## Family Management
+
+Focused pin list/show diagnostics and explicit existing-family batches share the
+reviewed-target owners. Addition uses an independent pure expected policy, and
+the binary shares refresh snapshot/PENDING-first publication protection. See
+[DD-005](decisions/dd-005-family-management.md); creation, identity refresh and
+enforcement retain their distinct contracts.

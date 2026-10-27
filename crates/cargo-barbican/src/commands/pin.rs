@@ -35,7 +35,24 @@ where
         PinCommand::Refresh { specs } => {
             super::pin_refresh::run_refresh(&specs, current_dir, runner, now, stdout, stderr)
         }
-        PinCommand::Add { spec } => run_pin_add(&spec, current_dir, now, stdout, stderr),
+        PinCommand::List => super::pin_family::view(None, current_dir, runner, stdout, stderr),
+        PinCommand::Show { family } => {
+            super::pin_family::view(Some(&family), current_dir, runner, stdout, stderr)
+        }
+        PinCommand::Add { specs, family } => {
+            if let Some(family) = family {
+                super::pin_family::add(&family, &specs, current_dir, runner, now, stdout, stderr)
+            } else if specs.len() == 1 {
+                run_pin_add(&specs[0], current_dir, now, stdout, stderr)
+            } else {
+                writeln!(
+                    stderr,
+                    "FAIL multiple crates require --family <existing-family>"
+                )
+                .map_err(CommandError::Io)?;
+                Ok(ExitCode::from(2))
+            }
+        }
         PinCommand::Exception {
             spec,
             advisories,

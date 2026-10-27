@@ -497,6 +497,59 @@ cargo barbican pin refresh <crate>[@version]...
     explicit review completion. This command does not assess, audit, move the
     lockfile, grant source permission, build or test.
 
+cargo barbican pin list
+cargo barbican pin show <family>
+    Browse exact configured families without a new enforcement verdict. List
+    shows direct/resolved counts, review-record content state, shared review
+    scope and available manifest/lock parity. Show includes exact registry/Git
+    identities, direct-only intent and declared grants/deadlines; declarations
+    do not imply those grants are currently honoured.
+    Valid policy remains browsable with missing/malformed/unsafe optional lock
+    facts or incomplete records. Confine optional lock/record reads before
+    opening; refuse symlinks/ancestors/special files and protected aliases.
+    Render optional facts unavailable rather than follow unsafe paths or open
+    a FIFO. Missing/empty policy gives explanatory empty list0; unknown show,
+    invalid/unreadable required policy/config fails1; usage fails2.
+    Exit0 means diagnostics rendered, not reviewed/adopted/enforced. No added
+    metadata, HTTP/scanner, resolve, build or test after ordinary Cargo/rustup
+    workspace discovery. Full source override/audit/toolchain checks remain
+    with existing owners. Exact names with spaces/metacharacters are supported;
+    option-looking names use `pin show -- <quoted-family>`.
+
+cargo barbican pin add --family <existing-family> <crate>[@version]...
+    Extend one existing family with an explicit nonempty batch. Family names
+    are exact and case-sensitive; unknown selection never creates a family.
+    Multiple specs without --family are usage error2. For option-looking names
+    use --family=<quoted-family>; shell quoting and option parsing are distinct.
+    Validate the entire batch before writing: checksum-bound crates.io or exact
+    admitted Git identities, all same-name lock siblings, no repeated names,
+    no foreign-family ownership or existing identity replacement. New direct
+    intent follows the existing uniformly-exact registry / exact Git rule;
+    preserve compatible direct-only keys, reject incompatible intent and never
+    edit manifests. New members gain no grants or source permissions; old
+    facts, grants/deadlines and unrelated families stay unchanged.
+    Full matching selected-family members are already-present no-ops. Mixed
+    batches add only new members; all-present succeeds without writes or review
+    completion and skips editor/writability/nonempty-record mutation preflight.
+    Required source/lock/coverage/direct-compatibility checks still apply.
+    Actual additions require an existing confined nonempty readable/writable
+    record and writable policy. Append unfinished source-aware facts, preserve
+    history and existing markers, insert PENDING only when absent. Normalised
+    shared records append once and reopen every citing family visibly. Distinct
+    physical aliases/protected collisions, .git paths, wrong types and unsafe
+    ancestors refuse. Never split, repair or retarget evidence automatically.
+    Support normal explicit family tables, parent maps and generated registry/
+    Git member subtables (including implicit parents), existing/absent direct
+    tables and repeated extensions. Preserve unrelated bytes and reparse to the
+    independently expected typed policy. Valid unsupported layouts print a
+    non-applying proposal and fail1 before any write.
+    Reuse captured-input and PENDING-first publication protection with refresh:
+    observe exact persisted evidence before one whole-policy replacement.
+    Changed inputs/config/manifest inventory refuse. Partial failure can retain
+    PENDING evidence and uncertain policy publication; never delete shared
+    history or markers as rollback. Inspect diff/show/check before retrying.
+    Successful preparation/no-op is not approval and does not weaken any gate.
+
 cargo barbican pin add <crate>[@version]
     Scaffold a reviewed-target family and review-record stub for one crate
     already resolved in `Cargo.lock`, fully offline. It:
@@ -1003,7 +1056,8 @@ including an in-repository path child, requires its own matching reviewed entry
 before verification executes. Same-name sources/revisions cannot coexist.
 Existing registry string/checksum forms and release-age rules remain supported.
 
-`pin add` remains offline and one package per invocation. It refuses ambiguous
+`pin add` remains offline: without --family it creates one package/family;
+explicit --family batches extend one existing family. It refuses ambiguous
 same-version sources and unsupported/floating identities, emits a pending
 source-aware review and never grants cargo-deny permissions. `pin check` stays
 local/offline; `inventory --enforce` additionally requires exact frozen Cargo

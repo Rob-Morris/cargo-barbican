@@ -387,6 +387,11 @@ pub(crate) enum CiSystem {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum PinCommand {
+    #[command(about = "List reviewed families and their declared review scope")]
+    List,
+    #[command(about = "Show one exact family's declarations, evidence state and scoped parity")]
+    Show { family: String },
+
     #[command(
         about = "Refresh existing registry pin facts and reopen their review records",
         long_about = "Copies changed registry versions/checksums from Cargo.lock into existing reviewed families, withdraws grants for changed targets, and reopens their existing records as PENDING. Fully offline after workspace discovery. Does not complete review, move the lockfile, assess, audit, build or test."
@@ -399,15 +404,20 @@ pub(crate) enum PinCommand {
         specs: Vec<String>,
     },
     #[command(
-        about = "Scaffold a reviewed family and review-record stub from Cargo.lock",
-        long_about = "Reads the resolved version and registry checksum or exact Git source for one crate already \
-            resolved in Cargo.lock, fully offline, and appends a reviewed-targets.toml family \
-            stub plus a review-record markdown stub pre-filled with the resolved facts. The \
-            scaffold is not a completed review."
+        about = "Add reviewed coverage from Cargo.lock; optionally extend an existing family",
+        long_about = "Without --family, scaffolds a new family and PENDING review record for one resolved crate. With --family <exact-existing-name>, adds a batch of checksum-bound registry or exact Git members to that family and reopens its existing shared review record. Exact existing members are no-ops; conflicts reject the batch. Neither mode completes review, grants permissions, resolves, builds or tests. Fully offline after ordinary Cargo workspace discovery."
     )]
     Add {
-        #[arg(help = "Crate name, optionally with @version when multiple versions are resolved")]
-        spec: String,
+        #[arg(
+            required = true,
+            help = "Resolved crate names, optionally with @version; several require --family"
+        )]
+        specs: Vec<String>,
+        #[arg(
+            long,
+            help = "Add members to this exact existing family; never creates a family"
+        )]
+        family: Option<String>,
     },
     #[command(
         about = "Scaffold a bounded reviewed advisory exception from Cargo.lock",

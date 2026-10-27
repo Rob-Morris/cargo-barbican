@@ -3,45 +3,18 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barbican::{
-    CratesIoClient, Lockfile, OffsetDateTime, PinRefreshPlan, ReviewedTargets,
-    drifted_registry_targets, parse_lockfile, parse_reviewed_targets_toml, plan_pin_refresh,
-    resolve_workspace_requirements,
+    CratesIoClient, OffsetDateTime, PinRefreshPlan, ReviewedTargets, drifted_registry_targets,
+    parse_lockfile, plan_pin_refresh,
 };
 
-use super::loaders::{parse_manifest_requirements, parse_workspace_requirements};
 use super::lockfile_ops::MemoizingCratesIoClient;
 use super::{CommandError, age_lock, assess, escape_render_field, load_git_base_lockfile};
 use crate::cli::AssessPolicyMode;
 use crate::command_runner::CommandRunner;
 
-mod files;
-use files::{Inputs, Prepared, error};
+use super::pin_files::{Inputs, PolicyInputs as Context, Prepared, error};
 
-struct Context {
-    policy: ReviewedTargets,
-    lockfile: Lockfile,
-    requirements: Vec<barbican::CargoManifestDirectRequirement>,
-}
 impl Context {
-    fn load(inputs: &Inputs) -> Result<Self, CommandError> {
-        let root = inputs.root();
-        let policy = parse_reviewed_targets_toml(inputs.text(root, "reviewed-targets.toml")?)
-            .map_err(|source| error(source.to_string()))?;
-        let lockfile = parse_lockfile(inputs.text(root, "Cargo.lock")?)
-            .map_err(|source| error(source.to_string()))?;
-        let manifests = inputs.manifests();
-        let requirements = resolve_workspace_requirements(
-            &parse_manifest_requirements(&manifests)?,
-            &parse_workspace_requirements(&manifests)?,
-        )
-        .map_err(|source| error(source.to_string()))?;
-        inputs.check()?;
-        Ok(Self {
-            policy,
-            lockfile,
-            requirements,
-        })
-    }
     fn plan(&self, requests: &[String]) -> Result<PinRefreshPlan, CommandError> {
         plan_pin_refresh(&self.policy, &self.lockfile, &self.requirements, requests)
             .map_err(|source| error(source.to_string()))

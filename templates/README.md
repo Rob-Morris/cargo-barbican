@@ -42,7 +42,7 @@ additionally emits a ready-to-run enforcement workflow to
 Each template file shipped to a consumer should include a header comment:
 
 ```
-# Synced from cargo-barbican v0.35.0
+# Synced from cargo-barbican v0.36.0
 ```
 
 Template-specific follow-up comments may differ. Some copied templates, such

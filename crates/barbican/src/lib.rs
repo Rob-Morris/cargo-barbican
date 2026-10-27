@@ -107,6 +107,9 @@ pub use release_age::{
 pub use review_record::{
     REVIEW_RECORD_SCAFFOLD_MARKER, ReviewRecordStatus, classify_review_record,
 };
+pub use reviewed_targets::addition::{
+    FamilyAdditionError, FamilyAdditionMember, FamilyAdditionPlan, plan_family_addition,
+};
 pub use reviewed_targets::refresh::{
     PinRefreshChange, PinRefreshError, PinRefreshPlan, compose_refresh_record,
     drifted_registry_targets, plan_pin_refresh,

@@ -338,3 +338,11 @@ inventory, audit and verification workflow. See the
 schema, full-commit requirement, per-package review, source-bound allowances,
 manual intake and advisory/build-input limitations. Registry age/advisory
 exceptions never authorise Git targets; cargo-deny permission remains separate.
+
+
+## Existing Family Management
+
+Use [Reviewed Families](families.md) to discover exact names and shared review
+scope before an explicit `pin add --family=<name> <crate>...` extension.
+Shared evidence becomes PENDING before policy publication; new members gain
+no permissions, and successful diagnostics/no-ops never substitute for gates.

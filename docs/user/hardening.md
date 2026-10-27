@@ -270,3 +270,11 @@ configuration, Cargo cwd and GUI PATH before [manual integration](ci.md#pre-comm
 Required CI checks, branch protection and policy/workflow review remain
 repository-owner controls; neither a copied hook nor a workflow alone prevents
 bypass.
+
+
+## Existing Family Management
+
+Use [Reviewed Families](families.md) to discover exact names and shared review
+scope before an explicit `pin add --family=<name> <crate>...` extension.
+Shared evidence becomes PENDING before policy publication; new members gain
+no permissions, and successful diagnostics/no-ops never substitute for gates.

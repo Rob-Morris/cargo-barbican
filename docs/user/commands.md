@@ -25,7 +25,8 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican assess` | Base assessment | Classify a dependency diff. |
 | `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption; `--toolchain` creates an absent exact native pin and `--ci github` also emits the CI workflow. |
 | `cargo barbican inventory` | Base audit / gate | Report dependency inventory and reviewed-policy coverage; `--enforce` gates direct-dependency coverage. |
-| `cargo barbican pin add` | Policy management | Scaffold a reviewed family and review-record stub from `Cargo.lock`. |
+| `cargo barbican pin list` / `pin show` | Diagnostics | Discover exact families, shared evidence scope and available parity. |
+| `cargo barbican pin add` | Policy management | Create one reviewed family or explicitly extend an existing family with --family. |
 | `cargo barbican pin refresh` | Policy management | Copy changed registry pin facts into existing families, withdraw old grants and reopen review as PENDING. |
 | `cargo barbican gatehouse policy-check` | Workflow gate | Check toolchain, direct coverage, audit and strict reviewed pins without workspace build/test. |
 | `cargo barbican gatehouse re-pin` | Workflow | Check each moved registry target against an explicit baseline, run age/assessment, then refresh without completing review. |
@@ -419,7 +420,7 @@ Prints the shipped cargo-barbican version.
 | `update --dry-run` | No | Uses a temporary workspace and prints a preview. |
 | `assess` | No | Reads manifests, lockfiles, policy files, and inspection evidence. |
 | `inventory` | No | Reads manifests, lockfile, and reviewed-target policy to report findings and coverage gaps. |
-| `pin add` | Yes | Appends a reviewed family to `reviewed-targets.toml` and creates a review-record stub; never overwrites existing entries or files. |
+| `pin add` | Yes | Without --family creates one family/record; explicit --family adds new members and reopens existing shared evidence. Exact matches are no-ops. |
 | `pin exception` | Yes | Appends an `allowed_advisories` family and a review-record stub when the crate is uncovered; prints a manual fragment instead when it is already covered. Never overwrites existing entries or files. |
 | `pin check` | No | Local-only reviewed-target enforcement. |
 | `review` | No | Prints review-focused diffs. |
@@ -916,7 +917,15 @@ The `--enforce` verdict does not use this approximation: declarations and
 workspace-member identities come from Cargo metadata, and exact resolved
 direct identities come from `Cargo.lock` dependency edges.
 
-### `cargo barbican pin add`
+### Reviewed family discovery and extension
+
+Use `pin list`, `pin show <exact-family>` and
+`pin add --family=<exact-family> <crate>...` for the focused family-management
+journey. See [Reviewed Families](families.md) for shared-record effects,
+no-op semantics, safe names, evidence completion and interrupted publication.
+These diagnostics and additions do not replace an enforcement gate.
+
+### `cargo barbican pin add` without `--family`
 
 Scaffolds a reviewed-target family and a review-record stub for one crate
 already resolved in `Cargo.lock`.

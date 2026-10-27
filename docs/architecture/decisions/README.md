@@ -20,6 +20,9 @@ system works today. Decision records explain why it ended up that way.
 
 ## Index
 
+- [DD-005: Reviewed Family Discovery and Explicit Extension](dd-005-family-management.md)
+  — focused diagnostics, explicit batches and shared PENDING-first publication.
+
 - [DD-004: Reviewed Registry Pin Refresh](dd-004-reviewed-pin-refresh.md)
   — fact mutation withdraws old grants and reopens review; explicit-baseline
   Gatehouse composition keeps evidence separate from approval.

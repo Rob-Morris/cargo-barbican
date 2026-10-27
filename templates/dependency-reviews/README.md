@@ -1,4 +1,4 @@
-<!-- Synced from cargo-barbican v0.35.0; consumer-owned process: tailor locally and review upstream diffs on upgrade. -->
+<!-- Synced from cargo-barbican v0.36.0; consumer-owned process: tailor locally and review upstream diffs on upgrade. -->
 
 # Dependency Review Records
 
@@ -127,4 +127,4 @@ review upstream diffs from the matching release rather than replacing local
 content. Provenance identifies the starting point; it neither pins the binary
 nor invalidates a completed review.
 
-Upstream guidance: [adoption](https://github.com/Rob-Morris/cargo-barbican/blob/v0.35.0/docs/user/adoption.md).
+Upstream guidance: [adoption](https://github.com/Rob-Morris/cargo-barbican/blob/v0.36.0/docs/user/adoption.md).

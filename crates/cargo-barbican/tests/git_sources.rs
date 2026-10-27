@@ -51,6 +51,10 @@ impl Fixture {
     }
 
     fn new() -> Self {
+        Self::with_extra(false)
+    }
+
+    fn with_extra(extra: bool) -> Self {
         let root = std::env::temp_dir().join(format!(
             "barbican-git-{}-{}",
             std::process::id(),
@@ -58,12 +62,16 @@ impl Fixture {
         ));
         let upstream = root.join("upstream");
         let consumer = root.join("consumer");
-        for package in ["wrapper", "native-sys"] {
+        for package in ["wrapper", "native-sys", "helper"] {
             let dir = upstream.join(package);
             fs::create_dir_all(dir.join("src")).unwrap();
             fs::write(dir.join("src/lib.rs"), "pub fn harmless() {}\n").unwrap();
             let deps = if package == "wrapper" {
-                "[dependencies]\nnative-sys={path=\"../native-sys\"}\n"
+                if extra {
+                    "[dependencies]\nnative-sys={path=\"../native-sys\"}\nhelper={path=\"../helper\"}\n"
+                } else {
+                    "[dependencies]\nnative-sys={path=\"../native-sys\"}\n"
+                }
             } else {
                 ""
             };
@@ -78,7 +86,7 @@ impl Fixture {
         fs::write(upstream.join("native-sys/build.rs"), "fn main(){if let Ok(path)=std::env::var(\"BARBICAN_GIT_SENTINEL\"){std::fs::write(path,\"executed\").unwrap();}}\n").unwrap();
         fs::write(
             upstream.join("Cargo.toml"),
-            "[workspace]\nmembers=[\"wrapper\",\"native-sys\"]\nresolver=\"3\"\n",
+            if extra { "[workspace]\nmembers=[\"wrapper\",\"native-sys\",\"helper\"]\nresolver=\"3\"\n" } else { "[workspace]\nmembers=[\"wrapper\",\"native-sys\"]\nexclude=[\"helper\"]\nresolver=\"3\"\n" },
         )
         .unwrap();
         for args in [
@@ -238,6 +246,47 @@ fn registry_shaped_update_refuses_git_without_mutation_including_dry_run() {
         );
     }
     assert!(!fixture.root.join("executed").exists());
+}
+
+#[test]
+fn generated_git_family_extends_with_explicit_child_then_reruns_without_writes() {
+    let fixture = Fixture::with_extra(true);
+    assert_success(fixture.cli(&["pin", "add", "wrapper"]));
+    let policy = barbican::parse_reviewed_targets_toml(
+        &fs::read_to_string(fixture.consumer.join("reviewed-targets.toml")).unwrap(),
+    )
+    .unwrap();
+    let family = policy.rust_families()[0].name();
+    let select = format!("--family={family}");
+    assert_success(fixture.cli(&["pin", "show", "--", family]));
+    let added = assert_success(fixture.cli(&["pin", "add", &select, "native-sys"]));
+    assert!(added.contains("PENDING"));
+    assert_success(fixture.cli(&["pin", "add", &select, "helper"]));
+    assert!(!fixture.cli(&["verify"]).status.success());
+    assert!(!fixture.root.join("executed").exists());
+    let before = fs::read(fixture.consumer.join("reviewed-targets.toml")).unwrap();
+    let record = fixture
+        .consumer
+        .join(policy.rust_families()[0].review_record());
+    let evidence = fs::read(&record).unwrap();
+    let repeated = assert_success(fixture.cli(&["pin", "add", &select, "wrapper", "native-sys"]));
+    assert!(repeated.contains("no changes"));
+    assert_eq!(
+        fs::read(fixture.consumer.join("reviewed-targets.toml")).unwrap(),
+        before
+    );
+    assert_eq!(fs::read(&record).unwrap(), evidence);
+    fixture.complete_reviews();
+    assert_success(fixture.cli(&["pin", "check"]));
+    let original_lock = fs::read_to_string(fixture.consumer.join("Cargo.lock")).unwrap();
+    fs::write(fixture.consumer.join("Cargo.lock"), format!("{original_lock}\n[[package]]\nname='unreviewed-child'\nversion='0.1.0'\nsource='git+{URL}?rev={}#{}'\n", fixture.rev, fixture.rev)).unwrap();
+    let rejected = fixture.cli(&["verify"]);
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stdout).contains("unreviewed-child"));
+    assert!(!fixture.root.join("executed").exists());
+    fs::write(fixture.consumer.join("Cargo.lock"), original_lock).unwrap();
+    assert_success(fixture.cli(&["verify"]));
+    assert!(fixture.root.join("executed").exists());
 }
 
 #[test]

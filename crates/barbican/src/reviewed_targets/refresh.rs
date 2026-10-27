@@ -379,7 +379,7 @@ fn target_fact(target: &ReviewedResolvedTarget) -> String {
     )
 }
 
-fn record_field(value: &str) -> String {
+pub(super) fn record_field(value: &str) -> String {
     value
         .chars()
         .map(|ch| {

@@ -486,31 +486,8 @@ pub fn plan_pin_add(
         .iter()
         .filter(|requirement| requirement.name() == package.name)
         .collect::<Vec<_>>();
-    if let Some(git) = &git
-        && observed_direct.iter().any(|declaration| {
-            declaration.git() != Some(git)
-                || declaration
-                    .version_requirement()
-                    .is_some_and(|requirement| {
-                        semver::VersionReq::parse(requirement)
-                            .ok()
-                            .zip(semver::Version::parse(&package.version).ok())
-                            .is_none_or(|(requirement, version)| !requirement.matches(&version))
-                    })
-        })
-    {
-        return Err(PinAddRejection::UnsupportedSource {
-            crate_name: package.name.clone(),
-            reason: "direct Git declarations must request the reviewed repository and full commit"
-                .to_owned(),
-        });
-    }
     let exact = package.exact_spec();
-    let direct_requirement = if let Some(git) = &git {
-        (!observed_direct.is_empty()).then(|| git.declaration_source())
-    } else {
-        exact_direct_requirement(&observed_direct, exact)
-    };
+    let direct_requirement = pin_direct_requirement(package, git.as_ref(), &observed_direct)?;
     let has_non_conforming_direct_requirement =
         direct_requirement.is_none() && !observed_direct.is_empty();
 
@@ -835,6 +812,36 @@ fn compose_allowed_advisories_fragment(
         entries
     } else {
         format!("[rust.families.allowed_advisories]\n{crate_name} = [{entries}]\n")
+    }
+}
+
+pub(crate) fn pin_direct_requirement(
+    package: &LockedPackage,
+    git: Option<&GitSourceIdentity>,
+    observed: &[&CargoManifestDirectRequirement],
+) -> Result<Option<String>, PinAddRejection> {
+    if let Some(git) = git {
+        if observed.iter().any(|declaration| {
+            declaration.git() != Some(git)
+                || declaration
+                    .version_requirement()
+                    .is_some_and(|requirement| {
+                        semver::VersionReq::parse(requirement)
+                            .ok()
+                            .zip(semver::Version::parse(&package.version).ok())
+                            .is_none_or(|(requirement, version)| !requirement.matches(&version))
+                    })
+        }) {
+            return Err(PinAddRejection::UnsupportedSource {
+                crate_name: package.name.clone(),
+                reason:
+                    "direct Git declarations must request the reviewed repository and full commit"
+                        .to_owned(),
+            });
+        }
+        Ok((!observed.is_empty()).then(|| git.declaration_source()))
+    } else {
+        Ok(exact_direct_requirement(observed, package.exact_spec()))
     }
 }
 

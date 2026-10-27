@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::Date;
 
+pub mod addition;
 pub mod refresh;
 
 use crate::{
@@ -86,11 +87,11 @@ impl ReviewedRustFamily {
         &self.resolved
     }
 
-    pub(crate) fn execution_surface_allowances(&self) -> &[ReviewedExecutionSurfaceAllowance] {
+    pub fn execution_surface_allowances(&self) -> &[ReviewedExecutionSurfaceAllowance] {
         &self.execution_surface_allowances
     }
 
-    fn release_age_exceptions(&self) -> &[ReviewedReleaseAgeException] {
+    pub fn release_age_exceptions(&self) -> &[ReviewedReleaseAgeException] {
         &self.release_age_exceptions
     }
 

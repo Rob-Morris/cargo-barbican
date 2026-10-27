@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.36.0](changelog/v0.36.0.md) | 2026-10-27 | Manage reviewed families without bypassing policy |
 | [v0.35.0](changelog/v0.35.0.md) | 2026-10-24 | Complete adoption scaffolds and optional local hooks |
 | [v0.34.0](changelog/v0.34.0.md) | 2026-10-24 | Bootstrap lockfiles and capture comparison baselines |
 | [v0.33.0](changelog/v0.33.0.md) | 2026-10-22 | Keep PR dependency evidence after gate rejection |

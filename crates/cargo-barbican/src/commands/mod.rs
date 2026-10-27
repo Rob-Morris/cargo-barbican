@@ -13,6 +13,8 @@ mod lockfile_ops;
 mod pick;
 mod pin;
 mod pin_check;
+mod pin_family;
+mod pin_files;
 mod pin_refresh;
 mod policy;
 mod render;
