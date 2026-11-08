@@ -29,13 +29,14 @@ When cargo-audit is selected as scanner (or both scanners are selected):
 cargo install --locked cargo-audit@0.22.1
 ```
 
-Cargo-deny is also needed when its non-advisory check groups are configured.
+Cargo-deny remains required for its configured check groups even when
+cargo-audit supplies the lockfile advisory scan.
 These are this release's reviewed examples; an adopter owns its tool trust
 choices. Optional nextest has its own setup below; the advisory hook requires
 none of these scanners or a hook framework.
 
 If a required delegate is missing from `PATH`, `cargo barbican audit` detects
-this before delegating and fails closed, naming the tool and the exact install
+this for all selected tools before the first scan and fails closed, naming the tool and the exact install
 command — for example `FAIL cargo-deny: not found on PATH; install with
 cargo install --locked cargo-deny@0.19.6` — then exits non-zero rather than silently
 skipping the check. `cargo-audit` is only required when it is the configured
@@ -65,7 +66,10 @@ approve unrestricted consumer use. Product `verify` does not set those
 environment controls; consumers own review of their runner and native
 configuration.
 
-A version check does not prove binary provenance. Gate-time verification never
+`verify` checks the selected nextest installation and exact version after
+trusted toolchain conformance and reviewed pins, before its locked build.
+Missing or mismatched tools fail with install guidance. A version check does
+not prove binary provenance. Gate-time verification never
 installs or updates tools. Check custom-harness compatibility, shared resources
 and default-member doctest policy before switching. See
 [configuration](configuration.md#verify) for the mixed-doctest restriction.
@@ -103,7 +107,7 @@ Follow [Adoption](adoption.md) for the ordered new/existing project journey.
 Install this release using its immutable identity:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.37.0 cargo-barbican
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.38.0 cargo-barbican
 ```
 
 Init preserves regular policy/process/template files and completed records.
@@ -117,7 +121,7 @@ release into a scratch area. This does not assume an upstream checkout:
 
 ```sh
 barbican_source=$(mktemp -d)
-git clone --depth 1 --branch v0.37.0 \
+git clone --depth 1 --branch v0.38.0 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream"
 # Review templates in "$barbican_source/upstream/templates" before copying.
 ```
@@ -138,7 +142,7 @@ and copying desired files.
 
 ## Versioning and re-sync
 
-Every shipped template carries `Synced from cargo-barbican v0.37.0` provenance.
+Every shipped template carries `Synced from cargo-barbican v0.38.0` provenance.
 The process README and record template are consumer-owned and may be tailored.
 On upgrade, install the reviewed immutable release, obtain its templates in a
 scratch checkout as above, and review diffs before merging desired changes.

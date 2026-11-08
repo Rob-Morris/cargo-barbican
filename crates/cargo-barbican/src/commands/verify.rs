@@ -86,6 +86,13 @@ where
         return Ok(pin_check_exit);
     }
 
+    if config.test_runner == TestRunner::Nextest {
+        let exit = check_nextest_version(current_dir, runner, config, stdout, stderr)?;
+        if exit != ExitCode::SUCCESS {
+            return Ok(exit);
+        }
+    }
+
     // The build/test delegates stream through this process's terminal, so
     // flush our buffered report lines before each handoff or they can land
     // after the delegate's streamed output.
@@ -103,7 +110,7 @@ where
             writeln!(stdout, "OK   cargo test --locked").map_err(CommandError::Io)?;
         }
         TestRunner::Nextest => {
-            let exit = run_nextest_verification(current_dir, runner, config, stdout, stderr)?;
+            let exit = run_nextest_verification(current_dir, runner, stdout, stderr)?;
             if exit != ExitCode::SUCCESS {
                 return Ok(exit);
             }
@@ -121,7 +128,7 @@ where
     Ok(ExitCode::SUCCESS)
 }
 
-fn run_nextest_verification<R: CommandRunner + ?Sized>(
+fn check_nextest_version<R: CommandRunner + ?Sized>(
     current_dir: &Path,
     runner: &R,
     config: &VerifyConfig,
@@ -151,7 +158,15 @@ fn run_nextest_verification<R: CommandRunner + ?Sized>(
         version.as_str()
     )
     .map_err(CommandError::Io)?;
-    stdout.flush().map_err(CommandError::Io)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_nextest_verification<R: CommandRunner + ?Sized>(
+    current_dir: &Path,
+    runner: &R,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<ExitCode, CommandError> {
     if let Err(error) = runner.cargo_nextest_run_locked(current_dir) {
         return fail(stderr, format!("cargo nextest run --locked: {error}"));
     }

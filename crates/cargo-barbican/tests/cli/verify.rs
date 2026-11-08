@@ -369,13 +369,27 @@ fn nextest_verification_orders_steps_and_preserves_the_verdict() {
     assert_eq!(
         *runner.verification_calls.borrow(),
         [
-            "build",
             "nextest-version",
+            "build",
             "nextest",
             "metadata",
             "doctests"
         ]
     );
+    assert_eq!(
+        stdout
+            .matches("OK   cargo-nextest 0.9.146 (exact runner pin)")
+            .count(),
+        1
+    );
+    let pins = stdout.find("Pin check: PASS").expect("pin check passed");
+    let version = stdout
+        .find("OK   cargo-nextest")
+        .expect("runner pin checked");
+    let build = stdout
+        .find("OK   cargo build --locked")
+        .expect("build passed");
+    assert!(pins < version && version < build);
     assert_eq!(*runner.doctest_packages.borrow(), ["fixture"]);
     assert!(stdout.contains("OK   cargo nextest run --locked"));
     assert!(stdout.contains("OK   cargo test --doc --locked"));
@@ -384,22 +398,73 @@ fn nextest_verification_orders_steps_and_preserves_the_verdict() {
 }
 
 #[test]
-fn nextest_version_errors_stop_before_tests_with_install_guidance() {
-    for result in [
-        Err("no such command".to_owned()),
-        Ok("invalid banner".to_owned()),
-        Ok("cargo-nextest 0.9.145".to_owned()),
+fn nextest_version_errors_stop_before_build_with_install_guidance() {
+    for command in [
+        vec!["cargo-barbican", "verify"],
+        vec!["cargo-barbican", "gatehouse", "pre-release"],
     ] {
-        let (root, mut runner) = nextest_fixture();
-        runner.nextest_version_result = result;
+        for result in [
+            Err("no such command".to_owned()),
+            Ok("invalid banner".to_owned()),
+            Ok("cargo-nextest 0.9.145".to_owned()),
+        ] {
+            let (root, mut runner) = nextest_fixture();
+            runner.nextest_version_result = result;
+            runner.cargo_metadata_frozen_result =
+                Ok(declared_crates_io_direct_metadata_json("serde", "1.0.228"));
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            let exit = run_cli_with_runner(
+                Cli::parse_from(command.clone()),
+                &root,
+                &FakeCratesIoClient::default(),
+                &runner,
+                &mut stdout,
+                &mut stderr,
+            )
+            .unwrap();
+            let stdout = String::from_utf8(stdout).unwrap();
+            let stderr = String::from_utf8(stderr).unwrap();
+            assert_eq!(exit, ExitCode::from(1), "{command:?}: {stdout}\n{stderr}");
+            assert!(!stdout.contains("Verify: PASS"));
+            assert!(stdout.contains("Pin check: PASS"));
+            assert!(stderr.contains("cargo install --locked cargo-nextest@0.9.146"));
+            let calls = runner.verification_calls.borrow();
+            assert_eq!(
+                calls
+                    .iter()
+                    .copied()
+                    .filter(|&call| call != "metadata")
+                    .collect::<Vec<_>>(),
+                ["nextest-version"]
+            );
+            assert_eq!(*runner.build_calls.borrow(), 0);
+            assert_eq!(*runner.test_calls.borrow(), 0);
+            assert_eq!(runner.rustup_active_toolchain_calls(), 1);
+        }
+    }
+}
+
+#[test]
+fn nextest_policy_failures_stop_before_runner_probe_or_build() {
+    for policy in ["absent", "empty", "drift"] {
+        let (root, runner) = nextest_fixture();
+        match policy {
+            "absent" => fs::remove_file(root.join("reviewed-targets.toml")).unwrap(),
+            "empty" => {
+                fs::write(root.join("reviewed-targets.toml"), "[rust]\nfamilies=[]\n").unwrap()
+            }
+            "drift" => fs::write(
+                root.join("Cargo.lock"),
+                lockfile_with_packages(&[("serde", "1.0.227", true)]),
+            )
+            .unwrap(),
+            _ => unreachable!(),
+        }
         let (exit, stdout, stderr) = verify_result(&root, &runner);
-        assert_eq!(exit, ExitCode::from(1));
-        assert!(!stdout.contains("Verify: PASS"));
-        assert!(stderr.contains("cargo install --locked cargo-nextest@0.9.146"));
-        assert_eq!(
-            *runner.verification_calls.borrow(),
-            ["build", "nextest-version"]
-        );
+        assert_eq!(exit, ExitCode::from(1), "{policy}: {stdout}\n{stderr}");
+        assert!(runner.verification_calls.borrow().is_empty(), "{policy}");
+        assert_eq!(*runner.build_calls.borrow(), 0);
     }
 }
 
@@ -507,6 +572,28 @@ fn gatehouse_uses_nextest_and_reuses_the_toolchain_preflight() {
     assert_eq!(runner.rustup_active_toolchain_calls(), 1);
     assert_eq!(*runner.test_calls.borrow(), 0);
     assert!(stdout.contains("Gatehouse pre-release: PASS"));
+    assert_eq!(
+        runner
+            .verification_calls
+            .borrow()
+            .iter()
+            .filter(|&&call| call == "nextest-version")
+            .count(),
+        1
+    );
+    assert_eq!(
+        stdout
+            .matches("OK   cargo-nextest 0.9.146 (exact runner pin)")
+            .count(),
+        1
+    );
+    let version = stdout
+        .find("OK   cargo-nextest")
+        .expect("runner pin checked");
+    let build = stdout
+        .find("OK   cargo build --locked")
+        .expect("build passed");
+    assert!(version < build);
 }
 
 #[test]

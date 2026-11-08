@@ -23,4 +23,19 @@ case "$NEXTEST_BANNER" in
 esac
 
 export BARBICAN_TEST_NEXTEST_VERSION=$NEXTEST_VERSION
-cargo test --locked -p cargo-barbican --test nextest -- --ignored
+nextest_log=$(mktemp)
+trap 'rm -f "$nextest_log"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if cargo test --locked -p cargo-barbican --test nextest -- --ignored > "$nextest_log" 2>&1; then
+  cat "$nextest_log"
+else
+  cat "$nextest_log" >&2
+  exit 1
+fi
+# An empty, ignored or filtered fixture target is not real-runner proof.
+if ! grep -Eq '^test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;' "$nextest_log"; then
+  printf >&2 '%s\n' 'verify-nextest: expected executed nextest tests with no skips or filters'
+  exit 1
+fi

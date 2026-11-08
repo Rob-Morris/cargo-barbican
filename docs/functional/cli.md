@@ -858,9 +858,9 @@ cargo barbican audit [--format text|json]
     status must be explained by cargo-deny's error-summary bitset or
     cargo-audit's findings status; reviewed advisory exceptions still apply.
 
-    Before delegating, `audit` checks that each required scanner binary is on
+    Before the first scan, `audit` checks that every required scanner binary is on
     `PATH` (`cargo-deny` always; `cargo-audit` only when it is the configured
-    lockfile scanner). A missing binary fails closed with an actionable
+    lockfile scanner or both scanners are selected). A missing binary fails closed with an actionable
     `FAIL <tool>: not found on PATH; install with <install command>` line on
     stderr and no report body, in both text and JSON mode. If a delegate is
     present but its run fails, `audit` surfaces the delegate's exit status and
@@ -920,13 +920,13 @@ cargo barbican verify
     Validate barbican.toml before the local execution gates, then:
     1. exact `rust-toolchain.toml` and active toolchain conformance
     2. `pin check` with the default repo-root `reviewed-targets.toml`
-    3. `cargo build --locked`
-    4. default: `cargo test --locked`; opt-in `[verify] test_runner = "nextest"`
-       requires an exact `nextest_version` (stable X.Y.Z, >= 0.9.128), checks
-       `cargo nextest --version`, then runs
+    3. opt-in `[verify] test_runner = "nextest"`: check `cargo nextest --version`
+       against the required exact `nextest_version` (stable X.Y.Z, >= 0.9.128)
+    4. `cargo build --locked`
+    5. default: `cargo test --locked`; nextest runs
        `cargo nextest run --locked --retries 0 --profile default
        --ignore-default-filter --no-tests pass --fail-fast`
-    5. nextest only: frozen Cargo metadata selects the default-member doctest
+    6. nextest only: frozen Cargo metadata selects the default-member doctest
        scope. When libraries enable docs, `cargo test --doc --locked` receives
        every default member via exact --package IDs, retaining feature
        activation. If no libraries enable docs, report the skip explicitly.
@@ -935,7 +935,9 @@ cargo barbican verify
        Missing or inconsistent scope metadata also fails closed.
     Unknown/contradictory runner policy fails before toolchain preflight;
     workspace discovery may already have invoked Cargo. Missing, malformed,
-    failing or mismatching nextest blocks before tests with install guidance.
+    failing or mismatching nextest blocks before the locked build with install
+    guidance. This probe runs once, only after toolchain and reviewed-pin checks
+    pass; cargo-test and `gatehouse policy-check` never probe nextest.
     With nextest selected, CARGO_ALIAS_NEXTEST or alias.nextest in effective
     Cargo config fails toolchain preflight before builds or delegate probes;
     an alias can otherwise replace an installed external subcommand.
@@ -1072,7 +1074,7 @@ contract, not a routine rewording.
   the full default-member scope; a no-eligible-library note is not an OK token.
 - `Verify: PASS` — printed by `verify` on success; there is no matching
   `Verify: FAIL` token. A failing `verify` run stops at the failing step
-  (policy load, toolchain, pins, build, runner conformance, tests or doctest
+  (policy load, toolchain, pins, runner conformance, build, tests or doctest
   scope/execution), reports the
   failure through that step's own output — `Toolchain check: FAIL` or `Pin
   check: FAIL` on stdout for a

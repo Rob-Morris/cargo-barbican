@@ -282,6 +282,7 @@ pub(crate) struct FakeCommandRunner {
     /// from the map is available (`Ok(true)`); `Ok(false)` models a clean
     /// ENOENT and `Err` models any other probe failure.
     pub(crate) delegate_availability: HashMap<cargo_barbican::Delegate, Result<bool, String>>,
+    pub(crate) delegate_probes: RefCell<Vec<cargo_barbican::Delegate>>,
     pub(crate) rustup_active_toolchain_result: Result<String, String>,
     pub(crate) cargo_verbose_version_result: Result<String, String>,
     pub(crate) rustc_verbose_version_result: Result<String, String>,
@@ -347,6 +348,7 @@ impl Default for FakeCommandRunner {
                 exit_code: Some(0),
             },
             delegate_availability: HashMap::new(),
+            delegate_probes: RefCell::new(Vec::new()),
             rustup_active_toolchain_result: Ok(
                 "1.95.0-aarch64-apple-darwin (overridden by 'rust-toolchain.toml')\n".to_owned(),
             ),
@@ -682,6 +684,7 @@ impl CommandRunner for FakeCommandRunner {
         &self,
         delegate: cargo_barbican::Delegate,
     ) -> Result<bool, cargo_barbican::RunnerError> {
+        self.delegate_probes.borrow_mut().push(delegate);
         match self.delegate_availability.get(&delegate) {
             None => Ok(true),
             Some(Ok(available)) => Ok(*available),

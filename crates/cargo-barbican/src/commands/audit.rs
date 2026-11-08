@@ -127,7 +127,17 @@ where
         .licenses_posture(declares_licenses_policy);
     let native_ignores = load_native_delegated_ignores(current_dir)?;
 
+    let uses_cargo_audit = matches!(
+        config.delegates.advisories.lockfile_scanner,
+        LockfileAdvisoryScanner::CargoAudit | LockfileAdvisoryScanner::Both
+    );
     if let Some(exit_code) = ensure_delegate_available(runner, Delegate::CargoDeny, stderr)? {
+        return Ok(exit_code);
+    }
+
+    if uses_cargo_audit
+        && let Some(exit_code) = ensure_delegate_available(runner, Delegate::CargoAudit, stderr)?
+    {
         return Ok(exit_code);
     }
 
@@ -185,14 +195,7 @@ where
             }
         };
 
-    let mut cargo_audit_report = if matches!(
-        config.delegates.advisories.lockfile_scanner,
-        LockfileAdvisoryScanner::CargoAudit | LockfileAdvisoryScanner::Both
-    ) {
-        if let Some(exit_code) = ensure_delegate_available(runner, Delegate::CargoAudit, stderr)? {
-            return Ok(exit_code);
-        }
-
+    let mut cargo_audit_report = if uses_cargo_audit {
         let lockfile_path = current_dir.join("Cargo.lock");
         match runner.cargo_audit_json(scratch.path(), &lockfile_path) {
             Ok(output) => match parse_cargo_audit_json(&output.stdout) {

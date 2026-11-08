@@ -105,6 +105,8 @@ consumer toolchain acceptance.
 - [8 November nextest qualification refresh](2026-11-08-nextest-qualification.md)
   and [exact graph/advisory/execution receipt](2026-11-08-nextest-qualification.json)
   — current bounded macOS/Linux verification-script acceptance through 14 November.
+  [Prerequisite follow-up installation](2026-11-08-nextest-prerequisite-followup.md)
+  recreates the same qualified tool in a new isolated scratch root.
 
 ## When to add a record
 

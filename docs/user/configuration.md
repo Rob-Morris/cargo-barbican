@@ -168,8 +168,10 @@ ordinary inputs, and cargo-test retains its previous alias behaviour. There is n
 environment override for the Barbican runner choice. `policy init` leaves the
 section absent, retaining cargo-test.
 
-`verify` keeps toolchain conformance, reviewed-target pin check and locked
-build, then checks the nextest banner against the exact pin. It runs:
+`verify` runs toolchain conformance and the reviewed-target pin check, then
+checks the selected nextest banner against the exact pin before the locked
+build. A missing or mismatched runner therefore fails before compilation.
+After the build it runs:
 
 ```bash
 cargo nextest run --locked --retries 0 --profile default --ignore-default-filter --no-tests pass --fail-fast

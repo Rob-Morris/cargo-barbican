@@ -222,8 +222,10 @@ This mandatory real-tool check uses the reviewed minimal-feature nextest pin
 from [the tool review](../dependency-reviews/2026-10-14-cargo-nextest-0.9.146.md).
 It does not change the ordinary self-hosted runner. The default Cargo suite
 labels these external-tool tests as ignored; the explicit entry point runs
-all of them and fails if the tool is absent or the pin differs. CI executes
-both paths on macOS and Linux.
+all of them and fails if the tool is absent or the pin differs. It also requires
+a nonzero executed test count with no ignored or filtered tests; Cargo success
+with an empty fixture target is not runner proof. CI executes both paths on
+macOS and Linux.
 
 Normal pre-commit expectations still include checked-in dependency review
 records for direct dependency and `deny.toml` changes.

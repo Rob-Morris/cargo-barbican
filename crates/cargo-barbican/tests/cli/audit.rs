@@ -281,42 +281,66 @@ fn audit_json_fails_closed_with_empty_stdout_when_cargo_deny_is_missing() {
 }
 
 #[test]
-fn audit_fails_closed_with_install_hint_when_configured_cargo_audit_is_missing() {
-    let cli = Cli::parse_from(["cargo-barbican", "audit"]);
-    let client = FakeCratesIoClient::default();
-    let runner =
-        FakeCommandRunner::default().with_missing_delegate(cargo_barbican::Delegate::CargoAudit);
-    let temp_dir = fresh_temp_dir();
-    write_root_manifest(&temp_dir);
-    fs::write(
-        temp_dir.join("barbican.toml"),
-        r#"[delegates.advisories]
-lockfile_scanner = "cargo-audit"
-"#,
-    )
-    .expect("config should write");
-    write_audit_source_lock(&temp_dir);
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-
-    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-        .expect("command should run");
-
-    assert_eq!(exit_code, ExitCode::from(1));
-    assert!(stdout.is_empty());
-    assert_eq!(
-        runner.recorded_deny_json_calls().len(),
-        1,
-        "cargo-deny runs before the cargo-audit preflight"
-    );
-    assert!(
-        runner.recorded_audit_json_calls().is_empty(),
-        "a missing delegate must fail before its subprocess is spawned"
-    );
-    let rendered_error = String::from_utf8(stderr).expect("stderr should be utf8");
-    assert!(rendered_error.contains(
-        "FAIL cargo-audit: not found on PATH; install with `cargo install --locked cargo-audit@0.22.1`"
-    ));
+fn audit_checks_all_selected_delegates_before_scanning() {
+    use cargo_barbican::Delegate::{CargoAudit, CargoDeny};
+    for scanner in ["cargo-audit", "both"] {
+        for format in ["text", "json"] {
+            for (missing, probe_error) in
+                [(CargoDeny, false), (CargoAudit, false), (CargoAudit, true)]
+            {
+                let cli = Cli::parse_from(["cargo-barbican", "audit", "--format", format]);
+                let client = FakeCratesIoClient::default();
+                let runner = if probe_error {
+                    FakeCommandRunner::default()
+                        .with_delegate_probe_error(missing, "permission denied")
+                } else {
+                    FakeCommandRunner::default().with_missing_delegate(missing)
+                };
+                let temp_dir = fresh_temp_dir();
+                write_root_manifest(&temp_dir);
+                fs::write(
+                    temp_dir.join("barbican.toml"),
+                    format!("[delegates.advisories]\nlockfile_scanner = \"{scanner}\"\n"),
+                )
+                .unwrap();
+                write_audit_source_lock(&temp_dir);
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                let exit_code =
+                    run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+                        .unwrap();
+                assert_eq!(exit_code, ExitCode::from(1));
+                assert!(stdout.is_empty());
+                assert!(runner.recorded_deny_json_calls().is_empty());
+                assert!(runner.recorded_audit_json_calls().is_empty());
+                assert_eq!(
+                    *runner.delegate_probes.borrow(),
+                    if missing == CargoDeny {
+                        vec![CargoDeny]
+                    } else {
+                        vec![CargoDeny, CargoAudit]
+                    }
+                );
+                let error = String::from_utf8(stderr).unwrap();
+                if probe_error {
+                    assert!(error.contains("FAIL cargo-audit: unable to probe availability:"));
+                    assert!(error.contains("permission denied"));
+                } else {
+                    let (binary, pin) = if missing == CargoDeny {
+                        ("cargo-deny", "0.19.6")
+                    } else {
+                        ("cargo-audit", "0.22.1")
+                    };
+                    assert_eq!(
+                        error,
+                        format!(
+                            "FAIL {binary}: not found on PATH; install with `cargo install --locked {binary}@{pin}`\n"
+                        )
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -337,6 +361,11 @@ fn audit_does_not_require_cargo_audit_when_it_is_not_the_configured_scanner() {
     assert_eq!(exit_code, ExitCode::SUCCESS);
     assert!(stderr.is_empty());
     assert!(runner.recorded_audit_json_calls().is_empty());
+    assert_eq!(
+        *runner.delegate_probes.borrow(),
+        [cargo_barbican::Delegate::CargoDeny]
+    );
+    assert_eq!(runner.recorded_deny_json_calls().len(), 1);
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("Audit: PASS"));
 }

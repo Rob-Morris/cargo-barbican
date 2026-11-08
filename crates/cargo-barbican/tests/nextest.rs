@@ -601,7 +601,7 @@ fn real_custom_harness_protocol_runs_and_incompatible_discovery_blocks() {
 
 #[test]
 #[ignore = "requires the reviewed real nextest tool; run sh scripts/verify-nextest.sh"]
-fn real_nextest_version_mismatch_blocks_tests_after_build() {
+fn real_nextest_version_mismatch_blocks_build_and_tests() {
     let fixture = Fixture::new();
     fixture.package(
         "",
@@ -613,11 +613,13 @@ fn real_nextest_version_mismatch_blocks_tests_after_build() {
         "barbican.toml",
         "[verify]\ntest_runner = \"nextest\"\nnextest_version = \"0.9.999\"\n",
     );
+    fixture.write("build.rs", "fn main() { std::fs::write(std::path::Path::new(&std::env::var(\"BARBICAN_TEST_MARKERS\").unwrap()).join(\"build\"), \"built\").unwrap(); }\n");
     fixture.lock();
     let output = fixture.verify();
     failed(&output);
     let text = rendered(&output);
-    assert!(text.contains("OK   cargo build --locked"), "{text}");
+    assert!(!text.contains("OK   cargo build --locked"), "{text}");
+    assert!(!fixture.marker("build").exists(), "{text}");
     assert!(
         text.contains("0.9.999") && text.contains("cargo install --locked"),
         "{text}"
