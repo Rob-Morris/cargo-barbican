@@ -2,7 +2,7 @@
 
 This is the authoritative user-facing reference for cargo-barbican's two
 policy files: `barbican.toml` (behaviour policy) and `reviewed-targets.toml`
-(reviewed dependency families). Both live at the consumer repo root. It also
+(reviewed dependency families and toolchain admissions). Both live at the consumer repo root. It also
 covers how the CLI `--min-age-days` override and the delegated `deny.toml`
 boundary interact with them.
 
@@ -10,6 +10,10 @@ boundary interact with them.
 For the adoption sequence around them, see [adoption.md](adoption.md). For
 per-command usage, see [commands.md](commands.md); for exact behaviour
 contracts, see [../functional/cli.md](../functional/cli.md).
+
+For Rust distribution review and installation, start with
+[the toolchain workflow](toolchains.md). Its per-user acceptance and download
+storage are separate from these checked-in policy files.
 
 ## `barbican.toml`
 
@@ -53,6 +57,37 @@ minimum_days = 14
 
 The invocation-scoped `--min-age-days` CLI flag overrides this key for a
 single command run; see [Interactions](#interactions).
+
+The same minimum applies to Rust toolchain admission. Its source dates are
+evaluated conservatively through the end of the latest corroborated UTC day.
+Toolchain-specific exceptions remain bound to their exact subject, effective
+policy and repository scope; crate-family exceptions do not transfer.
+
+### `[toolchain]`
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `require_admission` | boolean | `false` | Require current static toolchain admission and installed correspondence before opted-in gate workspace discovery or runtime conformance probes. |
+| `admission_scope` | string | unset | Stable explicit repository governance identity, required for repository admission. Non-empty, at most 256 bytes, without control characters. |
+
+```toml
+[toolchain]
+require_admission = true
+admission_scope = "your-organisation/your-repository"
+```
+
+Legacy configurations retain their existing conformance checks. Toolchain
+installation, adoption and activation still enforce their own admission
+requirements. There is no configuration setting that silently enables cached
+admission. The current governance scope is checked against portable evidence;
+copying another repository's admission cannot select this scope for you.
+
+Completed toolchain admissions use separate `[[rust.toolchains]]` records in
+`reviewed-targets.toml`. They bind the exact subject, policy, assessment,
+scope and digests of portable evidence and completed prose. Optional
+`review_by` deadlines and exact scoped age exceptions remain explicit. These
+records do not count as crate families or satisfy the existing active-family
+coverage floor. See [toolchains.md](toolchains.md#trust-and-storage).
 
 ### `[high_scrutiny]`
 

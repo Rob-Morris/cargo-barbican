@@ -2,6 +2,7 @@ mod cli;
 mod command_runner;
 mod commands;
 mod crates_io_http;
+mod toolchain_intake;
 
 pub use cli::Cli;
 pub use command_runner::{CommandOutput, CommandRunner, Delegate, RealCommandRunner, RunnerError};

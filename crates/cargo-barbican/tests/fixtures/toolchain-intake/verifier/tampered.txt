@@ -1,0 +1,2 @@
+Barbican verifier fixture
+x

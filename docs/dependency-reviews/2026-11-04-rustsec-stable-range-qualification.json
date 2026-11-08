@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "qualified_at": "2026-11-04T05:58:01Z",
+  "source_database_revision": "965bf9ad083b58e6340d65829d85217b18be9290",
+  "source_implementation": {
+    "url": "https://raw.githubusercontent.com/RustSec/rustsec/bec1cd21fcfdd2a102109273914587bb2d51914e/rustsec/src/osv/unaffected_range.rs",
+    "sha256": "e020b8680a90bb37bdf225c8e7d6578a1646ae777f1cda257df1f2a9a546decd",
+    "revision": "bec1cd21fcfdd2a102109273914587bb2d51914e",
+    "original_url": "https://raw.githubusercontent.com/RustSec/rustsec/main/rustsec/src/osv/unaffected_range.rs",
+    "pinned_bytes_match_initial_snapshot": true,
+    "validation_sources": [
+      {
+        "url": "https://raw.githubusercontent.com/RustSec/rustsec/bec1cd21fcfdd2a102109273914587bb2d51914e/rustsec/src/osv/ranges_for_advisory.rs",
+        "sha256": "81ca70a2d4e9f6976ac27e21dd2ca1ff1ed7e886444eb572d5f8b3fe8ffb6d9f",
+        "retained_source": "rustsec-ranges-for-advisory.rs.txt"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/RustSec/rustsec/bec1cd21fcfdd2a102109273914587bb2d51914e/rustsec/src/advisory/versions.rs",
+        "sha256": "7a096b777d1419841f0517c704c4c53bbb6e61ef16e901e9069df2090adf3e97",
+        "retained_source": "rustsec-versions.rs.txt"
+      }
+    ]
+  },
+  "oracle": {
+    "name": "cargo-audit",
+    "version": "0.22.1",
+    "sha256": "78489d4c3fd75c92cfb0e86e1384a2ff8519c5533683c93102e719874f2d0cec",
+    "mode": "audit --no-fetch --db <exact retained database> --file <source lock> --format json; per-command CARGO_NET_OFFLINE=true"
+  },
+  "source_locks": [
+    {
+      "corpus": "rust",
+      "url": "https://raw.githubusercontent.com/rust-lang/rust/58cf8f9c35b355199727627d07ae34a4e2846d67/Cargo.lock",
+      "packages": 669,
+      "bytes": 160984,
+      "sha256": "d8b190bf43e70da9ceb20c7296ac7dea9ed7abdaded3d12d0142ecc40e399dc5"
+    },
+    {
+      "corpus": "std",
+      "url": "https://raw.githubusercontent.com/rust-lang/rust/58cf8f9c35b355199727627d07ae34a4e2846d67/library/Cargo.lock",
+      "packages": 49,
+      "bytes": 9822,
+      "sha256": "53d9ccff0c906de434b65af90d5c30063894b940fc839261f1fb06ef2e69e3d3"
+    },
+    {
+      "corpus": "cargo",
+      "url": "https://raw.githubusercontent.com/rust-lang/cargo/5f94df4789f005f9a352888e8355ffc645b7ed0e/Cargo.lock",
+      "packages": 550,
+      "bytes": 136494,
+      "sha256": "b8dee6ceec201b2031561cac7d44318f45e618e18bfa1be511370a97dfdf52df"
+    }
+  ],
+  "registry_package_occurrences": 1093,
+  "advisory_version_queries": 273,
+  "product_affected_observations": 30,
+  "oracle_affected_observations": 30,
+  "missing": [],
+  "extra": [],
+  "query_counts": {
+    "rust": 85,
+    "std": 5,
+    "cargo": 183
+  },
+  "affected_counts": {
+    "rust": 9,
+    "std": 0,
+    "cargo": 21
+  },
+  "limitations": [
+    "No prerelease registry target occurs in these three locks; prerelease targets remain unsupported.",
+    "Affected source inclusion is not shipment, reachability, native coverage or compiler safety.",
+    "Offline registry-index gaps affected oracle yank checks; yank results are not part of range parity or a complete audit clearance.",
+    "The earlier 1406-document parsing test did not establish matching representative candidate package versions."
+  ],
+  "artifacts": {
+    "admission-range-comparison.json": "963b51742e31a89fbb875ad6bb1ba1681427e20259f98b039eec0c08dd118113",
+    "admission-range-product-results.json": "d0221ddd702a15dd6ff52db59cae6253c88f97abe4e3db91d8a79894447cda7a",
+    "admission-range-rust-audit.json": "3417ffa28639d84f8bc2e58c3bf0af761e7c53a4cfd34018b4b090e898ce2e37",
+    "admission-range-std-audit.json": "e4c2cd11a8186dda00ff7f7c89533dc3c2b6e419e2464e42c3f511c99adb3e3b",
+    "admission-range-cargo-audit.json": "2b8fddd0b5fd7a9bfcd97e4a7dd386848e92c05ba4da8c539262451fcbfee22c",
+    "admission_ranges_qualification.rs.txt": "876778f15d173c8e56c5068a600b47e4671f642867819e9a0bcf01751d2c0a0f"
+  },
+  "overlap_followup": {
+    "reason": "Independent Sol review found combined patched/unaffected overlap was not rejected.",
+    "validation": "Closed RustSec bounds including prereleases; max128 ranges per list; combined pairwise rejection before SourceAdvisory construction.",
+    "parsed_advisories": 1406,
+    "queries": 273,
+    "affected": 30,
+    "missing": [],
+    "extra": [],
+    "focused_tests": 9,
+    "focused_test_seconds": 0.43,
+    "actual_corpus_seconds": 0.43,
+    "qualifier_source_sha256": "460add0acfa52545dff8558f0e6be57ae27792b7c7764bd21bc9607862e253e5",
+    "product_results_sha256": "d0221ddd702a15dd6ff52db59cae6253c88f97abe4e3db91d8a79894447cda7a",
+    "temporary_test_removed": true,
+    "strict_library_clippy": "PASS --all-targets -- -D warnings",
+    "source_guard": "PASS"
+  }
+}

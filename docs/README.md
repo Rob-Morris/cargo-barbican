@@ -10,6 +10,7 @@ routes to its artefacts.
   - [Configuration](user/configuration.md) — `barbican.toml` and `reviewed-targets.toml` reference
   - [Operations](user/operations.md) — day-2 lifecycle: failing audits, updates, family lifecycle
   - [Hardening](user/hardening.md) — making the barbican gate hard to bypass
+  - [Rust Toolchains](user/toolchains.md) — review and admit a Rust distribution before its first execution
 - [Functional](functional/README.md) — CLI and behaviour contracts
 - [Architecture](architecture/README.md) — goals, boundaries, and design-decision routing
 - [Contributor](contributor/README.md) — how to contribute to this repo

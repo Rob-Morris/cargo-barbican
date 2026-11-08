@@ -86,6 +86,21 @@ impl RustReviewedTargetsReport {
                     .any(|fact| fact.family_name() == family.name() && fact.is_satisfied())
             })
             .flat_map(RustReviewedFamilyReport::advisory_exceptions_with_matching_resolved_target)
+            .filter(|exception| {
+                self.families
+                    .iter()
+                    .filter(|family| {
+                        family
+                            .resolved_checks
+                            .iter()
+                            .any(|check| check.crate_name() == exception.spec().crate_name())
+                    })
+                    .all(|family| {
+                        review_record_facts
+                            .iter()
+                            .any(|fact| fact.family_name() == family.name() && fact.is_satisfied())
+                    })
+            })
             .collect()
     }
 }
@@ -399,12 +414,12 @@ pub fn check_reviewed_rust_targets(
         },
     );
 
-    let observed_lockfile_targets = lockfile.packages().iter().fold(
+    let mut observed_lockfile_targets = lockfile.packages().iter().fold(
         BTreeMap::<&str, ObservedResolvedTarget>::new(),
         |mut grouped, package| {
             let observed = grouped.entry(package.name.as_str()).or_default();
+            observed.packages.push(package.clone());
             observed.versions.insert(package.version.clone());
-            observed.has_crates_io_entry |= package.is_crates_io();
 
             if !package.is_crates_io() {
                 observed.non_crates_io_sources.insert(
@@ -426,6 +441,16 @@ pub fn check_reviewed_rust_targets(
             grouped
         },
     );
+
+    for family in reviewed_targets.rust_families() {
+        for (name, target) in family.resolved() {
+            observed_lockfile_targets
+                .entry(name.as_str())
+                .or_default()
+                .reviewed_targets
+                .push(target.clone());
+        }
+    }
 
     let families = reviewed_targets
         .rust_families()

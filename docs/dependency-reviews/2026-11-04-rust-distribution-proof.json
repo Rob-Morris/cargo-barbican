@@ -1,0 +1,216 @@
+{
+  "authentic": {
+    "scope": "data-only product module source via exact-reviewed isolated harness; no authentic payload extraction/installation/execution",
+    "profile": "default",
+    "release": "1.99.1",
+    "host": "aarch64-apple-darwin",
+    "encoding": "xz",
+    "manifest_sha256": "fb152be80975c194aa5fc684b2aec3a6e14e2b855efe2faa4e5f8ae6e590f463",
+    "archives": [
+      {
+        "package": "cargo",
+        "expanded_bytes": 32862720,
+        "physical_headers": 68,
+        "effective_entries": 68,
+        "mapped_entries": 44,
+        "compared_paths": 44,
+        "missing": [],
+        "unexpected": [],
+        "changed_type_size_mode_hash": [],
+        "reference_sha256": "6d33785c523ec481852375463b6b2a413799cab017256a61540fcc7e94dfca70"
+      },
+      {
+        "package": "clippy-preview",
+        "expanded_bytes": 13665792,
+        "physical_headers": 22,
+        "effective_entries": 22,
+        "mapped_entries": 5,
+        "compared_paths": 5,
+        "missing": [],
+        "unexpected": [],
+        "changed_type_size_mode_hash": [],
+        "reference_sha256": "e51366d677ddd3103efbc314a1c8db521ebbdb1349251c9652fd930175bb2334"
+      },
+      {
+        "package": "rust-docs",
+        "expanded_bytes": 847405056,
+        "physical_headers": 125063,
+        "effective_entries": 67505,
+        "mapped_entries": 67488,
+        "compared_paths": 67488,
+        "missing": [],
+        "unexpected": [],
+        "changed_type_size_mode_hash": [],
+        "reference_sha256": "a18f3062c62e42c9900e9116416fa0d0dccaf7fae9acb89686cfbcbee472910f"
+      },
+      {
+        "package": "rust-std",
+        "expanded_bytes": 152414208,
+        "physical_headers": 139,
+        "effective_entries": 78,
+        "mapped_entries": 59,
+        "compared_paths": 59,
+        "missing": [],
+        "unexpected": [],
+        "changed_type_size_mode_hash": [],
+        "reference_sha256": "a3f29c3b466b20e62756ce8a854d0abf901e3c345c624b796dd31390ec426bf1"
+      },
+      {
+        "package": "rustc",
+        "expanded_bytes": 280002560,
+        "physical_headers": 72,
+        "effective_entries": 72,
+        "mapped_entries": 43,
+        "compared_paths": 43,
+        "missing": [],
+        "unexpected": [],
+        "changed_type_size_mode_hash": [],
+        "reference_sha256": "a9a75ce326c91a0354a9e6889749047a61fbc6b922953080730ea847d1b7721b"
+      },
+      {
+        "package": "rustfmt-preview",
+        "expanded_bytes": 5842944,
+        "physical_headers": 22,
+        "effective_entries": 22,
+        "mapped_entries": 5,
+        "compared_paths": 5,
+        "missing": [],
+        "unexpected": [],
+        "changed_type_size_mode_hash": [],
+        "reference_sha256": "eb8b53b1fc316f7a3a99475f108e542800eff483aa76e64cf995d92b2c2174f9"
+      }
+    ],
+    "total": {
+      "expanded_bytes": 1332193280,
+      "mapped_entries": 67644
+    },
+    "timing": {
+      "elapsed_seconds": 23.176306708017364,
+      "exit_code": 0
+    },
+    "output_sha256": "3d7e90140913f2f8b577b364d5564496822aecf349eeda09aea2a256b9f0d838"
+  },
+  "native_index_cases": [
+    {
+      "case": "valid",
+      "decode": {
+        "code": 0,
+        "stdout": "PASS 10240\n",
+        "stderr": "",
+        "stdlib_liblzma": "PASS"
+      },
+      "code": 0,
+      "probe": true,
+      "installed_payload_checks": [
+        {
+          "path": "lib/rustlib/aarch64-apple-darwin/lib/libstd.rlib",
+          "expected_sha256": "ec19916a169f416bd78c9a47916813d41c51882e4cd49aa795bf3573047e44b6",
+          "actual_sha256": "ec19916a169f416bd78c9a47916813d41c51882e4cd49aa795bf3573047e44b6",
+          "matches": true
+        },
+        {
+          "path": "bin/cargo",
+          "expected_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "actual_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "matches": true
+        },
+        {
+          "path": "bin/rustc",
+          "expected_sha256": "4bc9154bdab85e5df57ee422f71a2e7bf3fdaa2dbe2f5e8f48f6db1748a28818",
+          "actual_sha256": "4bc9154bdab85e5df57ee422f71a2e7bf3fdaa2dbe2f5e8f48f6db1748a28818",
+          "matches": true
+        },
+        {
+          "path": "bin/rustdoc",
+          "expected_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "actual_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "case": "index-size",
+      "decode": {
+        "code": 0,
+        "stdout": "PASS 10240\n",
+        "stderr": "",
+        "stdlib_liblzma": "Corrupt input data"
+      },
+      "code": 0,
+      "probe": true,
+      "installed_payload_checks": [
+        {
+          "path": "lib/rustlib/aarch64-apple-darwin/lib/libstd.rlib",
+          "expected_sha256": "ec19916a169f416bd78c9a47916813d41c51882e4cd49aa795bf3573047e44b6",
+          "actual_sha256": "ec19916a169f416bd78c9a47916813d41c51882e4cd49aa795bf3573047e44b6",
+          "matches": true
+        },
+        {
+          "path": "bin/cargo",
+          "expected_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "actual_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "matches": true
+        },
+        {
+          "path": "bin/rustc",
+          "expected_sha256": "e82f1f6689c080477e066f1b791d4b8949f73ebf4e6dfe1db7070b871611469b",
+          "actual_sha256": "e82f1f6689c080477e066f1b791d4b8949f73ebf4e6dfe1db7070b871611469b",
+          "matches": true
+        },
+        {
+          "path": "bin/rustdoc",
+          "expected_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "actual_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "case": "backward-size",
+      "decode": {
+        "code": 0,
+        "stdout": "PASS 10240\n",
+        "stderr": "",
+        "stdlib_liblzma": "Corrupt input data"
+      },
+      "code": 0,
+      "probe": true,
+      "installed_payload_checks": [
+        {
+          "path": "lib/rustlib/aarch64-apple-darwin/lib/libstd.rlib",
+          "expected_sha256": "ec19916a169f416bd78c9a47916813d41c51882e4cd49aa795bf3573047e44b6",
+          "actual_sha256": "ec19916a169f416bd78c9a47916813d41c51882e4cd49aa795bf3573047e44b6",
+          "matches": true
+        },
+        {
+          "path": "bin/cargo",
+          "expected_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "actual_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "matches": true
+        },
+        {
+          "path": "bin/rustc",
+          "expected_sha256": "839d361ec7d22360a551ba9b5263f8c7513dfe1b51a5439c097c97a91bd8e2fc",
+          "actual_sha256": "839d361ec7d22360a551ba9b5263f8c7513dfe1b51a5439c097c97a91bd8e2fc",
+          "matches": true
+        },
+        {
+          "path": "bin/rustdoc",
+          "expected_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "actual_sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+          "matches": true
+        }
+      ]
+    }
+  ],
+  "native_scope": "Authored harmless sentinel only; each case uses its own sentinel path. No authentic Rust binary executed. Exact Rustup1.29.0 native macOS arm64 only.",
+  "tests": "Final exact-source locked/offline suite:19passed (17distribution+2existingSHA),0failed,8.40seconds; includes two equivalent clippy lint fixes.",
+  "receipts": {
+    "authentic-comparison.json": "a767ac70daf82e9d2608c4bd347b6616ad7857055df67b51b5160fe75b134dc0",
+    "native-index-results.json": "2f419401b967b041cbb765d89abe1e118917c7d2d904d6015dbec5d12928c996",
+    "foundation-tests.log": "227adc51bf2a6a363a6c18a312f4a2207ec97e1492488493e82e9bdc131b03fc",
+    "final-path-test.log": "d983c0e6088c6a70faf9f2fb2960603738d5b440b460badd5fd730c922114691",
+    "execution-incident.json": "d34c4c6a7060623aa5f1f02fd0aa54f560bbbfd04951108c9a1a828d371984e6",
+    "final-tests.log": "e6c1796a906c2a3d534d85743aa32849fcdd4c74fef6009f88a464137a4ecf4a"
+  }
+}

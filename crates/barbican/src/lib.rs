@@ -21,11 +21,13 @@ pub mod pin_check;
 pub mod release_age;
 pub mod review_record;
 pub mod reviewed_targets;
+pub mod rust_distribution;
 pub mod scaffold;
 pub mod sha256;
 pub mod source_identity;
 pub mod spec;
 pub mod toolchain;
+pub mod toolchain_admission;
 
 pub use advisory::{
     AdvisoryAuditCompletenessFailure, AdvisoryAuditOutcome, AdvisoryDisposition, AdvisoryFinding,

@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.36.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.37.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -88,7 +88,7 @@ support is explicitly delivered.
 Install the insiders release candidate from its immutable git tag:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.36.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.37.0
 ```
 
 The tag is the install identity; do not replace it with a moving branch in
@@ -101,11 +101,22 @@ workspace, choose an exact Rust channel deliberately:
 cargo barbican policy init --toolchain <exact-channel>
 ```
 
-Install that selected toolchain, run `cargo barbican toolchain check`, then
+Use an already trusted toolchain for Cargo-based scaffolding. Review and
+explicitly accept a new compiler through the direct
+[toolchain workflow](docs/user/toolchains.md) before installation or execution.
+With a trusted selected compiler, run `cargo barbican toolchain check`, then
 prepare the graph and complete dependency review before enforcing it. Init
 creates policy and a reusable pending review template; it does not approve the
 graph. Optional `--pre-commit-hook` copies a disabled local helper. Plain init
 also links the [manual installation/integration guide](docs/user/ci.md#pre-commit-hook).
+
+For a new Rust compiler, use the direct trusted `cargo-barbican toolchain`
+workflow to review and explicitly accept it before installation or execution.
+That workflow provides scoped source evidence, checked native installation or
+static adoption, and separate repository pin activation. Runtime
+`toolchain check` alone does not establish that admission. See
+[Rust toolchains](docs/user/toolchains.md) for bootstrap, supported routes and
+repository opt-in.
 
 Install only the scanners selected by `barbican.toml`; see
 [prerequisites](docs/user/integration.md#prerequisites). After review:
@@ -267,7 +278,7 @@ The main files, all documented in the
 [configuration reference](docs/user/configuration.md):
 
 - [`barbican.toml`](docs/user/configuration.md) — release-age, high-scrutiny, and delegate settings
-- [`reviewed-targets.toml`](docs/user/configuration.md) — active reviewed dependency families and exact resolved targets
+- [`reviewed-targets.toml`](docs/user/configuration.md) — active reviewed dependency families, exact resolved targets and separate toolchain admissions
 - [`docs/dependency-reviews/`](docs/user/configuration.md) — checked-in human review records
 - [`deny.toml`](docs/user/configuration.md) — native `cargo-deny` policy, delegated rather than redefined
 - `rust-toolchain.toml` — exact Rust toolchain input required by `verify` and

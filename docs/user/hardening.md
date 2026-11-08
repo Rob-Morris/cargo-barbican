@@ -43,7 +43,12 @@ diff:
 
 - **Source substitution for reviewed crates.** `pin check` requires every
   `Cargo.lock` entry whose name matches a reviewed crate to match the reviewed
-  source and version. A reviewed crates.io target cannot be satisfied by Git,
+  source, version and applicable checksum in the explicitly reviewed set.
+  Multiple versions require separate active family declarations; every
+  observed sibling must match and every expected identity must be present.
+  Checksums remain paired with their own source/version, and a weak duplicate
+  declaration cannot dilute a checksum-bound declaration. A reviewed crates.io
+  target cannot be satisfied by Git,
   path, or alternate-registry entries, even alongside a matching registry
   entry. A reviewed Git target requires the exact repository URL and full
   commit; another repository, revision, or registry entry cannot satisfy it.
@@ -98,6 +103,15 @@ diff:
   or emptying it of active families, does not turn the gate off: `verify`
   refuses to run build/test verification without at least one active reviewed
   family, and it re-runs the full `pin check` gate first.
+- **Opted-in toolchain admission precedes Cargo discovery.** With
+  `[toolchain].require_admission = true`, the existing execution gates first
+  require current repository admission, local acceptance and static installed
+  correspondence. Explicit repository paths cannot substitute a workspace
+  member's weaker policy for its actual governance root. New installation
+  and adoption have their own fresh-evidence checks; unchanged continuing use
+  does not silently become permission for another repository or installation.
+  See [toolchain workflow](toolchains.md) for exact supported routes and
+  direct trusted entry before any Cargo launcher can select a candidate.
 
 ## What barbican leaves to process
 
@@ -110,6 +124,12 @@ repo-side recipe below exists to cover:
   or sandbox everything Cargo executes. Reviewed build scripts, proc macros,
   runners, linkers and tests execute with ordinary Cargo semantics after the
   gate passes. Clean, ephemeral CI runners remain useful defence in depth.
+  Toolchain admission adds scoped official-input authentication and installed
+  byte/type/mode correspondence, with explicit human assessment of source and
+  advisory uncertainty. It does not prove binary benignness or reproducible
+  builds. Per-user trust and acceptance assume that local account's authority;
+  they are not protection against a hostile process rewriting all that user's
+  state. Restoring a download cache cannot itself grant local approval.
 - **Intermediate symlink and concurrent-filesystem containment are incomplete.**
   Review-record readers refuse a symlink at the file itself, but do not yet
   prove every intermediate directory stays inside the workspace. Workspace

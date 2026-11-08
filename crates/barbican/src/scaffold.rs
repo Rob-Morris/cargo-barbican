@@ -161,6 +161,7 @@ pub fn compose_pin_family_stub(
     let document = RawReviewedTargets {
         rust: RawRustReviewedTargets {
             families: vec![family],
+            ..Default::default()
         },
     };
 
@@ -535,7 +536,8 @@ pub fn plan_pin_add(
             "\n{}",
             toml::to_string(&RawReviewedTargets {
                 rust: RawRustReviewedTargets {
-                    families: vec![family]
+                    families: vec![family],
+                    ..Default::default()
                 }
             })
             .expect("typed Git family serialises")

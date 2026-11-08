@@ -1,0 +1,16 @@
+version = 1
+SPDX-PackageName = "rpgpie"
+SPDX-PackageSupplier = "Heiko Schaefer <heiko@schaefer.name>"
+SPDX-PackageDownloadLocation = "https://codeberg.org/heiko/rpgpie"
+
+[[annotations]]
+path = ["Cargo.lock"]
+SPDX-FileCopyrightText = "Heiko Schaefer <heiko@schaefer.name>"
+SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+# certificate data from public keyservers
+path = ["tests/608B00ABE1DAA3501C5FF91AE58271326F9F4937", "tests/merge/**", "tests/certs/**", "tests/validity/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Heiko Schaefer <heiko@schaefer.name>"
+SPDX-License-Identifier = "CC0-1.0"

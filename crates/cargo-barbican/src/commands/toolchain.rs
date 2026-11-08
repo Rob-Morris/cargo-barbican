@@ -64,6 +64,9 @@ pub(super) fn run_toolchain<R: CommandRunner + ?Sized>(
                 ToolchainCheckOutcome::Failed(exit) => Ok(exit),
             }
         }
+        _ => Err(CommandError::ToolchainIntake(
+            "static intake must dispatch before Cargo workspace discovery".into(),
+        )),
     }
 }
 

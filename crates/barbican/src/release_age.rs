@@ -119,12 +119,10 @@ pub fn evaluate_release_age(
     exception: Option<&ReviewedReleaseAgeException>,
 ) -> ReleaseAgeReport {
     let age_seconds = (now - release.published_at).whole_seconds().max(0);
-    let clamped_age_seconds = age_seconds as u64;
-    let minimum_age_seconds = minimum_days.saturating_mul(86_400);
 
     let outcome = if release.yanked {
         ReleaseAgeOutcome::Yanked
-    } else if clamped_age_seconds < minimum_age_seconds {
+    } else if !meets_minimum_age(age_seconds, minimum_days) {
         match exception.filter(|exception| exception.spec() == &spec) {
             Some(exception) if exception.checksum_sha256() == &release.checksum_sha256_hex => {
                 ReleaseAgeOutcome::AllowedByException {
@@ -151,6 +149,12 @@ pub fn evaluate_release_age(
         minimum_days,
         outcome,
     }
+}
+
+/// The shared maturity threshold; source dating and exception authority stay with
+/// their respective crate/distribution owners.
+pub(crate) fn meets_minimum_age(age_seconds: i64, minimum_days: u64) -> bool {
+    age_seconds.max(0) as u64 >= minimum_days.saturating_mul(86_400)
 }
 
 pub fn format_age(seconds: i64) -> String {

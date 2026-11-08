@@ -87,6 +87,16 @@ fn run_at(
     stderr: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
     let current_dir = env::current_dir().map_err(CommandError::Io)?;
+    if crate::toolchain_intake::is_static(&cli) {
+        return crate::toolchain_intake::run(
+            &cli,
+            &current_dir,
+            OffsetDateTime::now_utc(),
+            stdout,
+            true,
+        )
+        .map_err(CommandError::ToolchainIntake);
+    }
     let base_url = crates_io_base_url()?;
     if base_url != DEFAULT_CRATES_IO_BASE_URL {
         writeln!(
@@ -184,6 +194,13 @@ where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
+    if crate::toolchain_intake::is_static(&cli) {
+        return crate::toolchain_intake::run(&cli, current_dir, now, stdout, false)
+            .map_err(CommandError::ToolchainIntake);
+    }
+    let static_root = crate::toolchain_intake::gate_preflight(&cli, current_dir, now)
+        .map_err(CommandError::ToolchainIntake)?;
+    let current_dir = static_root.as_deref().unwrap_or(current_dir);
     let allow_manifest_degradation = matches!(&cli.command, Command::Audit { .. });
     let workspace =
         workspace::discover_workspace_root(current_dir, runner, allow_manifest_degradation)?;

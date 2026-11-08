@@ -1,12 +1,16 @@
 # CLI Contract
 
 Current `cargo barbican` surface. This document describes the intended
-behaviour of the implemented command set.
+behaviour of the implemented command set. Parser help and usage diagnostics use
+`cargo-barbican` as the executable name. Direct invocation and Cargo's normalized
+`barbican` subcommand argument use the same parser and exit conventions.
 
 ## Workspace-root anchoring
 
-Every subcommand resolves the workspace root before doing anything else, so
-commands behave identically from any directory inside a consumer repo.
+Legacy subcommands resolve the workspace root before their normal work, so
+commands behave identically from any directory inside a consumer repo. Toolchain
+intake commands and opted-in admission preflight use the filesystem-only route
+described below before Cargo discovery or runtime probes.
 For a readable, parseable nearest manifest, discovery delegates to `cargo
 locate-project --workspace`, so Cargo owns membership, `[workspace].exclude`,
 glob, explicit workspace-pointer, and path-normalisation semantics. A Cargo
@@ -23,11 +27,115 @@ root, as do relative path arguments such as `--lockfile`, `--base-dir`, and
 `--base-lockfile`.
 
 When no `Cargo.toml` exists in the invocation directory or any parent, every
-command fails closed with a `FAIL workspace root not found: ...` line on
+legacy repository command fails closed with a `FAIL workspace root not found: ...` line on
 stderr naming the discovery rule, and exits `1`. A nearest manifest that
 cannot be read or parsed still anchors discovery to its own directory (or to
 an enclosing `[workspace]` root); the command that actually consumes that
 manifest then reports the failure through its own error or degradation path.
+
+## Toolchain intake and early admission
+
+Use the direct already trusted `cargo-barbican` executable to review a candidate.
+`cargo +<already-trusted-toolchain> barbican …` is also a launcher option for
+static review; ordinary Cargo dispatch can select a repository's candidate
+before Barbican starts. Neither launcher selection nor static review grants
+candidate execution authority.
+
+Global `--repo <root>`, `--data-dir <private-root>` and `--cache-dir <private-root>`
+are available for intake and applicable early gates. Relative explicit paths
+resolve from the invocation directory. Other legacy commands reject these intake
+options. Default data is per-user Application Support on macOS or XDG data on
+Linux, separate from disposable cache. Explicit storage paths do not waive
+ownership, containment, file-type or applicable Cargo environment checks.
+
+```text
+cargo-barbican [--repo ROOT] toolchain review EXACT-STABLE
+    [--standalone] [--host HOST] [--profile minimal|default]
+    [--component COMPONENT,...] [--target TARGET,...]
+    [--min-age-days DAYS] [--format text|json]
+cargo-barbican [--repo ROOT] toolchain accept REVIEW-ID --record COMPLETED-PATH
+    [operation options]
+cargo-barbican [--repo ROOT] toolchain admission-check [REVIEW-ID]
+    [operation options]
+cargo-barbican [--repo ROOT] toolchain install REVIEW-ID
+    --rustup-executable EXACT-TRUSTED-PATH [--allow-initial-default]
+    [operation options]
+cargo-barbican [--repo ROOT] toolchain adopt REVIEW-ID [operation options]
+cargo-barbican [--repo ROOT] toolchain installation-check REVIEW-ID [operation options]
+cargo-barbican --repo ROOT toolchain activate REVIEW-ID [operation options]
+cargo-barbican toolchain trust show [--format text|json]
+cargo-barbican toolchain trust refresh
+    [--public-key PATH --fingerprint FULL-FINGERPRINT] [--format text|json]
+cargo-barbican toolchain trust approve PROPOSAL-ID [--format text|json]
+```
+
+Operation options are `--standalone`, `--cached-admission --cache-reason REASON`,
+`--rustup-home PATH`, `--min-age-days DAYS`, and `--format text|json`. `--repo` and `--standalone` cannot
+be combined. Repository admission and activation require repository context.
+A standalone `--min-age-days` override must be explicitly repeated on every
+acceptance, install, adoption or inspection operation; omission recomputes the
+default seven-day policy. Even an explicit value of seven records distinct
+operator provenance and must be repeated. Stored review policy never supplies
+an implicit waiver. Repository review and operation overrides are rejected;
+configure checked-in `release_age.minimum_days` or an exact scoped age exception.
+Installation inspection accepts standalone context; it verifies current accepted
+bytes and known facts without creating an installation, execution or admission
+grant. Cached admission is an explicit per-operation request, bounded by the
+oldest required mutable-source check (at most 24 hours) and any earlier expiry.
+It is never an automatic fallback or a saved operating mode. Continuing admitted
+use in the same repository checks current policy, deadlines, adverse facts and
+installed bytes without imposing that fresh-operation 24-hour limit.
+
+Review returns an exact review ID, selected archive identities, source coverage
+and findings, a concrete dossier/source directory and a human template path.
+Acceptance requires completed exact prose, explicit residual-uncertainty and
+finding assessments, and a separate current local personal acceptance. With
+`--repo`, it publishes portable evidence before the repository admission
+reference. An empty local store can explicitly accept the existing portable
+review: online collection reconstructs and checks current facts; explicit cached
+import requires checked-in original authenticated inputs, source snapshots and
+independently verified archive cache bytes. It preserves the repository author's
+assessment and repository bytes while recording the new local acceptance time.
+A changed source identity produces a new review requiring assessment.
+
+Trust show displays approved material, retained adverse observations and pending
+bundled proposals. Refresh displays exact proposed material, its base and the
+private proposal path; approve requires that exact proposal ID and unchanged
+base. Unchanged refresh updates check time without fabricating approval time.
+Authenticated adverse observations are retained before refusal. Trust records,
+personal acceptance and installation correspondence are distinct local facts.
+
+Successful intake output is text by default. `--format json` emits one JSON
+object with `schema_version: 1`, `operation`, `status`, and operation-specific
+fields. Review includes `subject`, `evidence`, `policy`, `review_template`,
+`dossier_directory` and `source_directory`. Acceptance/install/adopt/activation
+include `eligibility`, with the evaluated operation, exact identities, time and
+mode; explicit cached mode records its reason, oldest check and expiry.
+Success exits 0; operational/policy refusal exits 1 with a terminal-escaped
+`FAIL toolchain intake: …` diagnostic on stderr; parser usage errors exit 2.
+Failures do not promise a JSON result. Static review, acceptance and activation
+never claim compatibility success; activation directs the operator to the
+existing explicit verify or pre-release gate.
+
+When `[toolchain].require_admission = true`, `verify`, `gatehouse policy-check`,
+`gatehouse pre-release` and legacy `toolchain check` perform canonical admission
+and installed-correspondence checks before any Cargo delegate. Explicit nested
+package roots cannot evade ancestor governance; a positively declared independent
+`[workspace]` root can anchor itself. Ambiguous membership and `package.workspace`
+require explicit correction/root selection, without asking Cargo to resolve them.
+The guard allows an exported `RUSTUP_TOOLCHAIN` only when it exactly equals the
+fully qualified pinned and accepted release-host slot; aliases, bare releases
+and paths fail closed. It rejects other ambient Rustup source/fallback controls, relative
+inherited root controls, exact-root Rustup directory overrides, and effective
+Cargo environment/executable controls from the target root, ancestors and Cargo
+home. These checks apply even with explicit storage paths and run again before
+delegation. Existing trusted launchers remain the trust assumption; no arbitrary
+PATH attestation is implied. Opt-in false preserves legacy behavior.
+
+Native installation/adoption/activation qualification is narrower than manifest
+metadata support: see [toolchain workflows](../user/toolchains.md) and the
+[qualification record](../dependency-reviews/2026-11-04-native-toolchain-qualification.md).
+Unsupported native evaluator cases fail closed before candidate execution.
 
 ## Subcommands
 
@@ -1122,3 +1230,23 @@ This is same-runner diagnostic evidence. Earlier build/test may have modified
 inputs; assess retains ordinary metadata semantics. Fresh conformance prevents
 continuation through rejected executable controls, but does not attest binaries,
 isolate prior executed code or secure the earlier Cargo install/fetch bootstrap.
+
+
+## Explicitly reviewed sibling versions
+
+`pin check` reconciles the complete set of locked identities for each governed
+crate name against all active families. Distinct versions need distinct family
+declarations; the schema remains one target per crate name per family. Every
+expected target must be present, and every observed sibling must match its own
+source/version/checksum tuple. Unreviewed versions, source substitutions,
+checksumless siblings, swapped checksums, duplicate locked identities and
+conflicting checksum declarations fail closed. A legacy version-only declaration
+cannot dilute a checksum-bound declaration for the same identity. Direct
+manifest requirements retain their existing exact requirement semantics.
+
+Advisory bindings reuse this complete reconciliation and additionally require
+completed review records for all families governing that crate name. A pending
+sibling family cannot make a new identity eligible. Grants remain specific to
+their declared target: no advisory, age or execution-surface allowance transfers
+to another version. Pre-add age/inspection/assessment retain their existing
+source-specific checks; they do not become a substitute for the execution gate.

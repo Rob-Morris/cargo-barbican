@@ -67,6 +67,8 @@ if { [ "$MODE" = vanilla ] || [ "$MODE" = skip ]; } && ! off_main; then
 fi
 
 if [ "$MODE" != skip ]; then
+  sh scripts/check_vendored_source.sh
+  sh scripts/tests/check_vendored_source_test.sh
   sh scripts/tests/check_commit_msg_test.sh
   sh scripts/tests/check_release_tag_test.sh
   # verify_branch_guard_test.sh drives this very script (including its

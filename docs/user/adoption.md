@@ -27,6 +27,13 @@ After the [reviewed installation](integration.md#consumer-flow) and
 [configured prerequisites](integration.md#prerequisites), work from the intended
 Cargo workspace root. Choose an exact channel, rather than copying a default:
 
+Use an already trusted compiler for these Cargo-based scaffold commands. A
+Cargo launcher can select or download the repository compiler before
+Barbican starts. For a new exact stable Rust distribution, first use the
+direct trusted [toolchain workflow](toolchains.md) to review, explicitly
+accept and perform checked installation. That guide also explains separate
+repository admission and its narrower qualified native support matrix.
+
 ```sh
 cargo barbican policy init --toolchain <exact-channel>
 ```
@@ -57,7 +64,10 @@ and bare versioned beta channels such as `1.96.0-beta` are not accepted. A
 missing or invalid pin blocks `--ci github`, because the
 generated gate must not start from an unpinned compiler.
 
-Install the chosen compiler explicitly, then diagnose agreement:
+The native example below assumes the chosen compiler already has your trust.
+Complete pre-execution review of a new compiler before installation; use the
+checked `toolchain install` route from the guide when adopting admission.
+Then diagnose agreement:
 
 ```sh
 rustup toolchain install 1.95.0
@@ -291,6 +301,11 @@ installation tree, and target runner/linker, rustflags, and Cargo `[env]`
 settings remain normal build inputs. Treat the subsequent locked build and
 test as ordinary Cargo execution and review the dependency execution surface
 accordingly.
+
+Opting into `[toolchain].require_admission` adds static admission and installed
+correspondence before workspace discovery. Its supported Rustup selection and
+effective environment controls are checked before delegation; the broader
+build/test execution boundary above still applies.
 
 The first Gatehouse step applies the same coverage floor as
 `cargo barbican inventory --enforce`. It fails closed (`Inventory: FAIL`) when

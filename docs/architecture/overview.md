@@ -30,6 +30,12 @@ unverified on Windows.
 Treat Windows use as experimental and use-at-your-own-risk until full Windows
 support is explicitly delivered.
 
+Rust distribution metadata and native installer qualification are separate.
+The checked toolchain handoff/static installed mapping currently admits only
+the exact qualified macOS ARM64 Rustup build; unqualified hosts, evaluators
+and preferred encodings refuse. Broader metadata support is not a claim of
+native installation support. See [toolchain operation](../user/toolchains.md).
+
 ## Goals
 
 1. Be the single, portable source of truth for Rust supply-chain policy — one dependency-intake gate that many repos install, pin, and enforce consistently.
@@ -51,6 +57,26 @@ The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
 `update`, `assess`, `inspect`, `gatehouse candidate`, `gatehouse pre-release`, `gatehouse policy-check`, `toolchain check`, `policy init`,
 `inventory`, `pin add`, `pin exception`, `pin check`, `review`, `audit`, and
 `verify` are implemented.
+
+The `toolchain` namespace also provides exact-stable distribution review,
+explicit personal acceptance, repository admission, checked Rustup handoff,
+static adoption/installation checks and separate pin activation. The pure
+`rust_distribution` and `toolchain_admission` modules own identities, mapping,
+bounded parsing and eligibility; binary `toolchain_intake` owns HTTP, public
+verification, private storage, repository publication and native effects.
+Neither library module imports process/filesystem concerns.
+
+Static entry runs before Cargo workspace discovery. Opted-in existing gates
+check admission and current installed correspondence before runtime probes;
+legacy configurations retain conformance-only behaviour. Per-user authority,
+disposable downloads and portable checked-in evidence remain distinct. New
+admission/install requires fresh evidence by default; explicit bounded cached
+operations do not become defaults or expire unchanged continuing local use.
+The public supplier baseline uses explicit material-change proposals, not a
+new signing service or personal GPG trust. Normal Rustup destinations and
+defaults remain native; acceptance precedes its internal candidate probe.
+This is scoped admission and correspondence, not binary benignness,
+reproducible-build proof, compatibility testing or a hostile-process sandbox.
 
 `pin refresh` updates existing registry pin facts, withdraws changed targets'
 grants and reopens review records. `gatehouse re-pin` composes explicit-baseline

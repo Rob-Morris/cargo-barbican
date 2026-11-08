@@ -1,0 +1,70 @@
+{
+  "command": "CARGO_TARGET_DIR=/private/tmp/barbican-distribution.dzt33D/decoder-target cargo test --offline --manifest-path review/Cargo.toml --lib",
+  "failure": "missing --locked and full baseline lock seeding before execution; solver selected newer transitive code",
+  "observed_compilation": [
+    "proc-macro2 1.0.107",
+    "quote 1.0.47",
+    "unicode-ident 1.0.27",
+    "winnow 1.0.4",
+    "toml_parser 1.1.3+spec-1.1.0",
+    "toml_writer 1.1.2+spec-1.1.0",
+    "syn 2.0.119"
+  ],
+  "termination": "interrupted with control-C; exit130; no test/harness invocation observed",
+  "effects": "proc-macro2 build script may have executed; exact subprocess/environment effects not captured",
+  "proof_limit": "owned decoder-target removed before root preservation instruction arrived; initial tool-call output remains conversation record but removed build-script outputs unavailable",
+  "recovery": "metadata-only precise updates restored all baseline overlapping versions; only reviewed decoder additional graph retained; subsequent --offline --locked10test run passed before root stop; further builds paused",
+  "new_selections": [
+    {
+      "name": "indexmap",
+      "version": "2.14.2",
+      "sha256": "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855",
+      "Cargo.toml_sha256": "7b2aec83d5afb43fa5788bda468ce1d65df9dd8f406058e2eada3546ef906ea1"
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.107",
+      "sha256": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9",
+      "Cargo.toml_sha256": "6bdbe54a7f052e552dcfca90351764476e2767237ec3f954df8bd9f602861056",
+      "build.rs_sha256": "baeb20b52f6b536be8657a566591a507bb2e34a45cf8baa42b135510a0c3c729"
+    },
+    {
+      "name": "quote",
+      "version": "1.0.47",
+      "sha256": "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001",
+      "Cargo.toml_sha256": "13d8c50837f14aff48cd622349f98fb2c46350b7a0c08fd574cf7de4def27d06",
+      "build.rs_sha256": "cd6808c02e476b09a520105e2c6f6d325cccb1ecd542cbbcc836a0ae6f6fb0f1"
+    },
+    {
+      "name": "syn",
+      "version": "2.0.119",
+      "sha256": "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297",
+      "Cargo.toml_sha256": "da8b83ac2c66a7b404dc55d88ae42592f70714823251f51b620ae349b246a18f"
+    },
+    {
+      "name": "toml_parser",
+      "version": "1.1.3+spec-1.1.0",
+      "sha256": "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56",
+      "Cargo.toml_sha256": "23bf7bc66a7090d0048555ec05a81216a5d335e5648952d7fb266c7529a7ad90"
+    },
+    {
+      "name": "toml_writer",
+      "version": "1.1.2+spec-1.1.0",
+      "sha256": "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2",
+      "Cargo.toml_sha256": "a7ac80731e6c3680daa6dd6051b1199856d162ec213cbfb8706a0a9fd5077ce9"
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.27",
+      "sha256": "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563",
+      "Cargo.toml_sha256": "c0e96a9c7ee62f5f9ab12de69e0ad44826ad753911d47638f605c936f7ea2c1c"
+    },
+    {
+      "name": "winnow",
+      "version": "1.0.4",
+      "sha256": "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81",
+      "Cargo.toml_sha256": "cff392f2e5af8a662aed09551f50bbe74eafa5a53dc051c62add73ea82a3cab0"
+    }
+  ],
+  "retrospective_review": "Separate Astra security reviewer checked eight exact source archives/build-script source after incident. This does not establish prior approval or recover deleted initial build outputs."
+}

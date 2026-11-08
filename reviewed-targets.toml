@@ -91,3 +91,283 @@ semver = "=1.0.28"
 
 [rust.families.resolved]
 semver = { version = "1.0.28", checksum_sha256 = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd" }
+
+[[rust.families]]
+name = "phase0-product-integration-2026-11-04"
+review_record = "docs/dependency-reviews/2026-11-04-phase0-product-integration.md"
+
+[rust.families.direct]
+chrono = "=0.4.45"
+hex = "=0.4.3"
+log = "=0.4.29"
+lzma-rust2 = "=0.23.0"
+pgp = "=0.21.0"
+rand = "=0.8.8"
+rand_core = "=0.6.4"
+rsa = "=0.9.10"
+zeroize = "=1.8.2"
+
+[rust.families.resolved]
+adler2 = { version = "2.0.1", checksum_sha256 = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa" }
+aead = { version = "0.5.2", checksum_sha256 = "d122413f284cf2d62fb1b7db97e02edb8cda96d769b16e443a4f6195e35662b0" }
+aes = { version = "0.8.4", checksum_sha256 = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0" }
+aes-gcm = { version = "0.10.3", checksum_sha256 = "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1" }
+aes-kw = { version = "0.2.1", checksum_sha256 = "69fa2b352dcefb5f7f3a5fb840e02665d311d878955380515e4fd50095dd3d8c" }
+anstream = { version = "1.0.0", checksum_sha256 = "824a212faf96e9acacdbd09febd34438f8f711fb84e09a8916013cd7815ca28d" }
+anstyle = { version = "1.0.14", checksum_sha256 = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000" }
+anstyle-parse = { version = "1.0.0", checksum_sha256 = "52ce7f38b242319f7cabaa6813055467063ecdc9d355bbb4ce0c68908cd8130e" }
+anstyle-query = { version = "1.1.5", checksum_sha256 = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc" }
+anstyle-wincon = { version = "3.0.11", checksum_sha256 = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d" }
+argon2 = { version = "0.5.3", checksum_sha256 = "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072" }
+autocfg = { version = "1.5.1", checksum_sha256 = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53" }
+base16ct = { version = "0.2.0", checksum_sha256 = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf" }
+base64 = { version = "0.22.1", checksum_sha256 = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6" }
+base64ct = { version = "1.8.3", checksum_sha256 = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06" }
+bitfields = { version = "1.0.3", checksum_sha256 = "ef6e59298da389bc0649c7463856b34c6e17fe542f88939426ede4436c6b1195" }
+bitfields-impl = { version = "1.0.3", checksum_sha256 = "f2c044f98f86f15414668d6c8187c7e4fadab1ad2b31680f648703e0fe07c555" }
+bitvec = { version = "1.1.1", checksum_sha256 = "ddcec3d12c579d40898fe0a9a358a803c23e9c52ca3c425707f81c9436211837" }
+blake2 = { version = "0.10.6", checksum_sha256 = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe" }
+block-buffer = { version = "0.10.4", checksum_sha256 = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71" }
+block-padding = { version = "0.3.3", checksum_sha256 = "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93" }
+blowfish = { version = "0.9.1", checksum_sha256 = "e412e2cd0f2b2d93e02543ceae7917b3c70331573df19ee046bcbc35e45e87d7" }
+buffer-redux = { version = "1.1.0", checksum_sha256 = "431a9cc8d7efa49bc326729264537f5e60affce816c66edf434350778c9f4f54" }
+byteorder = { version = "1.5.0", checksum_sha256 = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b" }
+bytes = { version = "1.11.1", checksum_sha256 = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33" }
+camellia = { version = "0.1.0", checksum_sha256 = "3264e2574e9ef2b53ce6f536dea83a69ac0bc600b762d1523ff83fe07230ce30" }
+cast5 = { version = "0.11.1", checksum_sha256 = "26b07d673db1ccf000e90f54b819db9e75a8348d6eb056e9b8ab53231b7a9911" }
+cc = { version = "1.2.62", checksum_sha256 = "a1dce859f0832a7d088c4f1119888ab94ef4b5d6795d1ce05afb7fe159d79f98" }
+cfb-mode = { version = "0.8.2", checksum_sha256 = "738b8d467867f80a71351933f70461f5b56f24d5c93e0cf216e59229c968d330" }
+cfg-if = { version = "1.0.4", checksum_sha256 = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801" }
+chrono = { version = "0.4.45", checksum_sha256 = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327" }
+cipher = { version = "0.4.4", checksum_sha256 = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad" }
+clap_builder = { version = "4.6.0", checksum_sha256 = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f" }
+clap_lex = { version = "1.1.0", checksum_sha256 = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9" }
+cmac = { version = "0.7.2", checksum_sha256 = "8543454e3c3f5126effff9cd44d562af4e31fb8ce1cc0d3dcd8f084515dbc1aa" }
+colorchoice = { version = "1.0.5", checksum_sha256 = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570" }
+const-oid = { version = "0.10.2", checksum_sha256 = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c" }
+convert_case = { version = "0.10.0", checksum_sha256 = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9" }
+cpufeatures = { version = "0.2.17", checksum_sha256 = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280" }
+crc24 = { version = "0.1.6", checksum_sha256 = "fd121741cf3eb82c08dd3023eb55bf2665e5f60ec20f89760cf836ae4562e6a0" }
+crypto-bigint = { version = "0.5.5", checksum_sha256 = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76" }
+crypto-common = { version = "0.1.7", checksum_sha256 = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a" }
+ctr = { version = "0.9.2", checksum_sha256 = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835" }
+curve25519-dalek = { version = "4.1.3", checksum_sha256 = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be" }
+curve25519-dalek-derive = { version = "0.1.1", checksum_sha256 = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3" }
+cx448 = { version = "0.1.1", checksum_sha256 = "b4c0cf476284b03eb6c10e78787b21c7abb7d7d43cb2f02532ba6b831ed892fa" }
+darling = { version = "0.20.11", checksum_sha256 = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee" }
+darling_core = { version = "0.20.11", checksum_sha256 = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e" }
+darling_macro = { version = "0.20.11", checksum_sha256 = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead" }
+dbl = { version = "0.3.2", checksum_sha256 = "bd2735a791158376708f9347fe8faba9667589d82427ef3aed6794a8981de3d9" }
+der = { version = "0.7.10", checksum_sha256 = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb" }
+deranged = { version = "0.5.8", checksum_sha256 = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c" }
+derive_builder = { version = "0.20.2", checksum_sha256 = "507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947" }
+derive_builder_core = { version = "0.20.2", checksum_sha256 = "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8" }
+derive_builder_macro = { version = "0.20.2", checksum_sha256 = "ab63b0e2bf4d5928aff72e83a7dace85d7bba5fe12dcc3c5a572d78caffd3f3c" }
+derive_more = { version = "2.1.1", checksum_sha256 = "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134" }
+derive_more-impl = { version = "2.1.1", checksum_sha256 = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb" }
+des = { version = "0.8.1", checksum_sha256 = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e" }
+digest = { version = "0.10.7", checksum_sha256 = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292" }
+dsa = { version = "0.6.3", checksum_sha256 = "48bc224a9084ad760195584ce5abb3c2c34a225fa312a128ad245a6b412b7689" }
+eax = { version = "0.5.0", checksum_sha256 = "9954fabd903b82b9d7a68f65f97dc96dd9ad368e40ccc907a7c19d53e6bfac28" }
+ecdsa = { version = "0.16.9", checksum_sha256 = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca" }
+ed25519 = { version = "2.2.3", checksum_sha256 = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53" }
+ed25519-dalek = { version = "2.2.0", checksum_sha256 = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9" }
+elliptic-curve = { version = "0.13.8", checksum_sha256 = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47" }
+equivalent = { version = "1.0.2", checksum_sha256 = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f" }
+ff = { version = "0.13.1", checksum_sha256 = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393" }
+fiat-crypto = { version = "0.2.9", checksum_sha256 = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d" }
+filetime = { version = "0.2.29", checksum_sha256 = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759" }
+find-msvc-tools = { version = "0.1.9", checksum_sha256 = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582" }
+flate2 = { version = "1.1.10", checksum_sha256 = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb" }
+fnv = { version = "1.0.7", checksum_sha256 = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1" }
+funty = { version = "2.0.0", checksum_sha256 = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c" }
+generic-array = { version = "0.14.7", checksum_sha256 = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a" }
+getrandom = { version = "0.2.17", checksum_sha256 = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0" }
+ghash = { version = "0.5.1", checksum_sha256 = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1" }
+group = { version = "0.13.0", checksum_sha256 = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63" }
+hashbrown = { version = "0.17.1", checksum_sha256 = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a" }
+heck = { version = "0.5.0", checksum_sha256 = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea" }
+hex = { version = "0.4.3", checksum_sha256 = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70" }
+hkdf = { version = "0.12.4", checksum_sha256 = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7" }
+hmac = { version = "0.12.1", checksum_sha256 = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e" }
+http = { version = "1.4.0", checksum_sha256 = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a" }
+httparse = { version = "1.10.1", checksum_sha256 = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87" }
+hybrid-array = { version = "0.4.15", checksum_sha256 = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17" }
+idea = { version = "0.5.1", checksum_sha256 = "075557004419d7f2031b8bb7f44bb43e55a83ca7b63076a8fb8fe75753836477" }
+ident_case = { version = "1.0.1", checksum_sha256 = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39" }
+indexmap = { version = "2.14.0", checksum_sha256 = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9" }
+inout = { version = "0.1.4", checksum_sha256 = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01" }
+is_terminal_polyfill = { version = "1.70.2", checksum_sha256 = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695" }
+itoa = { version = "1.0.18", checksum_sha256 = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682" }
+k256 = { version = "0.13.4", checksum_sha256 = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b" }
+keccak = { version = "0.1.6", checksum_sha256 = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653" }
+lazy_static = { version = "1.5.1", checksum_sha256 = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb" }
+libc = { version = "0.2.186", checksum_sha256 = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66" }
+libm = { version = "0.2.16", checksum_sha256 = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981" }
+log = { version = "0.4.29", checksum_sha256 = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897" }
+lzma-rust2 = { version = "0.23.0", checksum_sha256 = "f1c46f3fcd2e888afdb01a07efc071cb21300e07c68d32c3e8b01b5c8cb1fcaa" }
+md-5 = { version = "0.10.6", checksum_sha256 = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf" }
+memchr = { version = "2.8.0", checksum_sha256 = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79" }
+nom = { version = "8.0.0", checksum_sha256 = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405" }
+num-bigint-dig = { version = "0.8.6", checksum_sha256 = "e661dda6640fad38e827a6d4a310ff4763082116fe217f279885c97f511bb0b7" }
+num-conv = { version = "0.2.2", checksum_sha256 = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441" }
+num-integer = { version = "0.1.47", checksum_sha256 = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b" }
+num-iter = { version = "0.1.46", checksum_sha256 = "c92800bd69a1eac91786bcfe9da64a897eb72911b8dc3095decbd07429e8048b" }
+num-traits = { version = "0.2.19", checksum_sha256 = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841" }
+num_enum = { version = "0.7.6", checksum_sha256 = "5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26" }
+num_enum_derive = { version = "0.7.6", checksum_sha256 = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8" }
+ocb3 = { version = "0.1.0", checksum_sha256 = "c196e0276c471c843dd5777e7543a36a298a4be942a2a688d8111cd43390dedb" }
+once_cell = { version = "1.21.4", checksum_sha256 = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50" }
+once_cell_polyfill = { version = "1.70.2", checksum_sha256 = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe" }
+opaque-debug = { version = "0.3.1", checksum_sha256 = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381" }
+p256 = { version = "0.13.2", checksum_sha256 = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b" }
+p384 = { version = "0.13.1", checksum_sha256 = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6" }
+p521 = { version = "0.13.3", checksum_sha256 = "0fc9e2161f1f215afdfce23677034ae137bbd45016a880c2eb3ba8eb95f085b2" }
+password-hash = { version = "0.5.0", checksum_sha256 = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166" }
+pem-rfc7468 = { version = "0.7.0", checksum_sha256 = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412" }
+percent-encoding = { version = "2.3.2", checksum_sha256 = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220" }
+pgp = { version = "0.21.0", checksum_sha256 = "ae70f4d9325a391db30d115d6191a7bb67cec856aa0bba131290f0c4e09a532a" }
+pkcs1 = { version = "0.7.5", checksum_sha256 = "c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f" }
+pkcs8 = { version = "0.10.2", checksum_sha256 = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7" }
+polyval = { version = "0.6.2", checksum_sha256 = "9d1fe60d06143b2430aa532c94cfe9e29783047f06c0d7fd359a9a51b729fa25" }
+powerfmt = { version = "0.2.0", checksum_sha256 = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391" }
+ppv-lite86 = { version = "0.2.21", checksum_sha256 = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9" }
+primeorder = { version = "0.13.6", checksum_sha256 = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6" }
+proc-macro2 = { version = "1.0.106", checksum_sha256 = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934" }
+quote = { version = "1.0.45", checksum_sha256 = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924" }
+radium = { version = "0.7.0", checksum_sha256 = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09" }
+rand = { version = "0.8.8", checksum_sha256 = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c" }
+rand_chacha = { version = "0.3.1", checksum_sha256 = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88" }
+rand_core = { version = "0.6.4", checksum_sha256 = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c" }
+replace_with = { version = "0.1.8", checksum_sha256 = "51743d3e274e2b18df81c4dc6caf8a5b8e15dbe799e0dca05c7617380094e884" }
+rfc6979 = { version = "0.4.0", checksum_sha256 = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2" }
+ring = { version = "0.17.14", checksum_sha256 = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7" }
+ripemd = { version = "0.1.3", checksum_sha256 = "bd124222d17ad93a644ed9d011a40f4fb64aa54275c08cc216524a9ea82fb09f" }
+rsa = { version = "0.9.10", checksum_sha256 = "b8573f03f5883dcaebdfcf4725caa1ecb9c15b2ef50c43a07b816e06799bb12d" }
+rustc_version = { version = "0.4.1", checksum_sha256 = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92" }
+rustls-pki-types = { version = "1.14.1", checksum_sha256 = "30a7197ae7eb376e574fe940d068c30fe0462554a3ddbe4eca7838e049c937a9" }
+rustversion = { version = "1.0.23", checksum_sha256 = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f" }
+sec1 = { version = "0.7.3", checksum_sha256 = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc" }
+serde_core = { version = "1.0.228", checksum_sha256 = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad" }
+serde_spanned = { version = "1.1.1", checksum_sha256 = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26" }
+serdect = { version = "0.2.0", checksum_sha256 = "a84f14a19e9a014bb9f4512488d9829a68e04ecabffb0f9904cd1ace94598177" }
+sha1 = { version = "0.10.7", checksum_sha256 = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8" }
+sha1-checked = { version = "0.10.0", checksum_sha256 = "89f599ac0c323ebb1c6082821a54962b839832b03984598375bff3975b804423" }
+sha2 = { version = "0.11.1", checksum_sha256 = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19" }
+sha3 = { version = "0.10.9", checksum_sha256 = "77fd7028345d415a4034cf8777cd4f8ab1851274233b45f84e3d955502d93874" }
+shlex = { version = "1.3.0", checksum_sha256 = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64" }
+signature = { version = "2.2.0", checksum_sha256 = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de" }
+smallvec = { version = "1.16.4", checksum_sha256 = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8" }
+snafu = { version = "0.9.2", checksum_sha256 = "e45cb604038abb7b926b679887b3226d8d0f23874b66623625a0454be425a4b7" }
+snafu-derive = { version = "0.9.2", checksum_sha256 = "287f59010008f0d7cf5e3b03196d666c1acc46c8d3e9cf34c28a1a7157601e72" }
+spin = { version = "0.9.9", checksum_sha256 = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e" }
+spki = { version = "0.7.3", checksum_sha256 = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d" }
+strsim = { version = "0.11.1", checksum_sha256 = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f" }
+subtle = { version = "2.6.1", checksum_sha256 = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292" }
+syn = { version = "2.0.117", checksum_sha256 = "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99" }
+tap = { version = "1.0.1", checksum_sha256 = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369" }
+time-core = { version = "0.1.8", checksum_sha256 = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca" }
+time-macros = { version = "0.2.27", checksum_sha256 = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215" }
+toml_datetime = { version = "1.1.1+spec-1.1.0", checksum_sha256 = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7" }
+toml_parser = { version = "1.1.2+spec-1.1.0", checksum_sha256 = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526" }
+toml_writer = { version = "1.1.1+spec-1.1.0", checksum_sha256 = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db" }
+twofish = { version = "0.7.1", checksum_sha256 = "a78e83a30223c757c3947cd144a31014ff04298d8719ae10d03c31c0448c8013" }
+typenum = { version = "1.20.0", checksum_sha256 = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de" }
+unicode-ident = { version = "1.0.24", checksum_sha256 = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75" }
+unicode-segmentation = { version = "1.13.3", checksum_sha256 = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8" }
+unicode-xid = { version = "0.2.6", checksum_sha256 = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853" }
+universal-hash = { version = "0.5.1", checksum_sha256 = "fc1de2c688dc15305988b563c3854064043356019f97a4b46276fe734c4f07ea" }
+untrusted = { version = "0.9.0", checksum_sha256 = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1" }
+ureq-proto = { version = "0.6.0", checksum_sha256 = "e994ba84b0bd1b1b0cf92878b7ef898a5c1760108fe7b6010327e274917a808c" }
+utf8-zero = { version = "0.8.1", checksum_sha256 = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e" }
+utf8parse = { version = "0.2.2", checksum_sha256 = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821" }
+version_check = { version = "0.9.5", checksum_sha256 = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a" }
+wasi = { version = "0.11.1+wasi-snapshot-preview1", checksum_sha256 = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b" }
+windows-link = { version = "0.2.1", checksum_sha256 = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5" }
+windows-sys = { version = "0.52.0", checksum_sha256 = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d" }
+windows-targets = { version = "0.52.6", checksum_sha256 = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973" }
+windows_aarch64_gnullvm = { version = "0.52.6", checksum_sha256 = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3" }
+windows_aarch64_msvc = { version = "0.52.6", checksum_sha256 = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469" }
+windows_i686_gnu = { version = "0.52.6", checksum_sha256 = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b" }
+windows_i686_gnullvm = { version = "0.52.6", checksum_sha256 = "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66" }
+windows_i686_msvc = { version = "0.52.6", checksum_sha256 = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66" }
+windows_x86_64_gnu = { version = "0.52.6", checksum_sha256 = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78" }
+windows_x86_64_gnullvm = { version = "0.52.6", checksum_sha256 = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d" }
+windows_x86_64_msvc = { version = "0.52.6", checksum_sha256 = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec" }
+winnow = { version = "1.0.3", checksum_sha256 = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1" }
+wyz = { version = "0.5.1", checksum_sha256 = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed" }
+x25519-dalek = { version = "2.0.1", checksum_sha256 = "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277" }
+zerocopy = { version = "0.8.63", checksum_sha256 = "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8" }
+zerocopy-derive = { version = "0.8.63", checksum_sha256 = "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f" }
+zeroize = { version = "1.8.2", checksum_sha256 = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0" }
+zeroize_derive = { version = "1.5.0", checksum_sha256 = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328" }
+zlib-rs = { version = "0.6.8", checksum_sha256 = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112" }
+zmij = { version = "1.0.21", checksum_sha256 = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa" }
+
+[rust.families.allowed_surfaces]
+bitfields-impl = ["proc-macro"]
+crc24 = ["build-rs"]
+curve25519-dalek = ["build-rs"]
+curve25519-dalek-derive = ["proc-macro"]
+darling_macro = ["proc-macro"]
+derive_builder_macro = ["proc-macro"]
+derive_more-impl = ["proc-macro"]
+generic-array = ["build-rs"]
+httparse = ["build-rs"]
+libc = ["build-rs"]
+libm = ["build-rs"]
+num-bigint-dig = ["build-rs"]
+num-traits = ["build-rs"]
+num_enum_derive = ["proc-macro"]
+proc-macro2 = ["build-rs"]
+quote = ["build-rs"]
+radium = ["build-rs"]
+ring = ["build-rs"]
+rustversion = ["build-rs", "proc-macro"]
+serde_core = ["build-rs"]
+snafu-derive = ["proc-macro"]
+time-macros = ["proc-macro"]
+windows_aarch64_gnullvm = ["build-rs"]
+windows_aarch64_msvc = ["build-rs"]
+windows_i686_gnu = ["build-rs"]
+windows_i686_gnullvm = ["build-rs"]
+windows_i686_msvc = ["build-rs"]
+windows_x86_64_gnu = ["build-rs"]
+windows_x86_64_gnullvm = ["build-rs"]
+windows_x86_64_msvc = ["build-rs"]
+zerocopy = ["build-rs"]
+zerocopy-derive = ["proc-macro"]
+zeroize_derive = ["proc-macro"]
+zmij = ["build-rs"]
+
+[rust.families.allowed_advisories]
+rsa = [{ id = "RUSTSEC-2023-0071", review_by = "2026-12-04" }]
+crypto-bigint = [{ id = "RUSTSEC-2026-0387", review_by = "2026-12-04" }]
+
+[[rust.families]]
+name = "phase0-product-integration-2026-11-04-siblings-1"
+review_record = "docs/dependency-reviews/2026-11-04-phase0-product-integration.md"
+
+[rust.families.resolved]
+block-buffer = { version = "0.12.1", checksum_sha256 = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa" }
+const-oid = { version = "0.9.6", checksum_sha256 = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8" }
+cpufeatures = { version = "0.3.1", checksum_sha256 = "5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566" }
+crypto-common = { version = "0.2.2", checksum_sha256 = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453" }
+digest = { version = "0.11.3", checksum_sha256 = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2" }
+serdect = { version = "0.3.0", checksum_sha256 = "f42f67da2385b51a5f9652db9c93d78aeaf7610bf5ec366080b6de810604af53" }
+windows-sys = { version = "0.61.2", checksum_sha256 = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc" }
+
+[[rust.families]]
+name = "toolchain-cancellation-2026-11-04"
+review_record = "docs/dependency-reviews/2026-11-04-toolchain-cancellation.md"
+
+[rust.families.direct]
+signal-hook = "=0.3.18"
+
+[rust.families.resolved]
+signal-hook = { version = "0.3.18", checksum_sha256 = "d881a16cf4426aa584979d30bd82cb33429027e42122b169753d6ef1085ed6e2" }
+signal-hook-registry = { version = "1.4.8", checksum_sha256 = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b" }
+errno = { version = "0.3.14", checksum_sha256 = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb" }
+
+[rust.families.allowed_surfaces]
+signal-hook = ["build-rs"]

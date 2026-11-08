@@ -10,6 +10,14 @@ pub struct BarbicanConfig {
     pub high_scrutiny: HighScrutinyConfig,
     pub delegates: DelegatesConfig,
     pub verify: VerifyConfig,
+    pub toolchain: ToolchainConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToolchainConfig {
+    pub require_admission: bool,
+    pub admission_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -248,6 +256,10 @@ pub enum CargoDenyCheck {
 
 #[derive(Debug, Error)]
 pub enum ConfigLoadError {
+    #[error(
+        "toolchain admission_scope must be nonempty, at most 256 bytes and contain no control characters"
+    )]
+    InvalidToolchainAdmissionScope,
     #[error("barbican.toml verify.nextest_version is required when test_runner is nextest")]
     MissingNextestVersion,
     #[error("barbican.toml verify.nextest_version requires test_runner = nextest")]
@@ -270,6 +282,16 @@ pub enum ConfigLoadError {
 
 impl BarbicanConfig {
     fn validate(self) -> Result<Self, ConfigLoadError> {
+        if self
+            .toolchain
+            .admission_scope
+            .as_ref()
+            .is_some_and(|scope| {
+                scope.trim().is_empty() || scope.len() > 256 || scope.chars().any(char::is_control)
+            })
+        {
+            return Err(ConfigLoadError::InvalidToolchainAdmissionScope);
+        }
         match (
             self.verify.test_runner,
             self.verify.nextest_version.is_some(),

@@ -39,13 +39,20 @@ fn version_flag_reports_package_version_for_cargo_subcommand_invocation() {
 /// harness used elsewhere never sees this path.
 #[test]
 fn usage_error_exits_with_clap_conventional_code_two() {
-    let output = Command::new(cargo_barbican_binary())
-        .args(["age"])
-        .output()
-        .expect("age command should run");
+    for args in [&["age"][..], &["barbican", "age"][..]] {
+        let output = Command::new(cargo_barbican_binary())
+            .args(args)
+            .output()
+            .expect("age command should run");
 
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
-    assert!(stderr.contains("Usage: cargo barbican age"));
+        assert_eq!(output.status.code(), Some(2), "invocation: {args:?}");
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+        assert!(stderr.contains("Usage: cargo-barbican age"), "{stderr}");
+        assert!(
+            stderr.contains("required arguments were not provided"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("unrecognized subcommand"), "{stderr}");
+    }
 }

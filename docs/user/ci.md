@@ -6,6 +6,15 @@ example, not the only valid layout — adapt it to your existing workflow files.
 See [commands.md](commands.md#glossary) for term definitions (gate, family,
 reviewed target, and so on) used below.
 
+For repositories opting into Rust toolchain admission, provision an already
+trusted Barbican binary and qualified evaluator before installing or launching
+the target compiler. The generated workflow and worked example below install
+Rust before their ordinary conformance gate; they do not establish that
+pre-execution boundary. Follow the explicit
+[toolchain bootstrap](toolchains.md#ci-bootstrap), including fresh local
+acceptance from reviewed portable evidence. Native toolchain admission also
+has a narrower qualified host/evaluator matrix than the existing gate.
+
 ## Why pull-request and scheduled runs differ
 
 `cargo barbican pin check` evaluates checked-in reviewed-target policy.
@@ -29,7 +38,7 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.36.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.37.0
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -115,7 +124,7 @@ jobs:
       - id: tools
         name: Install cargo-barbican, cargo-deny, and cargo-audit
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.36.0 cargo-barbican
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.37.0 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
       - id: fetch
@@ -253,7 +262,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.36.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.37.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -340,7 +349,7 @@ copy only to an absent destination:
 
 ```sh
 barbican_source=$(mktemp -d) &&
-git clone --depth 1 --branch v0.36.0 \
+git clone --depth 1 --branch v0.37.0 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream" &&
 cat "$barbican_source/upstream/templates/hooks/pre-commit"
 ```

@@ -1,0 +1,33 @@
+# AUTHORED TEST FIXTURE: not an official Rust release or supplier signature.
+manifest-version = "2"
+date = "2026-10-15"
+[profiles]
+minimal = ["rustc", "cargo", "rust-std"]
+default = ["rustc", "cargo", "rust-std"]
+[pkg.rust]
+version = "1.99.1 (authored-workflow-fixture 2026-10-15)"
+git_commit_hash = "1111111111111111111111111111111111111111"
+[pkg.rust.target.aarch64-apple-darwin]
+available = true
+components = [{pkg="rustc",target="aarch64-apple-darwin"},{pkg="cargo",target="aarch64-apple-darwin"},{pkg="rust-std",target="aarch64-apple-darwin"}]
+[pkg.rustc]
+version = "1.99.1 (authored-workflow-fixture 2026-10-15)"
+git_commit_hash = "1111111111111111111111111111111111111111"
+[pkg.rustc.target.aarch64-apple-darwin]
+available = true
+xz_url = "https://static.rust-lang.org/dist/2026-10-15/rustc-1.99.1-aarch64-apple-darwin.tar.xz"
+xz_hash = "353aeeca0deac2cd93bc74488be0f095d828dcebe9619b86826fe4903fdf683a"
+[pkg.cargo]
+version = "0.100.0 (authored-workflow-fixture 2026-10-15)"
+git_commit_hash = "1111111111111111111111111111111111111111"
+[pkg.cargo.target.aarch64-apple-darwin]
+available = true
+xz_url = "https://static.rust-lang.org/dist/2026-10-15/cargo-1.99.1-aarch64-apple-darwin.tar.xz"
+xz_hash = "9d9197ace28c4b125f9d9fa69d4c4d091ae281e9cbd3943192897c1451453ad0"
+[pkg.rust-std]
+version = "1.99.1 (authored-workflow-fixture 2026-10-15)"
+git_commit_hash = "1111111111111111111111111111111111111111"
+[pkg.rust-std.target.aarch64-apple-darwin]
+available = true
+xz_url = "https://static.rust-lang.org/dist/2026-10-15/rust-std-1.99.1-aarch64-apple-darwin.tar.xz"
+xz_hash = "e6379501bd5dc1d3b05d7c3151e1a8085d23c6c33616450a956295e4f1d9af93"

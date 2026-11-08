@@ -36,6 +36,7 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican audit` | Base delegated gate | Run delegated advisory and source-policy checks. |
 | `cargo barbican verify` | Base execution gate | Run the final local execution gate. |
 | `cargo barbican gatehouse` | Workflow namespace | Run supported gatehouse workflows over the base commands. |
+| `cargo-barbican toolchain` | Toolchain admission | Review, explicitly accept, install/adopt, check and separately activate exact stable Rust distributions. Use the direct trusted executable before candidate acceptance. |
 
 ## Glossary
 
@@ -156,6 +157,15 @@ pre-add evidence workflow.
 If the candidate is `elevated-risk`, write or update the relevant dependency
 review record before adopting it. If the candidate is `policy-violating`, do
 not add it unless the underlying policy problem is fixed.
+
+### Reviewing The Rust Compiler Before Installation
+
+Use the direct trusted `cargo-barbican toolchain` commands to review and
+accept an exact Rust distribution before its first local execution. This
+workflow also supports checked native installation, static adoption and
+separate repository activation. Start with [toolchains.md](toolchains.md);
+`toolchain check` alone checks runtime conformance and does not establish
+pre-execution admission.
 
 ### Reviewing A Rust Tool Before Local Installation
 

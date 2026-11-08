@@ -10,6 +10,7 @@ use crate::crates_io_http::CRATES_IO_BASE_URL_ENV;
 
 #[derive(Debug)]
 pub enum CommandError {
+    ToolchainIntake(String),
     PinEdit(String),
     CargoHomeUnresolved,
     CargoConfigRead {
@@ -93,6 +94,11 @@ pub enum CommandError {
 impl fmt::Display for CommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ToolchainIntake(detail) => write!(
+                formatter,
+                "toolchain intake: {}",
+                escape_diagnostic_for_terminal(detail)
+            ),
             Self::PinEdit(detail) => write!(
                 formatter,
                 "reviewed pin edit: {}",
@@ -311,6 +317,7 @@ pub(crate) fn escape_diagnostic_for_terminal(value: &str) -> String {
 impl std::error::Error for CommandError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::ToolchainIntake(_) => None,
             Self::PinEdit(_) => None,
             Self::CargoHomeUnresolved => None,
             Self::CargoConfigRead { source, .. } => Some(source),

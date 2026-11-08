@@ -75,6 +75,20 @@ docs/
 
 ## Current state
 
+Rust distribution intake lives in the pure `rust_distribution` and
+`toolchain_admission` modules and the binary's `toolchain_intake` effects
+boundary. Direct static dispatch and opted-in gate admission run before any
+Cargo workspace discovery. Personal approval, repository policy, portable
+evidence, download cache and current installed correspondence must stay
+separate; do not bypass current eligibility through a cached receipt. Native
+handoff is limited to explicitly qualified host/evaluator/encoding routes.
+The maintained
+`vendor/rpgpie` workspace member has exact source custody; run
+`sh scripts/check_vendored_source.sh` before direct Cargo build/test/lint work.
+Canonical verification and CI run it automatically. See the
+[Phase0 dependency records](../dependency-reviews/README.md#rust-distribution-phase0-qualification)
+and [verification process](process.md#verification-expectations).
+
 The repo has now moved beyond scaffolding and the dependency baseline. The
 current implemented surface is:
 
@@ -89,6 +103,9 @@ current implemented surface is:
 - `cargo barbican gatehouse pre-release`
 - `cargo barbican gatehouse policy-check`
 - `cargo barbican toolchain check`
+- Direct trusted `cargo-barbican toolchain review`, `accept`, `install`,
+  `adopt`, `installation-check`, `admission-check`, `activate` and
+  `trust show` / `refresh` / `approve`
 - `cargo barbican policy init`
 - `cargo barbican inventory`
 - `cargo barbican pin list`

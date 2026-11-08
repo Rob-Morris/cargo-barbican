@@ -1,0 +1,1988 @@
+[
+  {
+    "name": "aead",
+    "version": "0.5.2",
+    "checksum": "d122413f284cf2d62fb1b7db97e02edb8cda96d769b16e443a4f6195e35662b0",
+    "features": [
+      "alloc",
+      "bytes",
+      "default",
+      "getrandom",
+      "rand_core"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-04-02T15:42:58Z"
+  },
+  {
+    "name": "aes",
+    "version": "0.8.4",
+    "checksum": "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-02-13T15:55:26Z"
+  },
+  {
+    "name": "aes-gcm",
+    "version": "0.10.3",
+    "checksum": "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1",
+    "features": [
+      "aes",
+      "alloc",
+      "default",
+      "getrandom",
+      "rand_core"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-09-21T22:41:40Z"
+  },
+  {
+    "name": "aes-kw",
+    "version": "0.2.1",
+    "checksum": "69fa2b352dcefb5f7f3a5fb840e02665d311d878955380515e4fd50095dd3d8c",
+    "features": [
+      "alloc",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-04-20T20:24:49Z"
+  },
+  {
+    "name": "argon2",
+    "version": "0.5.3",
+    "checksum": "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072",
+    "features": [
+      "alloc",
+      "default",
+      "password-hash",
+      "rand",
+      "std",
+      "zeroize"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-01-20T19:21:51Z"
+  },
+  {
+    "name": "autocfg",
+    "version": "1.5.1",
+    "checksum": "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53",
+    "features": [],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2026-05-22T11:03:04Z"
+  },
+  {
+    "name": "base16ct",
+    "version": "0.2.0",
+    "checksum": "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf",
+    "features": [
+      "alloc"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-02-26T17:06:02Z"
+  },
+  {
+    "name": "base64",
+    "version": "0.22.1",
+    "checksum": "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6",
+    "features": [
+      "alloc",
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-04-30T23:16:40Z"
+  },
+  {
+    "name": "base64ct",
+    "version": "1.8.3",
+    "checksum": "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06",
+    "features": [
+      "alloc",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2026-01-12T04:41:30Z"
+  },
+  {
+    "name": "bitfields",
+    "version": "1.0.3",
+    "checksum": "ef6e59298da389bc0649c7463856b34c6e17fe542f88939426ede4436c6b1195",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2026-03-23T17:31:14Z"
+  },
+  {
+    "name": "bitfields-impl",
+    "version": "1.0.3",
+    "checksum": "f2c044f98f86f15414668d6c8187c7e4fadab1ad2b31680f648703e0fe07c555",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "bitfields-impl-1.0.3/src/lib.rs"
+      }
+    ],
+    "licence": "MIT",
+    "published": "2026-03-23T17:30:55Z"
+  },
+  {
+    "name": "bitvec",
+    "version": "1.1.1",
+    "checksum": "ddcec3d12c579d40898fe0a9a358a803c23e9c52ca3c425707f81c9436211837",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2026-06-18T19:47:24Z"
+  },
+  {
+    "name": "blake2",
+    "version": "0.10.6",
+    "checksum": "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-12-16T20:38:42Z"
+  },
+  {
+    "name": "block-buffer",
+    "version": "0.10.4",
+    "checksum": "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-03-09T02:08:25Z"
+  },
+  {
+    "name": "block-padding",
+    "version": "0.3.3",
+    "checksum": "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-04-02T00:37:44Z"
+  },
+  {
+    "name": "blowfish",
+    "version": "0.9.1",
+    "checksum": "e412e2cd0f2b2d93e02543ceae7917b3c70331573df19ee046bcbc35e45e87d7",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-02-17T08:58:15Z"
+  },
+  {
+    "name": "buffer-redux",
+    "version": "1.1.0",
+    "checksum": "431a9cc8d7efa49bc326729264537f5e60affce816c66edf434350778c9f4f54",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-11-03T13:30:10Z"
+  },
+  {
+    "name": "byteorder",
+    "version": "1.5.0",
+    "checksum": "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b",
+    "features": [
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Unlicense OR MIT",
+    "published": "2023-10-06T00:45:57Z"
+  },
+  {
+    "name": "bytes",
+    "version": "1.11.1",
+    "checksum": "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33",
+    "features": [
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2026-02-03T14:10:43Z"
+  },
+  {
+    "name": "camellia",
+    "version": "0.1.0",
+    "checksum": "3264e2574e9ef2b53ce6f536dea83a69ac0bc600b762d1523ff83fe07230ce30",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-09-26T15:41:04Z"
+  },
+  {
+    "name": "cast5",
+    "version": "0.11.1",
+    "checksum": "26b07d673db1ccf000e90f54b819db9e75a8348d6eb056e9b8ab53231b7a9911",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-02-17T08:58:39Z"
+  },
+  {
+    "name": "cfb-mode",
+    "version": "0.8.2",
+    "checksum": "738b8d467867f80a71351933f70461f5b56f24d5c93e0cf216e59229c968d330",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-09-13T04:07:34Z"
+  },
+  {
+    "name": "cfg-if",
+    "version": "1.0.4",
+    "checksum": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-10-15T08:12:46Z"
+  },
+  {
+    "name": "chrono",
+    "version": "0.4.45",
+    "checksum": "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327",
+    "features": [
+      "alloc",
+      "clock",
+      "default",
+      "iana-time-zone",
+      "js-sys",
+      "now",
+      "oldtime",
+      "serde",
+      "std",
+      "wasm-bindgen",
+      "wasmbind",
+      "winapi",
+      "windows-link"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-06-04T12:16:42Z"
+  },
+  {
+    "name": "cipher",
+    "version": "0.4.4",
+    "checksum": "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-03-09T00:11:40Z"
+  },
+  {
+    "name": "cmac",
+    "version": "0.7.2",
+    "checksum": "8543454e3c3f5126effff9cd44d562af4e31fb8ce1cc0d3dcd8f084515dbc1aa",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-03-14T20:46:35Z"
+  },
+  {
+    "name": "const-oid",
+    "version": "0.9.6",
+    "checksum": "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8",
+    "features": [],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-12-15T00:13:20Z"
+  },
+  {
+    "name": "convert_case",
+    "version": "0.10.0",
+    "checksum": "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2025-11-23T12:24:56Z"
+  },
+  {
+    "name": "core-foundation-sys",
+    "version": "0.8.7",
+    "checksum": "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b",
+    "features": [
+      "default",
+      "link"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-08-11T00:48:27Z"
+  },
+  {
+    "name": "cpufeatures",
+    "version": "0.2.17",
+    "checksum": "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-01-25T01:35:46Z"
+  },
+  {
+    "name": "crc24",
+    "version": "0.1.6",
+    "checksum": "fd121741cf3eb82c08dd3023eb55bf2665e5f60ec20f89760cf836ae4562e6a0",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "crc24-0.1.6/src/tablegen.rs"
+      }
+    ],
+    "licence": "MIT/Apache-2.0",
+    "published": "2015-04-03T21:00:33Z"
+  },
+  {
+    "name": "crypto-bigint",
+    "version": "0.5.5",
+    "checksum": "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76",
+    "features": [
+      "generic-array",
+      "rand_core",
+      "zeroize"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-11-18T22:56:54Z"
+  },
+  {
+    "name": "crypto-common",
+    "version": "0.1.7",
+    "checksum": "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a",
+    "features": [
+      "getrandom",
+      "rand_core",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-11-12T14:20:00Z"
+  },
+  {
+    "name": "ctr",
+    "version": "0.9.2",
+    "checksum": "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-09-30T00:02:32Z"
+  },
+  {
+    "name": "curve25519-dalek",
+    "version": "4.1.3",
+    "checksum": "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be",
+    "features": [
+      "alloc",
+      "digest",
+      "precomputed-tables",
+      "zeroize"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "curve25519-dalek-4.1.3/build.rs"
+      }
+    ],
+    "licence": "BSD-3-Clause",
+    "published": "2024-06-18T19:20:35Z"
+  },
+  {
+    "name": "cx448",
+    "version": "0.1.1",
+    "checksum": "b4c0cf476284b03eb6c10e78787b21c7abb7d7d43cb2f02532ba6b831ed892fa",
+    "features": [
+      "default",
+      "pkcs8",
+      "signing",
+      "std",
+      "zeroize"
+    ],
+    "surfaces": [],
+    "licence": "BSD-3-Clause",
+    "published": "2025-04-10T21:12:26Z"
+  },
+  {
+    "name": "darling",
+    "version": "0.20.11",
+    "checksum": "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee",
+    "features": [
+      "default",
+      "suggestions"
+    ],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2025-03-28T20:05:16Z"
+  },
+  {
+    "name": "darling_core",
+    "version": "0.20.11",
+    "checksum": "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e",
+    "features": [
+      "strsim",
+      "suggestions"
+    ],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2025-03-28T20:05:00Z"
+  },
+  {
+    "name": "darling_macro",
+    "version": "0.20.11",
+    "checksum": "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "darling_macro-0.20.11/src/lib.rs"
+      }
+    ],
+    "licence": "MIT",
+    "published": "2025-03-28T20:05:07Z"
+  },
+  {
+    "name": "dbl",
+    "version": "0.3.2",
+    "checksum": "bd2735a791158376708f9347fe8faba9667589d82427ef3aed6794a8981de3d9",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2021-12-21T08:20:26Z"
+  },
+  {
+    "name": "der",
+    "version": "0.7.10",
+    "checksum": "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb",
+    "features": [
+      "alloc",
+      "oid",
+      "pem",
+      "std",
+      "zeroize"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2025-04-18T14:53:09Z"
+  },
+  {
+    "name": "derive_builder",
+    "version": "0.20.2",
+    "checksum": "507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947",
+    "features": [
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-10-08T16:55:17Z"
+  },
+  {
+    "name": "derive_builder_core",
+    "version": "0.20.2",
+    "checksum": "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8",
+    "features": [
+      "lib_has_std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-10-08T16:54:04Z"
+  },
+  {
+    "name": "derive_builder_macro",
+    "version": "0.20.2",
+    "checksum": "ab63b0e2bf4d5928aff72e83a7dace85d7bba5fe12dcc3c5a572d78caffd3f3c",
+    "features": [
+      "lib_has_std"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "derive_builder_macro-0.20.2/src/lib.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-10-08T16:54:13Z"
+  },
+  {
+    "name": "derive_more",
+    "version": "2.1.1",
+    "checksum": "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134",
+    "features": [
+      "debug",
+      "default",
+      "display",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2025-12-22T09:13:44Z"
+  },
+  {
+    "name": "derive_more-impl",
+    "version": "2.1.1",
+    "checksum": "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb",
+    "features": [
+      "debug",
+      "default",
+      "display"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "derive_more-impl-2.1.1/src/lib.rs"
+      }
+    ],
+    "licence": "MIT",
+    "published": "2025-12-22T09:13:41Z"
+  },
+  {
+    "name": "des",
+    "version": "0.8.1",
+    "checksum": "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-02-17T08:59:01Z"
+  },
+  {
+    "name": "digest",
+    "version": "0.10.7",
+    "checksum": "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292",
+    "features": [
+      "alloc",
+      "block-buffer",
+      "const-oid",
+      "core-api",
+      "default",
+      "mac",
+      "oid",
+      "std",
+      "subtle"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-05-19T17:11:30Z"
+  },
+  {
+    "name": "dsa",
+    "version": "0.6.3",
+    "checksum": "48bc224a9084ad760195584ce5abb3c2c34a225fa312a128ad245a6b412b7689",
+    "features": [],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2024-01-28T16:31:27Z"
+  },
+  {
+    "name": "eax",
+    "version": "0.5.0",
+    "checksum": "9954fabd903b82b9d7a68f65f97dc96dd9ad368e40ccc907a7c19d53e6bfac28",
+    "features": [
+      "alloc",
+      "default",
+      "getrandom"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2022-07-30T19:27:01Z"
+  },
+  {
+    "name": "ecdsa",
+    "version": "0.16.9",
+    "checksum": "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca",
+    "features": [
+      "alloc",
+      "arithmetic",
+      "default",
+      "der",
+      "digest",
+      "hazmat",
+      "pem",
+      "pkcs8",
+      "rfc6979",
+      "signing",
+      "spki",
+      "std",
+      "verifying"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-11-16T15:55:48Z"
+  },
+  {
+    "name": "ed25519",
+    "version": "2.2.3",
+    "checksum": "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53",
+    "features": [
+      "alloc",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-10-15T19:12:57Z"
+  },
+  {
+    "name": "ed25519-dalek",
+    "version": "2.2.0",
+    "checksum": "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9",
+    "features": [
+      "alloc",
+      "fast",
+      "rand_core",
+      "std",
+      "zeroize"
+    ],
+    "surfaces": [],
+    "licence": "BSD-3-Clause",
+    "published": "2025-07-09T16:24:38Z"
+  },
+  {
+    "name": "elliptic-curve",
+    "version": "0.13.8",
+    "checksum": "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47",
+    "features": [
+      "alloc",
+      "arithmetic",
+      "bits",
+      "default",
+      "digest",
+      "ecdh",
+      "ff",
+      "group",
+      "hash2curve",
+      "hazmat",
+      "jwk",
+      "pem",
+      "pkcs8",
+      "sec1",
+      "serde",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-11-19T18:33:33Z"
+  },
+  {
+    "name": "ff",
+    "version": "0.13.1",
+    "checksum": "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393",
+    "features": [
+      "alloc",
+      "bits",
+      "bitvec"
+    ],
+    "surfaces": [],
+    "licence": "MIT/Apache-2.0",
+    "published": "2025-03-09T22:16:54Z"
+  },
+  {
+    "name": "flate2",
+    "version": "1.1.10",
+    "checksum": "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb",
+    "features": [
+      "any_impl",
+      "any_zlib",
+      "zlib-rs"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-08-28T04:35:22Z"
+  },
+  {
+    "name": "fnv",
+    "version": "1.0.7",
+    "checksum": "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1",
+    "features": [
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 / MIT",
+    "published": "2020-05-14T16:06:29Z"
+  },
+  {
+    "name": "funty",
+    "version": "2.0.0",
+    "checksum": "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2021-11-28T08:56:54Z"
+  },
+  {
+    "name": "generic-array",
+    "version": "0.14.7",
+    "checksum": "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a",
+    "features": [
+      "more_lengths",
+      "zeroize"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "generic-array-0.14.7/build.rs"
+      }
+    ],
+    "licence": "MIT",
+    "published": "2023-03-28T00:01:29Z"
+  },
+  {
+    "name": "getrandom",
+    "version": "0.2.17",
+    "checksum": "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0",
+    "features": [
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-01-11T21:09:53Z"
+  },
+  {
+    "name": "ghash",
+    "version": "0.5.1",
+    "checksum": "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1",
+    "features": [],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2024-03-03T21:07:19Z"
+  },
+  {
+    "name": "group",
+    "version": "0.13.0",
+    "checksum": "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63",
+    "features": [
+      "alloc"
+    ],
+    "surfaces": [],
+    "licence": "MIT/Apache-2.0",
+    "published": "2022-12-06T02:02:57Z"
+  },
+  {
+    "name": "heck",
+    "version": "0.5.0",
+    "checksum": "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-03-12T22:42:23Z"
+  },
+  {
+    "name": "hex",
+    "version": "0.4.3",
+    "checksum": "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70",
+    "features": [
+      "alloc",
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2021-03-03T10:48:58Z"
+  },
+  {
+    "name": "hkdf",
+    "version": "0.12.4",
+    "checksum": "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-12-13T13:35:31Z"
+  },
+  {
+    "name": "hmac",
+    "version": "0.12.1",
+    "checksum": "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e",
+    "features": [
+      "reset"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-02-17T10:50:37Z"
+  },
+  {
+    "name": "iana-time-zone",
+    "version": "0.1.65",
+    "checksum": "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470",
+    "features": [
+      "fallback"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-01-28T08:40:52Z"
+  },
+  {
+    "name": "idea",
+    "version": "0.5.1",
+    "checksum": "075557004419d7f2031b8bb7f44bb43e55a83ca7b63076a8fb8fe75753836477",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-02-17T08:59:30Z"
+  },
+  {
+    "name": "ident_case",
+    "version": "1.0.1",
+    "checksum": "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT/Apache-2.0",
+    "published": "2019-03-18T20:07:20Z"
+  },
+  {
+    "name": "inout",
+    "version": "0.1.4",
+    "checksum": "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-02-21T09:30:09Z"
+  },
+  {
+    "name": "itoa",
+    "version": "1.0.18",
+    "checksum": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-03-20T00:12:37Z"
+  },
+  {
+    "name": "k256",
+    "version": "0.13.4",
+    "checksum": "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b",
+    "features": [
+      "alloc",
+      "arithmetic",
+      "default",
+      "digest",
+      "ecdsa",
+      "ecdsa-core",
+      "once_cell",
+      "pkcs8",
+      "precomputed-tables",
+      "schnorr",
+      "sha2",
+      "sha256",
+      "signature",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2024-09-20T16:19:23Z"
+  },
+  {
+    "name": "keccak",
+    "version": "0.1.6",
+    "checksum": "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653",
+    "features": [],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2026-02-13T17:56:37Z"
+  },
+  {
+    "name": "lazy_static",
+    "version": "1.5.1",
+    "checksum": "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb",
+    "features": [
+      "spin",
+      "spin_no_std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-10-01T07:18:53Z"
+  },
+  {
+    "name": "libc",
+    "version": "0.2.186",
+    "checksum": "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66",
+    "features": [
+      "default",
+      "std"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "libc-0.2.186/build.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-04-23T20:00:00Z"
+  },
+  {
+    "name": "libm",
+    "version": "0.2.16",
+    "checksum": "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981",
+    "features": [
+      "arch",
+      "default"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "libm-0.2.16/build.rs"
+      }
+    ],
+    "licence": "MIT",
+    "published": "2026-01-24T03:14:21Z"
+  },
+  {
+    "name": "log",
+    "version": "0.4.29",
+    "checksum": "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-12-02T22:06:36Z"
+  },
+  {
+    "name": "md-5",
+    "version": "0.10.6",
+    "checksum": "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf",
+    "features": [
+      "default",
+      "oid",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-09-22T14:19:04Z"
+  },
+  {
+    "name": "memchr",
+    "version": "2.8.0",
+    "checksum": "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79",
+    "features": [
+      "alloc",
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Unlicense OR MIT",
+    "published": "2026-02-06T19:39:00Z"
+  },
+  {
+    "name": "nom",
+    "version": "8.0.0",
+    "checksum": "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405",
+    "features": [
+      "alloc",
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2025-01-26T16:03:28Z"
+  },
+  {
+    "name": "num-bigint-dig",
+    "version": "0.8.6",
+    "checksum": "e661dda6640fad38e827a6d4a310ff4763082116fe217f279885c97f511bb0b7",
+    "features": [
+      "default",
+      "i128",
+      "prime",
+      "rand",
+      "serde",
+      "std",
+      "u64_digit",
+      "zeroize"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "num-bigint-dig-0.8.6/build.rs"
+      }
+    ],
+    "licence": "MIT/Apache-2.0",
+    "published": "2025-11-12T14:16:01Z"
+  },
+  {
+    "name": "num-integer",
+    "version": "0.1.47",
+    "checksum": "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b",
+    "features": [
+      "i128",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-08-12T00:11:57Z"
+  },
+  {
+    "name": "num-iter",
+    "version": "0.1.46",
+    "checksum": "c92800bd69a1eac91786bcfe9da64a897eb72911b8dc3095decbd07429e8048b",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-07-07T19:51:46Z"
+  },
+  {
+    "name": "num-traits",
+    "version": "0.2.19",
+    "checksum": "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841",
+    "features": [
+      "default",
+      "i128",
+      "libm",
+      "std"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "num-traits-0.2.19/build.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-05-03T21:27:39Z"
+  },
+  {
+    "name": "num_enum",
+    "version": "0.7.6",
+    "checksum": "5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26",
+    "features": [],
+    "surfaces": [],
+    "licence": "BSD-3-Clause OR MIT OR Apache-2.0",
+    "published": "2026-03-15T21:29:40Z"
+  },
+  {
+    "name": "num_enum_derive",
+    "version": "0.7.6",
+    "checksum": "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "num_enum_derive-0.7.6/src/lib.rs"
+      }
+    ],
+    "licence": "BSD-3-Clause OR MIT OR Apache-2.0",
+    "published": "2026-03-15T21:29:38Z"
+  },
+  {
+    "name": "ocb3",
+    "version": "0.1.0",
+    "checksum": "c196e0276c471c843dd5777e7543a36a298a4be942a2a688d8111cd43390dedb",
+    "features": [
+      "alloc",
+      "default",
+      "getrandom",
+      "rand_core"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2024-03-27T14:45:20Z"
+  },
+  {
+    "name": "once_cell",
+    "version": "1.21.4",
+    "checksum": "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50",
+    "features": [
+      "alloc",
+      "race",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-03-12T10:59:52Z"
+  },
+  {
+    "name": "opaque-debug",
+    "version": "0.3.1",
+    "checksum": "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-03-01T12:08:32Z"
+  },
+  {
+    "name": "p256",
+    "version": "0.13.2",
+    "checksum": "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b",
+    "features": [
+      "alloc",
+      "arithmetic",
+      "default",
+      "digest",
+      "ecdh",
+      "ecdsa",
+      "ecdsa-core",
+      "pem",
+      "pkcs8",
+      "sha2",
+      "sha256",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-04-15T20:53:22Z"
+  },
+  {
+    "name": "p384",
+    "version": "0.13.1",
+    "checksum": "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6",
+    "features": [
+      "alloc",
+      "arithmetic",
+      "default",
+      "digest",
+      "ecdh",
+      "ecdsa",
+      "ecdsa-core",
+      "pem",
+      "pkcs8",
+      "sha2",
+      "sha384",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2025-02-07T01:25:30Z"
+  },
+  {
+    "name": "p521",
+    "version": "0.13.3",
+    "checksum": "0fc9e2161f1f215afdfce23677034ae137bbd45016a880c2eb3ba8eb95f085b2",
+    "features": [
+      "alloc",
+      "arithmetic",
+      "default",
+      "digest",
+      "ecdh",
+      "ecdsa",
+      "ecdsa-core",
+      "getrandom",
+      "pem",
+      "pkcs8",
+      "rand_core",
+      "sha512",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-11-11T17:06:38Z"
+  },
+  {
+    "name": "password-hash",
+    "version": "0.5.0",
+    "checksum": "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166",
+    "features": [
+      "alloc",
+      "default",
+      "rand_core",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-03-04T23:21:39Z"
+  },
+  {
+    "name": "pem-rfc7468",
+    "version": "0.7.0",
+    "checksum": "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412",
+    "features": [
+      "alloc"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-02-26T21:47:10Z"
+  },
+  {
+    "name": "pgp",
+    "version": "0.21.0",
+    "checksum": "ae70f4d9325a391db30d115d6191a7bb67cec856aa0bba131290f0c4e09a532a",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-10-03T10:02:02Z"
+  },
+  {
+    "name": "pkcs1",
+    "version": "0.7.5",
+    "checksum": "c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f",
+    "features": [
+      "alloc",
+      "pem",
+      "pkcs8",
+      "std",
+      "zeroize"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-04-24T19:00:40Z"
+  },
+  {
+    "name": "pkcs8",
+    "version": "0.10.2",
+    "checksum": "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7",
+    "features": [
+      "alloc",
+      "pem",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-04-05T00:01:55Z"
+  },
+  {
+    "name": "polyval",
+    "version": "0.6.2",
+    "checksum": "9d1fe60d06143b2430aa532c94cfe9e29783047f06c0d7fd359a9a51b729fa25",
+    "features": [],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2024-03-03T17:43:14Z"
+  },
+  {
+    "name": "ppv-lite86",
+    "version": "0.2.21",
+    "checksum": "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9",
+    "features": [
+      "simd",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-03-09T20:01:40Z"
+  },
+  {
+    "name": "primeorder",
+    "version": "0.13.6",
+    "checksum": "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6",
+    "features": [],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-11-16T02:38:26Z"
+  },
+  {
+    "name": "proc-macro2",
+    "version": "1.0.106",
+    "checksum": "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934",
+    "features": [
+      "default",
+      "proc-macro"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "proc-macro2-1.0.106/build.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-01-21T22:08:20Z"
+  },
+  {
+    "name": "quote",
+    "version": "1.0.45",
+    "checksum": "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924",
+    "features": [
+      "default",
+      "proc-macro"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "quote-1.0.45/build.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-03-03T20:54:15Z"
+  },
+  {
+    "name": "radium",
+    "version": "0.7.0",
+    "checksum": "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "radium-0.7.0/build.rs"
+      }
+    ],
+    "licence": "MIT",
+    "published": "2021-11-10T20:29:10Z"
+  },
+  {
+    "name": "rand",
+    "version": "0.8.8",
+    "checksum": "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c",
+    "features": [
+      "alloc",
+      "default",
+      "getrandom",
+      "libc",
+      "rand_chacha",
+      "std",
+      "std_rng"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-08-25T07:45:50Z"
+  },
+  {
+    "name": "rand_chacha",
+    "version": "0.3.1",
+    "checksum": "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88",
+    "features": [
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2021-06-09T19:46:38Z"
+  },
+  {
+    "name": "rand_core",
+    "version": "0.6.4",
+    "checksum": "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c",
+    "features": [
+      "alloc",
+      "getrandom",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-09-15T13:23:44Z"
+  },
+  {
+    "name": "replace_with",
+    "version": "0.1.8",
+    "checksum": "51743d3e274e2b18df81c4dc6caf8a5b8e15dbe799e0dca05c7617380094e884",
+    "features": [
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-05-20T16:43:43Z"
+  },
+  {
+    "name": "rfc6979",
+    "version": "0.4.0",
+    "checksum": "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2",
+    "features": [],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-02-28T20:35:07Z"
+  },
+  {
+    "name": "ripemd",
+    "version": "0.1.3",
+    "checksum": "bd124222d17ad93a644ed9d011a40f4fb64aa54275c08cc216524a9ea82fb09f",
+    "features": [
+      "default",
+      "oid",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-09-23T10:23:56Z"
+  },
+  {
+    "name": "rpgpie",
+    "version": "0.12.0",
+    "checksum": "2049db9b867c7a430535e6628d449afbcb058ad67d674c71143e62c86e7564af",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-10-03T17:06:03Z"
+  },
+  {
+    "name": "rsa",
+    "version": "0.9.10",
+    "checksum": "b8573f03f5883dcaebdfcf4725caa1ecb9c15b2ef50c43a07b816e06799bb12d",
+    "features": [
+      "default",
+      "pem",
+      "std",
+      "u64_digit"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-01-06T15:00:37Z"
+  },
+  {
+    "name": "rustc_version",
+    "version": "0.4.1",
+    "checksum": "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-08-28T09:21:22Z"
+  },
+  {
+    "name": "rustversion",
+    "version": "1.0.23",
+    "checksum": "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "rustversion-1.0.23/src/lib.rs"
+      },
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "rustversion-1.0.23/build/build.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-07-07T02:10:26Z"
+  },
+  {
+    "name": "sec1",
+    "version": "0.7.3",
+    "checksum": "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc",
+    "features": [
+      "alloc",
+      "default",
+      "der",
+      "pem",
+      "pkcs8",
+      "point",
+      "serde",
+      "std",
+      "subtle",
+      "zeroize"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-07-16T23:37:20Z"
+  },
+  {
+    "name": "semver",
+    "version": "1.0.28",
+    "checksum": "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd",
+    "features": [
+      "default",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-04-04T00:25:14Z"
+  },
+  {
+    "name": "serde",
+    "version": "1.0.228",
+    "checksum": "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e",
+    "features": [
+      "alloc",
+      "default",
+      "derive",
+      "serde_derive",
+      "std"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "serde-1.0.228/build.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-09-27T16:51:35Z"
+  },
+  {
+    "name": "serde_core",
+    "version": "1.0.228",
+    "checksum": "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad",
+    "features": [
+      "alloc",
+      "result",
+      "std"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "serde_core-1.0.228/build.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-09-27T16:51:25Z"
+  },
+  {
+    "name": "serde_derive",
+    "version": "1.0.228",
+    "checksum": "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79",
+    "features": [
+      "default"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "serde_derive-1.0.228/src/lib.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-09-27T16:51:16Z"
+  },
+  {
+    "name": "serde_json",
+    "version": "1.0.149",
+    "checksum": "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86",
+    "features": [
+      "alloc",
+      "default",
+      "std"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "serde_json-1.0.149/build.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-01-06T16:23:34Z"
+  },
+  {
+    "name": "serdect",
+    "version": "0.2.0",
+    "checksum": "a84f14a19e9a014bb9f4512488d9829a68e04ecabffb0f9904cd1ace94598177",
+    "features": [
+      "alloc"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-02-26T20:30:14Z"
+  },
+  {
+    "name": "serdect",
+    "version": "0.3.0",
+    "checksum": "f42f67da2385b51a5f9652db9c93d78aeaf7610bf5ec366080b6de810604af53",
+    "features": [
+      "alloc",
+      "default"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2025-01-06T17:55:50Z"
+  },
+  {
+    "name": "sha1",
+    "version": "0.10.7",
+    "checksum": "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8",
+    "features": [
+      "compress",
+      "default",
+      "oid",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-07-10T14:30:11Z"
+  },
+  {
+    "name": "sha1-checked",
+    "version": "0.10.0",
+    "checksum": "89f599ac0c323ebb1c6082821a54962b839832b03984598375bff3975b804423",
+    "features": [
+      "default",
+      "oid",
+      "std",
+      "zeroize"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-03-27T21:16:14Z"
+  },
+  {
+    "name": "sha2",
+    "version": "0.10.9",
+    "checksum": "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283",
+    "features": [
+      "default",
+      "oid",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2025-04-30T14:38:09Z"
+  },
+  {
+    "name": "sha3",
+    "version": "0.10.9",
+    "checksum": "77fd7028345d415a4034cf8777cd4f8ab1851274233b45f84e3d955502d93874",
+    "features": [
+      "default",
+      "oid",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-04-19T16:47:09Z"
+  },
+  {
+    "name": "signature",
+    "version": "2.2.0",
+    "checksum": "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de",
+    "features": [
+      "alloc",
+      "digest",
+      "rand_core",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-11-12T20:49:39Z"
+  },
+  {
+    "name": "smallvec",
+    "version": "1.16.4",
+    "checksum": "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8",
+    "features": [
+      "write"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-10-23T17:08:24Z"
+  },
+  {
+    "name": "snafu",
+    "version": "0.9.2",
+    "checksum": "e45cb604038abb7b926b679887b3226d8d0f23874b66623625a0454be425a4b7",
+    "features": [
+      "alloc",
+      "default",
+      "rust_1_81",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-07-21T17:52:51Z"
+  },
+  {
+    "name": "snafu-derive",
+    "version": "0.9.2",
+    "checksum": "287f59010008f0d7cf5e3b03196d666c1acc46c8d3e9cf34c28a1a7157601e72",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "snafu-derive-0.9.2/src/lib.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-07-21T17:52:49Z"
+  },
+  {
+    "name": "spin",
+    "version": "0.9.9",
+    "checksum": "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e",
+    "features": [
+      "once"
+    ],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2026-07-13T19:44:05Z"
+  },
+  {
+    "name": "spki",
+    "version": "0.7.3",
+    "checksum": "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d",
+    "features": [
+      "alloc",
+      "pem",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2023-11-28T19:35:46Z"
+  },
+  {
+    "name": "strsim",
+    "version": "0.11.1",
+    "checksum": "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2024-04-02T22:18:09Z"
+  },
+  {
+    "name": "subtle",
+    "version": "2.6.1",
+    "checksum": "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292",
+    "features": [
+      "default",
+      "i128",
+      "std"
+    ],
+    "surfaces": [],
+    "licence": "BSD-3-Clause",
+    "published": "2024-06-24T17:25:24Z"
+  },
+  {
+    "name": "syn",
+    "version": "2.0.117",
+    "checksum": "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99",
+    "features": [
+      "clone-impls",
+      "default",
+      "derive",
+      "extra-traits",
+      "full",
+      "parsing",
+      "printing",
+      "proc-macro",
+      "visit",
+      "visit-mut"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-02-20T02:40:03Z"
+  },
+  {
+    "name": "tap",
+    "version": "1.0.1",
+    "checksum": "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2021-02-13T02:43:25Z"
+  },
+  {
+    "name": "thiserror",
+    "version": "2.0.18",
+    "checksum": "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4",
+    "features": [
+      "default",
+      "std"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "thiserror-2.0.18/build.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-01-18T16:14:37Z"
+  },
+  {
+    "name": "thiserror-impl",
+    "version": "2.0.18",
+    "checksum": "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "thiserror-impl-2.0.18/src/lib.rs"
+      }
+    ],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-01-18T16:14:35Z"
+  },
+  {
+    "name": "twofish",
+    "version": "0.7.1",
+    "checksum": "a78e83a30223c757c3947cd144a31014ff04298d8719ae10d03c31c0448c8013",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2022-02-17T09:02:30Z"
+  },
+  {
+    "name": "typenum",
+    "version": "1.20.0",
+    "checksum": "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-04-19T03:36:11Z"
+  },
+  {
+    "name": "unicode-ident",
+    "version": "1.0.24",
+    "checksum": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75",
+    "features": [],
+    "surfaces": [],
+    "licence": "(MIT OR Apache-2.0) AND Unicode-3.0",
+    "published": "2026-02-16T02:46:44Z"
+  },
+  {
+    "name": "unicode-segmentation",
+    "version": "1.13.3",
+    "checksum": "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2026-06-01T15:58:43Z"
+  },
+  {
+    "name": "unicode-xid",
+    "version": "0.2.6",
+    "checksum": "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853",
+    "features": [
+      "default"
+    ],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2024-09-19T15:55:24Z"
+  },
+  {
+    "name": "universal-hash",
+    "version": "0.5.1",
+    "checksum": "fc1de2c688dc15305988b563c3854064043356019f97a4b46276fe734c4f07ea",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT OR Apache-2.0",
+    "published": "2023-05-19T15:25:05Z"
+  },
+  {
+    "name": "version_check",
+    "version": "0.9.5",
+    "checksum": "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT/Apache-2.0",
+    "published": "2024-07-25T23:38:14Z"
+  },
+  {
+    "name": "wyz",
+    "version": "0.5.1",
+    "checksum": "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed",
+    "features": [],
+    "surfaces": [],
+    "licence": "MIT",
+    "published": "2022-11-16T04:53:04Z"
+  },
+  {
+    "name": "x25519-dalek",
+    "version": "2.0.1",
+    "checksum": "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277",
+    "features": [
+      "alloc",
+      "precomputed-tables",
+      "static_secrets",
+      "zeroize"
+    ],
+    "surfaces": [],
+    "licence": "BSD-3-Clause",
+    "published": "2024-02-07T01:14:06Z"
+  },
+  {
+    "name": "zerocopy",
+    "version": "0.8.63",
+    "checksum": "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8",
+    "features": [
+      "simd"
+    ],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "zerocopy-0.8.63/build.rs"
+      }
+    ],
+    "licence": "BSD-2-Clause OR Apache-2.0 OR MIT",
+    "published": "2026-10-13T20:03:04Z"
+  },
+  {
+    "name": "zeroize",
+    "version": "1.8.2",
+    "checksum": "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0",
+    "features": [
+      "alloc",
+      "default",
+      "zeroize_derive"
+    ],
+    "surfaces": [],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2025-09-29T20:20:03Z"
+  },
+  {
+    "name": "zeroize_derive",
+    "version": "1.5.0",
+    "checksum": "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "proc-macro"
+        ],
+        "path": "zeroize_derive-1.5.0/src/lib.rs"
+      }
+    ],
+    "licence": "Apache-2.0 OR MIT",
+    "published": "2026-06-12T18:21:55Z"
+  },
+  {
+    "name": "zlib-rs",
+    "version": "0.6.8",
+    "checksum": "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112",
+    "features": [
+      "rust-allocator"
+    ],
+    "surfaces": [],
+    "licence": "Zlib",
+    "published": "2026-09-15T13:10:00Z"
+  },
+  {
+    "name": "zmij",
+    "version": "1.0.21",
+    "checksum": "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa",
+    "features": [],
+    "surfaces": [
+      {
+        "kind": [
+          "custom-build"
+        ],
+        "path": "zmij-1.0.21/build.rs"
+      }
+    ],
+    "licence": "MIT",
+    "published": "2026-02-12T03:14:15Z"
+  }
+]

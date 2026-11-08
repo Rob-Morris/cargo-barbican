@@ -67,6 +67,23 @@ pub fn cargo_config_has_nextest_alias(text: &str) -> Result<bool, CargoConfigErr
         .is_some_and(|aliases| aliases.contains_key("nextest")))
 }
 
+/// Detects authority-root environment controls without invoking Cargo. Includes
+/// are conservatively reported because their environment effects are unknown.
+pub fn cargo_config_defines_environment(
+    text: &str,
+    names: &[&str],
+) -> Result<bool, CargoConfigError> {
+    let table = parse_cargo_config(text)?;
+    if has_indirect_configuration(&table) {
+        return Ok(true);
+    }
+    match table.get("env") {
+        None => Ok(false),
+        Some(toml::Value::Table(env)) => Ok(names.iter().any(|name| env.contains_key(*name))),
+        Some(_) => Err(CargoConfigError::InvalidEnvironmentTable),
+    }
+}
+
 /// Returns the first cargo config key from [`SOURCE_OVERRIDE_KEYS`] present
 /// in the given `.cargo/config.toml` text, if any.
 pub fn cargo_config_source_override_key(
@@ -109,6 +126,8 @@ pub fn cargo_config_toolchain_executable_control_key(
 
 #[derive(Debug, Error)]
 pub enum CargoConfigError {
+    #[error("cargo config env must be a TOML table")]
+    InvalidEnvironmentTable,
     #[error("unable to parse cargo config: {0}")]
     Parse(#[source] toml::de::Error),
     #[error("cargo config root must be a TOML table")]
@@ -117,6 +136,21 @@ pub enum CargoConfigError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn authority_environment_detection_handles_all_cargo_value_forms_and_includes() {
+        for input in [
+            "[env]\nHOME='elsewhere'",
+            "[env]\nHOME={value='elsewhere',force=true}",
+            "[env.HOME]\nvalue='elsewhere'\nrelative=true",
+            "include=['hidden.toml']",
+        ] {
+            assert!(super::cargo_config_defines_environment(input, &["HOME"]).unwrap());
+        }
+        assert!(
+            !super::cargo_config_defines_environment("[env]\nUNRELATED='okay'", &["HOME"]).unwrap()
+        );
+        assert!(super::cargo_config_defines_environment("env='invalid'", &["HOME"]).is_err());
+    }
     #[test]
     fn detects_only_the_nextest_alias_regardless_of_value() {
         for text in [

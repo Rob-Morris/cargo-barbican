@@ -1,0 +1,137 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -14,0 +15 @@
++publish = false
+@@ -28,5 +28,0 @@
+-[features]
+-cli = ["clap"]
+-pqc = ["pgp/pqc"]
+-wasm = ["pgp/wasm"]
+-
+@@ -33,0 +30,2 @@
++test = false
++doctest = false
+@@ -37,13 +34,0 @@
+-[[bin]]
+-name = "rpgp"
+-path = "src/bin/rpgp.rs"
+-required-features = ["cli"]
+-
+-[[test]]
+-name = "test_merge"
+-path = "tests/test_merge.rs"
+-
+-[[test]]
+-name = "test_validity"
+-path = "tests/test_validity.rs"
+-
+@@ -51,7 +36,3 @@
+-version = "0.4"
+-features = ["serde"]
+-
+-[dependencies.clap]
+-version = "4"
+-features = ["derive"]
+-optional = true
++version = "=0.4.45"
++default-features = false
++features = ["std", "serde"]
+@@ -60 +41 @@
+-version = "0.4"
++version = "=0.4.3"
+@@ -63 +44 @@
+-version = "0.4"
++version = "=0.4.29"
+@@ -66 +47 @@
+-version = "0.21"
++version = "=0.21.0"
+@@ -70 +51 @@
+-version = "0.8"
++version = "=0.8.8"
+@@ -73 +54 @@
+-version = "0.6"
++version = "=0.6.4"
+@@ -76 +57 @@
+-version = "0.9.7"
++version = "=0.9.10"
+@@ -79 +60 @@
+-version = "1.0"
++version = "=1.0.228"
+@@ -83 +64 @@
+-version = "1.0"
++version = "=1.0.149"
+@@ -86 +67 @@
+-version = "2"
++version = "=2.0.18"
+@@ -89,7 +70 @@
+-version = "1"
+-
+-[dev-dependencies.env_logger]
+-version = "0.11"
+-
+-[dev-dependencies.rstest]
+-version = "0.27"
++version = "=1.8.2"
+@@ -102,0 +78,3 @@
++
++[lints.rust]
++unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("pqc"))'] }
+--- a/src/checked.rs
++++ b/src/checked.rs
+@@ -394 +394 @@
+-            && expiration < reference
++            && expiration <= reference
+--- a/src/key.rs
++++ b/src/key.rs
+@@ -656 +656 @@
+-            && (spsk.created_at().as_secs() + key_exp.as_secs() < reference.as_secs())
++            && (u64::from(spsk.created_at().as_secs()) + u64::from(key_exp.as_secs()) <= u64::from(reference.as_secs()))
+--- a/src/model/summary.rs
++++ b/src/model/summary.rs
+@@ -162,46 +161,0 @@
+-
+-#[cfg(test)]
+-#[allow(clippy::expect_used)]
+-mod tests {
+-    use std::fs::File;
+-
+-    use rstest::rstest;
+-
+-    use crate::certificate::{Certificate, Checked};
+-
+-    fn load_checked(file: &str) -> Checked {
+-        let certs = Certificate::load(&mut File::open(file).expect("cert open")).expect("load");
+-        assert_eq!(certs.len(), 1);
+-
+-        Checked::from(certs.into_iter().next().expect("asserted"))
+-    }
+-    #[rstest]
+-    #[case("tests/certs/hal_v2_1992.cert", "tests/certs/hal_v2_1992.txt")]
+-    #[case("tests/certs/prz_v4_1997.cert", "tests/certs/prz_v4_1997.txt")]
+-    #[case("tests/certs/dkg_v4_2007.cert", "tests/certs/dkg_v4_2007.txt")]
+-    #[case("tests/certs/alice_v6.cert", "tests/certs/alice_v6.txt")]
+-    fn status_summary_display(#[case] cert: &str, #[case] text: &str) {
+-        let checked = load_checked(cert);
+-        let summary = crate::model::status_summary(&checked);
+-
+-        let text_out = format!("{}", &summary);
+-        let nominal_text = std::fs::read_to_string(text).expect("read text");
+-
+-        assert_eq!(text_out, nominal_text);
+-    }
+-
+-    #[rstest]
+-    #[case("tests/certs/hal_v2_1992.cert", "tests/certs/hal_v2_1992.json")]
+-    #[case("tests/certs/prz_v4_1997.cert", "tests/certs/prz_v4_1997.json")]
+-    #[case("tests/certs/dkg_v4_2007.cert", "tests/certs/dkg_v4_2007.json")]
+-    #[case("tests/certs/alice_v6.cert", "tests/certs/alice_v6.json")]
+-    fn status_summary_json(#[case] cert: &str, #[case] json: &str) {
+-        let checked = load_checked(cert);
+-        let summary = crate::model::status_summary(&checked);
+-
+-        let json_out = serde_json::to_string_pretty(&summary).expect("json");
+-        let nominal_json = std::fs::read_to_string(json).expect("read json");
+-
+-        assert_eq!(format!("{json_out}\n"), nominal_json);
+-    }
+-}

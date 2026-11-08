@@ -55,6 +55,7 @@ diff rendering.
 | `sha2` | =0.10.9 (`default-features = false`, `features = [\"force-soft\"]`) | crates.io | Direct dependency for reviewed artefact SHA-256 verification and test support |
 | `tar` | =0.4.46 (`default-features = false`) | crates.io | Direct dependency for `.crate` tarball inspection and test support |
 | `semver` | =1.0.28 | crates.io | First-principles review; Cargo-compatible semver range evaluation for `pick` |
+| `signal-hook` | =0.3.18 (`default-features = false`) | crates.io | First-principles review; atomic Unix cancellation flags held through native toolchain CLI cleanup |
 
 `ureq` is preferred over a heavier HTTP stack because the surface is small and
 blocking I/O is acceptable at the CLI boundary.
@@ -70,6 +71,11 @@ blocking I/O is acceptable at the CLI boundary.
 - Templates are shipped content for consumer repos, not repo-facing documentation.
 - Future planning, slice sequencing, and deferred design work live in Brain,
   not in the canonical repo docs.
+- Toolchain admission dispatches statically before Cargo discovery. Pure
+  subject/evidence/policy owners remain process- and filesystem-independent;
+  the binary owns explicit trust, storage, source retrieval and native effects.
+  Do not replace current checks with a stored installation receipt or let a
+  copied repository assessment create another user's personal acceptance.
 
 ## Current implemented policy surface
 

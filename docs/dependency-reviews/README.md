@@ -60,6 +60,35 @@ requires re-review.
 `inspect` can supply evidence for a review record, but it does not by itself
 activate an entry in `reviewed-targets.toml`.
 
+## Rust distribution Phase0 qualification
+
+- [Embedded public verifier](2026-11-04-embedded-public-verifier.md) and
+  [selected-host graph](2026-11-04-embedded-public-verifier-graph.json).
+- [Bounded distribution decoder](2026-11-04-rust-distribution-decoder.md).
+- [Preserving toolchain edits](2026-11-04-rust-toolchain-preserving-edit.md).
+- [Zlib permissive licence refinement](2026-11-04-zlib-licence-refinement.md).
+- [Actual product integration and source custody](2026-11-04-phase0-product-integration.md),
+  [product graph](2026-11-04-phase0-product-graph.json),
+  [maintained source patch](2026-11-04-rpgpie.patch) and
+  [fixed source inventory](rpgpie-0.12.0-tree.sha256).
+
+These records qualify bounded foundation work; they do not enable trust,
+admission, installation or activation commands.
+
+## Toolchain admission implementation
+
+- [Pure admission identities, policy and source qualification](2026-11-04-rust-toolchain-admission-foundation.md).
+- [Official public distribution baseline seed](2026-11-04-rust-distribution-public-seed.md).
+- [Existing exact serde direct edge for strict records](2026-11-04-toolchain-record-serde.md).
+- [Scoped native cancellation dependencies](2026-11-04-toolchain-cancellation.md).
+- [Native toolchain scope and connected qualification](2026-11-04-native-toolchain-qualification.md).
+- [Exact native fixture evaluator CI provisioning](2026-11-08-native-fixture-evaluator-ci.md).
+
+These records accompany the runtime integration. Foundation qualification,
+explicit approval, current repository policy and independent installed
+correspondence remain separate requirements; a dependency review grants no
+consumer toolchain acceptance.
+
 ## Recent security remediation
 
 - [WebPKI distrust remediation](2026-10-21-webpki-distrust-remediation.md) —
@@ -73,6 +102,9 @@ activate an entry in `reviewed-targets.toml`.
 - [cargo-nextest 0.9.146](2026-10-14-cargo-nextest-0.9.146.md) — external CI
   test tool, installed with `--locked --no-default-features`; scoped advisory
   and execution-surface review, with no product manifest dependency.
+- [8 November nextest qualification refresh](2026-11-08-nextest-qualification.md)
+  and [exact graph/advisory/execution receipt](2026-11-08-nextest-qualification.json)
+  — current bounded macOS/Linux verification-script acceptance through 14 November.
 
 ## When to add a record
 

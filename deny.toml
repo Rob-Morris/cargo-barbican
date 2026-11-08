@@ -30,6 +30,7 @@ allow = [
   "Unicode-3.0",
   "BSD-3-Clause",
   "CDLA-Permissive-2.0",
+  "Zlib",
 ]
 # Flag entries that stop being needed, so the list tracks the real graph.
 unused-allowed-license = "warn"

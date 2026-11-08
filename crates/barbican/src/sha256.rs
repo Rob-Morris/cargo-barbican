@@ -4,8 +4,25 @@ use thiserror::Error;
 
 const SHA256_HEX_LEN: usize = 64;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(try_from = "String", into = "String")]
 pub struct Sha256Digest(String);
+
+impl TryFrom<String> for Sha256Digest {
+    type Error = Sha256DigestError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<Sha256Digest> for String {
+    fn from(value: Sha256Digest) -> Self {
+        value.0
+    }
+}
 
 impl Sha256Digest {
     pub fn as_str(&self) -> &str {

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/barbican", "crates/cargo-barbican"]
+members = ["crates/barbican", "crates/cargo-barbican", "vendor/rpgpie"]
+default-members = ["crates/barbican", "crates/cargo-barbican"]
 
 [workspace.package]
 edition = "2024"

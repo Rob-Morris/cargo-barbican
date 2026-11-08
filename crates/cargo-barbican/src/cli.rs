@@ -12,7 +12,7 @@ const MIN_AGE_DAYS_HELP: &str = "Override the configured release-age minimum for
 #[derive(Debug, Parser)]
 #[command(
     name = "cargo-barbican",
-    bin_name = "cargo barbican",
+    bin_name = "cargo-barbican",
     version,
     about = "Supply-chain policy gate for a Rust repo's dependency intake",
     long_about = "cargo-barbican is a policy-first Cargo subcommand for Rust supply-chain \
@@ -22,6 +22,24 @@ const MIN_AGE_DAYS_HELP: &str = "Override the configured release-age minimum for
         established, the command blocks and explains rather than passing silently."
 )]
 pub struct Cli {
+    #[arg(
+        long,
+        global = true,
+        help = "Explicit filesystem-only governance root for toolchain admission and opted-in gates"
+    )]
+    pub(crate) repo: Option<PathBuf>,
+    #[arg(
+        long,
+        global = true,
+        help = "Explicit private per-user toolchain authority directory; never a repository/cache approval"
+    )]
+    pub(crate) data_dir: Option<PathBuf>,
+    #[arg(
+        long,
+        global = true,
+        help = "Explicit disposable toolchain download cache directory"
+    )]
+    pub(crate) cache_dir: Option<PathBuf>,
     #[command(subcommand)]
     pub(crate) command: Command,
 }
@@ -198,7 +216,9 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: PolicyCommand,
     },
-    #[command(about = "Check the workspace's pinned Rust toolchain")]
+    #[command(
+        about = "Review, accept and govern Rust toolchains without executing unaccepted candidates"
+    )]
     Toolchain {
         #[command(subcommand)]
         command: ToolchainCommand,
@@ -281,6 +301,90 @@ pub(crate) enum Command {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ToolchainCommand {
+    #[command(
+        about = "Collect authenticated exact-stable distribution and scoped source evidence without candidate execution"
+    )]
+    Review {
+        release: String,
+        #[arg(long)]
+        standalone: bool,
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long, value_enum)]
+        profile: Option<ToolchainProfile>,
+        #[arg(long = "component", value_delimiter = ',')]
+        components: Vec<String>,
+        #[arg(long = "target", value_delimiter = ',')]
+        targets: Vec<String>,
+        #[arg(long, value_parser = min_age_days_parser(), help = MIN_AGE_DAYS_HELP)]
+        min_age_days: Option<u64>,
+        #[arg(long, value_enum, default_value = "text")]
+        format: AuditOutputFormat,
+    },
+    #[command(
+        about = "Explicitly accept one completed exact review; optionally publish current repository admission"
+    )]
+    Accept {
+        review_id: String,
+        #[arg(long)]
+        record: PathBuf,
+        #[command(flatten)]
+        options: ToolchainOperationArgs,
+    },
+    #[command(
+        about = "Check applicable exact repository admission and local installed correspondence"
+    )]
+    AdmissionCheck {
+        review_id: Option<String>,
+        #[command(flatten)]
+        options: ToolchainOperationArgs,
+    },
+    #[command(
+        about = "Install only accepted private snapshots through the qualified trusted Rustup evaluator"
+    )]
+    Install {
+        review_id: String,
+        #[arg(long)]
+        rustup_executable: PathBuf,
+        #[arg(long)]
+        allow_initial_default: bool,
+        #[command(flatten)]
+        options: ToolchainOperationArgs,
+    },
+    #[command(
+        about = "Establish current static correspondence for an existing accepted installation"
+    )]
+    Adopt {
+        review_id: String,
+        #[command(flatten)]
+        options: ToolchainOperationArgs,
+    },
+    #[command(
+        about = "Independently verify accepted installed bytes, types and generated metadata"
+    )]
+    InstallationCheck {
+        review_id: String,
+        #[command(flatten)]
+        options: ToolchainOperationArgs,
+    },
+    #[command(
+        about = "Activate an admitted verified installation by preserving the repository TOML pin"
+    )]
+    Activate {
+        review_id: String,
+        #[command(flatten)]
+        options: ToolchainOperationArgs,
+    },
+    #[command(
+        about = "Inspect and explicitly approve changes to the per-user public distribution trust baseline"
+    )]
+    Trust {
+        #[command(subcommand)]
+        command: ToolchainTrustCommand,
+        #[arg(long, value_enum, default_value = "text", global = true)]
+        format: AuditOutputFormat,
+    },
+
     #[command(
         about = "Check exact Rust toolchain conformance without workspace execution",
         long_about = "Checks rust-toolchain.toml, active rustup/Cargo/rustc/rustdoc release and host \
@@ -486,4 +590,40 @@ pub(crate) enum AssessPolicyMode {
 
 fn min_age_days_parser() -> RangedU64ValueParser<u64> {
     clap::value_parser!(u64).range(0..=MAXIMUM_RELEASE_AGE_MINIMUM_DAYS)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ToolchainProfile {
+    Minimal,
+    Default,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ToolchainOperationArgs {
+    #[arg(long, value_parser = min_age_days_parser(), help = MIN_AGE_DAYS_HELP)]
+    pub(crate) min_age_days: Option<u64>,
+    #[arg(long)]
+    pub(crate) standalone: bool,
+    #[arg(long, requires = "cache_reason")]
+    pub(crate) cached_admission: bool,
+    #[arg(long, requires = "cached_admission")]
+    pub(crate) cache_reason: Option<String>,
+    #[arg(long)]
+    pub(crate) rustup_home: Option<PathBuf>,
+    #[arg(long, value_enum, default_value = "text")]
+    pub(crate) format: AuditOutputFormat,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ToolchainTrustCommand {
+    Show,
+    Refresh {
+        #[arg(long, requires = "fingerprint")]
+        public_key: Option<PathBuf>,
+        #[arg(long, requires = "public_key")]
+        fingerprint: Option<String>,
+    },
+    Approve {
+        proposal_id: String,
+    },
 }

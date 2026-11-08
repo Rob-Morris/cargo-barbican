@@ -20,9 +20,14 @@ const RUSTSEC_ID_LEN: usize = 17;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReviewedTargets {
     rust_families: Vec<ReviewedRustFamily>,
+    rust_toolchains: Vec<crate::toolchain_admission::ReviewedToolchainAdmission>,
 }
 
 impl ReviewedTargets {
+    pub fn rust_toolchains(&self) -> &[crate::toolchain_admission::ReviewedToolchainAdmission] {
+        &self.rust_toolchains
+    }
+
     pub fn rust_families(&self) -> &[ReviewedRustFamily] {
         &self.rust_families
     }
@@ -501,33 +506,52 @@ impl ReviewedResolvedTarget {
     }
 
     pub(crate) fn is_satisfied_by(&self, observed: &ObservedResolvedTarget) -> bool {
-        let version_matches =
-            observed.versions.len() == 1 && observed.versions.contains(self.version());
-        if let Some(git) = self.git() {
-            return version_matches
-                && !observed.has_crates_io_entry
-                && observed.checksums_sha256.is_empty()
-                && observed.non_crates_io_sources.len() == 1
-                && observed
-                    .non_crates_io_sources
-                    .contains(&git.locked_source());
+        if observed.packages.is_empty() || observed.reviewed_targets.is_empty() {
+            return false;
         }
-        let source_matches = observed.non_crates_io_sources.is_empty();
-        let checksum_matches = match self.checksum_sha256() {
-            Some(expected_checksum) => {
-                !observed.has_checksumless_entry
-                    && observed.checksums_sha256.len() == 1
-                    && observed.checksums_sha256.contains(expected_checksum)
+        let mut identities = BTreeSet::new();
+        for package in &observed.packages {
+            if !identities.insert((&package.version, &package.source)) {
+                return false;
             }
-            None => true,
-        };
-
-        version_matches && source_matches && checksum_matches
+            let declarations = observed
+                .reviewed_targets
+                .iter()
+                .filter(|target| {
+                    target.version() == package.version
+                        && package.source.as_deref() == Some(target.source_string().as_str())
+                })
+                .collect::<Vec<_>>();
+            // Every declaration constrains its identity: a legacy checksum-free
+            // declaration cannot dilute a second, checksum-bound declaration.
+            if declarations.is_empty()
+                || !declarations
+                    .iter()
+                    .all(|target| target.matches_package(package))
+                || (observed.packages.len() > 1
+                    && package.is_crates_io()
+                    && package.checksum().is_none())
+            {
+                return false;
+            }
+        }
+        observed.reviewed_targets.iter().all(|target| {
+            observed
+                .packages
+                .iter()
+                .any(|package| target.matches_package(package))
+        }) && observed
+            .packages
+            .iter()
+            .any(|package| self.matches_package(package))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ObservedResolvedTarget {
+    pub(crate) packages: Vec<crate::LockedPackage>,
+    pub(crate) reviewed_targets: Vec<ReviewedResolvedTarget>,
+    // Aggregates support diagnostics only; acceptance uses associated tuples.
     pub(crate) versions: BTreeSet<String>,
     pub(crate) checksums_sha256: BTreeSet<Sha256Digest>,
     /// Every non-crates.io source string observed for this crate name across
@@ -541,11 +565,23 @@ pub(crate) struct ObservedResolvedTarget {
     /// satisfied by a checksum-less lockfile entry, even if another entry for
     /// the same name/version does carry the expected checksum.
     pub(crate) has_checksumless_entry: bool,
-    pub(crate) has_crates_io_entry: bool,
 }
 
 pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, ReviewedTargetsError> {
     let raw: RawReviewedTargets = toml::from_str(text).map_err(ReviewedTargetsError::Parse)?;
+    let mut toolchain_subjects = BTreeSet::new();
+    for admission in &raw.rust.toolchains {
+        admission
+            .validate()
+            .map_err(ReviewedTargetsError::ToolchainAdmission)?;
+        if !toolchain_subjects.insert((admission.scope.clone(), admission.subject_id.clone())) {
+            return Err(ReviewedTargetsError::ToolchainAdmission(
+                crate::toolchain_admission::AdmissionError(
+                    "duplicate toolchain subject in repository scope".into(),
+                ),
+            ));
+        }
+    }
     let mut rust_families = Vec::with_capacity(raw.rust.families.len());
     let mut family_names = BTreeSet::new();
     let mut advisory_bindings: BTreeMap<(RustSecAdvisoryId, ExactCrateSpec), String> =
@@ -857,7 +893,10 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
         });
     }
 
-    Ok(ReviewedTargets { rust_families })
+    Ok(ReviewedTargets {
+        rust_families,
+        rust_toolchains: raw.rust.toolchains,
+    })
 }
 
 const ALLOWED_SURFACES_TABLE: &str = "allowed_surfaces";
@@ -946,6 +985,8 @@ fn is_terminal_control_char(character: char) -> bool {
 
 #[derive(Debug, Error)]
 pub enum ReviewedTargetsError {
+    #[error("invalid toolchain admission: {0}")]
+    ToolchainAdmission(crate::toolchain_admission::AdmissionError),
     #[error("{0}")]
     GitSource(#[source] GitSourceError),
     #[error("Git direct target {crate_name:?} must match the same family's resolved Git target")]
@@ -1112,6 +1153,8 @@ pub(crate) struct RawReviewedTargets {
 pub(crate) struct RawRustReviewedTargets {
     #[serde(default)]
     pub(crate) families: Vec<RawReviewedRustFamily>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) toolchains: Vec<crate::toolchain_admission::ReviewedToolchainAdmission>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

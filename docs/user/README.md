@@ -9,6 +9,7 @@ hardening.
 - [Configuration](configuration.md) — `barbican.toml`, verification runner and `reviewed-targets.toml` reference
 - [Reviewed Families](families.md) — discover, inspect and extend exact family scope without completing review
 - [Reviewed Git Sources](git-sources.md) — exact source review, offline admission and scanner limits
+- [Rust Toolchains](toolchains.md) — pre-execution review, local acceptance, checked installation and separate activation
 - [Integration](integration.md) — install, template, and re-sync model
 - [CI](ci.md) — GitHub Actions workflow example and pre-commit-hook guidance
 - [Operations](operations.md) — failing audits, lockfile recovery, routine updates and family lifecycle

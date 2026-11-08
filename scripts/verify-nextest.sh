@@ -5,6 +5,9 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
 NEXTEST_VERSION=0.9.146
+# The reviewed fixture route excludes ambient user config and recording.
+export NEXTEST_USER_CONFIG_FILE=none
+export NEXTEST_EXPERIMENTAL_RECORD=0
 if ! NEXTEST_BANNER=$(cargo nextest --version 2>&1); then
   printf >&2 '%s\n' "verify-nextest: cargo-nextest $NEXTEST_VERSION is required; no tests were skipped" "$NEXTEST_BANNER"
   printf >&2 '%s\n' "Install the reviewed test tool: cargo install --locked --no-default-features cargo-nextest@$NEXTEST_VERSION"
