@@ -621,7 +621,7 @@ Examples:
 ```bash
 cargo barbican pick serde
 cargo barbican pick serde@^1
-cargo barbican pick --min-age-days 30 serde@>=1.0,<2.0
+cargo barbican pick --min-age-days 30 'serde@>=1.0,<2.0'
 ```
 
 What it does:
@@ -646,6 +646,8 @@ separate policy semantics.
 
 Currently supported workflows:
 
+- `policy-check` - toolchain, direct coverage, audit and strict reviewed pins
+  without workspace build/test
 - `pre-release` - whole-repo toolchain, inventory, audit, and verify workflow
 - `candidate` - pre-add intake dossier for one exact crates.io candidate
 - `re-pin` - explicit-baseline age/assessment followed by registry pin refresh;

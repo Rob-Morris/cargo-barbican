@@ -118,11 +118,11 @@ Two scope notes:
   are not governed by `[high_scrutiny]` and always block.
 - `cargo barbican inspect` is not governed by these keys. Its high-scrutiny
   indicator scan over build-time and proc-macro-relevant sources is fixed,
-  and its surface classification (`build.rs`, proc-macro, native `-sys` /
-  FFI surfaces are `elevated-risk` unless covered by a reviewed
-  `allowed_surfaces` allowance) does not consult `[high_scrutiny]`. The keys
-  configure the post-change assessment gate, not the pre-add evidence
-  commands.
+  and detected `build.rs`, proc-macro and native `-sys` / FFI surfaces count
+  as `elevated-risk` regardless of `allowed_surfaces`. Those reviewed
+  allowances apply to post-change `assess`, not pre-add inspection. See the
+  [functional contract](../functional/cli.md) for inspection classification
+  and blocking findings.
 
 Set a key to `false` only as a deliberate, reviewed policy decision — for
 example a repo that adds direct dependencies frequently under a separate
@@ -153,9 +153,13 @@ nextest_version = "0.9.146"
 ```
 
 Review and pin the consumer's exact nextest installation before adopting it.
-The example is the tool version reviewed for Barbican's CI; `0.9.128` is the
-supported CLI floor, not a fresh-install recommendation. Ranges, `=` or `v`
-prefixes, prereleases, build metadata and a version with cargo-test are errors.
+The example comes from Barbican's dated, bounded CI/fixture qualification,
+not unrestricted consumer approval. See the
+[nextest integration notes](integration.md#optional-nextest-runner) for its
+minimal features, environment controls and current review record. `0.9.128`
+is the supported CLI floor, not a fresh-install recommendation. Ranges, `=`
+or `v` prefixes, prereleases, build metadata and a version with cargo-test
+are errors.
 Nextest selection without a version is also an error.
 When nextest is selected, `CARGO_ALIAS_NEXTEST` and `alias.nextest` in effective
 workspace, ancestor or Cargo-home config fail the toolchain preflight: Cargo

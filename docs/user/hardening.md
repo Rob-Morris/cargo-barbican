@@ -166,7 +166,7 @@ to weaken the gate. A worked GitHub example (`.github/CODEOWNERS`):
 /docs/dependency-reviews/                 @your-org/dependency-policy
 /.cargo/                                  @your-org/dependency-policy
 /.github/CODEOWNERS                       @your-org/dependency-policy
-/.github/workflows/dependency-policy.yml  @your-org/dependency-policy
+/.github/workflows/barbican.yml           @your-org/dependency-policy
 ```
 
 Notes on the entries:
@@ -176,8 +176,10 @@ Notes on the entries:
   diff should still reach a policy owner.
 - `rust-toolchain.toml` is on the list because it selects the Rust toolchain
   executables that `verify` and Gatehouse prove before execution.
-- The CI workflow file and `CODEOWNERS` itself are on the list because
-  weakening either is equivalent to weakening the gate.
+- The generated CI workflow is `.github/workflows/barbican.yml`. Adjust this
+  entry for a custom name and include every workflow that enforces the gate.
+  Those workflows and `CODEOWNERS` itself need protection because weakening
+  either is equivalent to weakening the gate.
 - `Cargo.toml` and `Cargo.lock` are deliberately absent: they change with
   routine work, and gating them on a small owner group creates pressure to
   rubber-stamp. The barbican gates in CI are the control on those files.

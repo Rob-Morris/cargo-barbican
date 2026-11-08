@@ -97,10 +97,8 @@ The hook package is described in:
 
 ## Before Committing
 
-1. `cargo build --locked` passes.
-2. `cargo test --locked` passes.
-3. `cargo audit` and `cargo deny check advisories bans sources` pass.
-4. Any new dependency has a checked-in review record.
-5. If the repo version changed, `CHANGELOG.md` and `docs/changelog/vX.Y.Z.md` were updated together.
-6. Follow [`.canaries/pre-commit.md`](../.canaries/pre-commit.md), write the transient `.canary--pre-commit` receipt, and leave it unstaged.
-7. The commit subject matches [standards/commit-messages.md](standards/commit-messages.md).
+1. Set up the [verification prerequisites](contributor/process.md#verification-expectations), then run `sh scripts/verify.sh`. This canonical gate checks vendored source custody before Cargo execution; do not substitute the raw Cargo/audit/deny commands. Before direct Cargo build/test/lint work, run `sh scripts/check_vendored_source.sh`.
+2. Any new dependency has a checked-in review record.
+3. If the repo version changed, `CHANGELOG.md` and `docs/changelog/vX.Y.Z.md` were updated together.
+4. Follow [`.canaries/pre-commit.md`](../.canaries/pre-commit.md), write the transient `.canary--pre-commit` receipt, and leave it unstaged.
+5. The commit subject matches [standards/commit-messages.md](standards/commit-messages.md).

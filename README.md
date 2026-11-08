@@ -15,7 +15,7 @@ what needs human review, and what must be blocked before build/test execution.
 > deprecation period. It is a policy checkpoint, not a security guarantee: a
 > passing gate does not certify a dependency is safe. Provided as-is with no
 > warranty of any kind — see [LICENSE](LICENSE). macOS and Linux are the
-> supported platforms; Windows is untested and experimental. Read
+> supported platforms; the current binary requires Unix APIs. Read
 > [Insiders Release Scope](#insiders-release-scope) before adopting it.
 
 Use it to:
@@ -25,6 +25,8 @@ Use it to:
 - inspect exact crates.io candidates before adding them
 - classify dependency diffs as `routine-safe`, `elevated-risk`, or `policy-violating`
 - enforce checked-in reviewed-target policy before build/test execution
+- [review and explicitly accept Rust toolchains](docs/user/toolchains.md) before
+  installation or execution on qualified native routes
 - run the delegated advisory and deny checks through one workflow
 - produce review-focused output for humans deciding whether to trust a dependency
 
@@ -74,18 +76,22 @@ certification:
 
 ## Platform Support
 
-cargo-barbican is developed and tested on Unix-like systems: macOS and Linux.
-It may work on Windows, but Windows is not currently a supported or tested
-platform. In particular, fail-closed path-containment guarantees for static
-repo state around symlinks, directory junctions, and reparse points are
-unverified on Windows.
+cargo-barbican is developed and tested on macOS and Linux. The current binary
+requires Unix APIs and does not support Windows.
 
-Treat Windows use as experimental and use-at-your-own-risk until full Windows
-support is explicitly delivered.
+**Rust toolchain installation/adoption has narrower support:** native macOS
+ARM64 only, using the exact reviewed Homebrew Rustup 1.29.0_1 build and minimal
+Rust with supported Clippy/rustfmt additions. Broader distribution metadata
+support does not qualify native installation. See the
+[toolchain guide](docs/user/toolchains.md#installation-edges-and-recovery) for
+the exact evaluator identity, archive route and refusal boundaries.
 
 ## Quickstart
 
-Install the insiders release candidate from its immutable git tag:
+Use an already trusted Rust toolchain to build and install Barbican. Run from
+a directory that does not select an unaccepted repository compiler, or
+explicitly select your trusted toolchain with `RUSTUP_TOOLCHAIN`. Install the
+insiders release candidate from its immutable git tag:
 
 ```bash
 cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.37.0
@@ -94,29 +100,24 @@ cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag 
 The tag is the install identity; do not replace it with a moving branch in
 consumer CI.
 
-Start with the [adoption guide](docs/user/adoption.md). In the consumer Cargo
-workspace, choose an exact Rust channel deliberately:
+Start with the [adoption guide](docs/user/adoption.md). Before launching Cargo
+in a consumer workspace that pins a new compiler, review and explicitly accept it
+through the direct trusted [toolchain workflow](docs/user/toolchains.md).
+Use an already trusted, explicitly selected compiler for Cargo-based
+scaffolding, so the repository cannot auto-select an unaccepted compiler:
 
 ```bash
 cargo barbican policy init --toolchain <exact-channel>
 ```
 
-Use an already trusted toolchain for Cargo-based scaffolding. Review and
-explicitly accept a new compiler through the direct
-[toolchain workflow](docs/user/toolchains.md) before installation or execution.
 With a trusted selected compiler, run `cargo barbican toolchain check`, then
 prepare the graph and complete dependency review before enforcing it. Init
 creates policy and a reusable pending review template; it does not approve the
 graph. Optional `--pre-commit-hook` copies a disabled local helper. Plain init
 also links the [manual installation/integration guide](docs/user/ci.md#pre-commit-hook).
 
-For a new Rust compiler, use the direct trusted `cargo-barbican toolchain`
-workflow to review and explicitly accept it before installation or execution.
-That workflow provides scoped source evidence, checked native installation or
-static adoption, and separate repository pin activation. Runtime
-`toolchain check` alone does not establish that admission. See
-[Rust toolchains](docs/user/toolchains.md) for bootstrap, supported routes and
-repository opt-in.
+Runtime `toolchain check` establishes conformance to the pin; it does not
+replace review, acceptance or the separate admission opt-in.
 
 Install only the scanners selected by `barbican.toml`; see
 [prerequisites](docs/user/integration.md#prerequisites). After review:
@@ -301,6 +302,7 @@ tools instead of becoming a cross-ecosystem package-management framework.
 - [docs/user/commands.md](docs/user/commands.md) — command workflows and usage reference
 - [docs/user/configuration.md](docs/user/configuration.md) — `barbican.toml` and `reviewed-targets.toml` reference
 - [docs/user/integration.md](docs/user/integration.md) — install and template integration
+- [docs/user/toolchains.md](docs/user/toolchains.md) — compiler review, acceptance and qualified installation
 - [docs/user/ci.md](docs/user/ci.md) — GitHub Actions CI workflow example
 - [docs/user/operations.md](docs/user/operations.md) — day-2 operations: failing audits, updates, family lifecycle
 - [docs/user/hardening.md](docs/user/hardening.md) — making the gate hard to bypass

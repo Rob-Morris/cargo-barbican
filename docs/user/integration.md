@@ -49,11 +49,21 @@ error.
 To use process-isolated tests, first review and install the consumer's exact
 cargo-nextest version, then set both `[verify] test_runner = "nextest"` and
 `nextest_version` in `barbican.toml`. Keep the tool's install feature set in
-its review record and bootstrap. For Barbican's reviewed test-tool example:
+its review record and bootstrap. Barbican's dated CI/fixture example uses
+minimal features:
 
 ```bash
 cargo install --locked --no-default-features cargo-nextest@0.9.146
 ```
+
+The [current qualification](../dependency-reviews/2026-11-08-nextest-qualification.md)
+is limited to version/ordinary-run proof, with the review deadline recorded
+there. The shared [`verify-nextest.sh`](../../scripts/verify-nextest.sh) script
+sets `NEXTEST_USER_CONFIG_FILE=none` and `NEXTEST_EXPERIMENTAL_RECORD=0` before
+the first probe and throughout its fixtures. This CI acceptance does not
+approve unrestricted consumer use. Product `verify` does not set those
+environment controls; consumers own review of their runner and native
+configuration.
 
 A version check does not prove binary provenance. Gate-time verification never
 installs or updates tools. Check custom-harness compatibility, shared resources

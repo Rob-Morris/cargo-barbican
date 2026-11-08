@@ -33,6 +33,19 @@ Use `--repo <governance-root>` when the current directory is not the actual
 repository root. Use `--standalone` deliberately for personal review and
 acceptance without repository admission; activation always needs a repository.
 
+Before the first repository review, set a stable admission scope in
+`barbican.toml`:
+
+```toml
+[toolchain]
+admission_scope = "your-organisation/your-repository"
+```
+
+Defaults do not set a scope. Repository acceptance requires it to publish
+admission; without it, acceptance retains the personal decision but refuses
+repository publication. This does not enable admission enforcement for the
+existing pin: `require_admission` is a separate opt-in described below.
+
 From the governance root, start a review without changing the current pin:
 
 ```sh
@@ -86,7 +99,8 @@ verification or release gate afterwards to assess compatibility.
 
 ## Repository Governance And Gates
 
-Set a stable repository admission scope and deliberately opt in:
+After accepting and installing or adopting the toolchain, deliberately opt
+in to admission enforcement. Keep the scope established before review:
 
 ```toml
 [toolchain]
@@ -185,7 +199,8 @@ refusal by running the candidate to identify it.
 The current qualified evaluator is native macOS ARM64 Rustup 1.29.0, exact
 executable SHA256
 `16c7599bf448e4e7512779154f6b05042bf2ff715e5e09d9cf5d465a3b750496`
-(the reviewed Homebrew 1.29.0_1 libexec build), with selected XZ inputs.
+(the reviewed Homebrew 1.29.0_1 libexec build). The current CLI review route
+selects XZ inputs; it does not offer a Gzip selection or fallback.
 Barbican does not install that evaluator automatically. A version banner alone
 does not qualify a different binary. Authentic installed-output proof covers
 native minimal Rust with supported Clippy/rustfmt additions; broader

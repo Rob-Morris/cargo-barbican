@@ -21,14 +21,8 @@ deduplication of undertask's scripts.
 
 ## Platform Support
 
-cargo-barbican is developed and tested on Unix-like systems: macOS and Linux.
-It may work on Windows, but Windows is not currently a supported or tested
-platform. In particular, fail-closed path-containment guarantees for static
-repo state around symlinks, directory junctions, and reparse points are
-unverified on Windows.
-
-Treat Windows use as experimental and use-at-your-own-risk until full Windows
-support is explicitly delivered.
+cargo-barbican is developed and tested on macOS and Linux. The current binary
+requires Unix APIs and does not support Windows.
 
 Rust distribution metadata and native installer qualification are separate.
 The checked toolchain handoff/static installed mapping currently admits only
