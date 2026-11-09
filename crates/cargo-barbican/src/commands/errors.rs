@@ -13,6 +13,7 @@ pub enum CommandError {
     ToolchainIntake(String),
     PinEdit(String),
     CargoHomeUnresolved,
+    CargoLockfileSelection(String),
     CargoConfigRead {
         path: String,
         source: io::Error,
@@ -108,6 +109,9 @@ impl fmt::Display for CommandError {
                 formatter,
                 "unable to establish Cargo home: neither CARGO_HOME nor HOME is set; set one so user-level Cargo source policy can be inspected"
             ),
+            Self::CargoLockfileSelection(detail) => {
+                write!(formatter, "{}", escape_diagnostic_for_terminal(detail))
+            }
             Self::CargoConfigRead { path, source } => {
                 write!(
                     formatter,
@@ -320,6 +324,7 @@ impl std::error::Error for CommandError {
             Self::ToolchainIntake(_) => None,
             Self::PinEdit(_) => None,
             Self::CargoHomeUnresolved => None,
+            Self::CargoLockfileSelection(_) => None,
             Self::CargoConfigRead { source, .. } => Some(source),
             Self::Config(error) => Some(error),
             Self::ConfigRead { source, .. } => Some(source),

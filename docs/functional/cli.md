@@ -28,10 +28,47 @@ root, as do relative path arguments such as `--lockfile`, `--base-dir`, and
 
 When no `Cargo.toml` exists in the invocation directory or any parent, every
 legacy repository command fails closed with a `FAIL workspace root not found: ...` line on
-stderr naming the discovery rule, and exits `1`. A nearest manifest that
+stderr naming the discovery rule, and exits `1`, after the configuration guard
+below passes. A nearest manifest that
 cannot be read or parsed still anchors discovery to its own directory (or to
 an enclosing `[workspace]` root); the command that actually consumes that
 manifest then reports the failure through its own error or degradation path.
+
+## Cargo lockfile identity
+
+Ordinary repository commands require Cargo's default workspace `Cargo.lock`.
+Before their first Cargo workspace-discovery call, they inspect effective Cargo
+configuration in the invocation directory, its ancestors and Cargo home. If
+discovery selects a different execution directory, that directory's effective
+configuration is also checked. `locate-project` establishes workspace membership;
+it does not build the workspace or resolve its dependency graph.
+
+The presence of `resolver.lockfile-path`, `[env].CARGO_RESOLVER_LOCKFILE_PATH`,
+or `include` fails closed with an actionable diagnostic naming the configuration
+file and key, without echoing its value. Explicit default/same-root paths, empty
+values and dormant selections are also unsupported. Cargo's stable resolver
+selection and its earlier unstable feature gate use the same resolver key;
+an unstable enable flag alone does not select a lockfile. Configured `[env]`
+selection is refused as unsupported child-Cargo re-entry, not treated as a
+direct override of the current Cargo process. Direct inherited
+`CARGO_RESOLVER_*` variables remain removed at the prepared subprocess boundary.
+
+The check uses Cargo's effective legacy `config` before `config.toml` precedence
+at each directory. Member-only configuration is inspected when invoking Cargo
+from that member, but not when invoking from the workspace root. Repository and
+ancestor config symlinks are refused; the existing Cargo-home exception permits
+a config symlink only when both Cargo home and its resolved target stay outside
+the inspected workspace. Unreadable or malformed configuration fails closed.
+
+This guard applies before command-specific policy, including graph readers,
+adoption scaffolds and optional `pin check` with absent or empty reviewed
+families. It also checks the actual temporary execution roots of candidate
+intake and update previews before their Cargo graph operations. Verification
+and Gatehouse reuse the same rule on the toolchain preflight's captured config.
+Static toolchain intake retains its separate dispatch before Cargo and does
+not acquire this graph constraint. Explicit reader/baseline `--lockfile` options
+do not authorise alternate Cargo selection. Concurrent filesystem changes and
+general build-script/test subprocess containment remain outside this guarantee.
 
 ## Toolchain intake and early admission
 
@@ -952,7 +989,8 @@ cargo barbican verify
     The toolchain step establishes Rust toolchain executable identity, not
     binary provenance or a sandbox for Cargo's wider execution surface.
     `RUSTUP_HOME` may select the rustup installation tree, and target runners,
-    linkers, rustflags, and Cargo `[env]` settings remain ordinary inputs to
+    linkers, rustflags, and Cargo `[env]` settings other than the lockfile-selection
+    control above remain ordinary inputs to
     the subsequent build/test delegates.
     On success, `verify` confirms each executed step explicitly
     (`OK   cargo build --locked`, `OK   cargo test --locked` by default;

@@ -1,0 +1,397 @@
+{
+  "schema_version": 1,
+  "status": "completed; independent security review cleared exact bounded fixture; root authorised pinned script and inventory; exactly three candidate metadata calls passed",
+  "scope": "Existing Cargo component only for authored offline metadata proof; no Rust 1.99.1 toolchain acceptance",
+  "fresh_review_id": "2321919172fc30690873a35b58e38d5506de6e54f204afa12af228bab9bae2d4",
+  "fresh_review_json_sha256": "8556d9522d2412f6dd3a44fa14aaf7021b694a15d910367fa2d57c82867a7361",
+  "authentication": {
+    "certificate_sha256": "e54b09a439647e006b4831eec9785cbaaf3e07ab371c3a6ee6a68e1bdb9fbc6b",
+    "manifest_sha256": "fb152be80975c194aa5fc684b2aec3a6e14e2b855efe2faa4e5f8ae6e590f463",
+    "primary_fingerprint": "108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE",
+    "signature_sha256": "c841f374796b18294ad27045a13da75f6d31708b0c8c07821ef3de469b1830dc",
+    "signing_fingerprint": "108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE",
+    "verification_policy_sha256": "f732bf80b450c6ae7e7de40cc9138e318ca6f80e9b612294cc938de08dda09f5"
+  },
+  "cargo_archive_sha256": "685e563d94db1f003ffa5f5831439eec02569b9950b69867953c8213269c1eaf",
+  "cargo_executable": "/Users/robmorris/.rustup/toolchains/1.99.1-aarch64-apple-darwin/bin/cargo",
+  "cargo_executable_sha256": "6d576d8058f8ca643e8fce55b64ee3c614ba64c9da2e536bae843e6a2e1f3951",
+  "cargo_component_matching_files": 44,
+  "cargo_source_commit": "5f94df4789f005f9a352888e8355ffc645b7ed0e",
+  "cargo_source_archive_sha256": "49a8bcfa0e88d97737c0bec19b8b6c1abfbfb551d5cb43ad8b592d9f601bee1c",
+  "rust_source_commit": "58cf8f9c35b355199727627d07ae34a4e2846d67",
+  "rustsec_revision": "7a40350e1b8ba5b656d909f88222a8059a83d88d",
+  "trusted_compiler": "/Users/robmorris/.rustup/toolchains/1.95.0-aarch64-apple-darwin/bin/rustc",
+  "trusted_compiler_sha256": "b829b733131d4e1673eeebd1f34d06ae1e9ff4977b051313cf42e2a9e79ecf1c",
+  "fixture_commits": [
+    "36c7ed7e0c17e595921f066ea8103d8ea6bf0df6",
+    "65c072600b7384319470483cd181f0a94ac433ee"
+  ],
+  "fixture_lock_sha256": [
+    "98811b93c0770b154f290e4f1e8aea6ff43c4375fc0072091c7f2d606404bd57",
+    "684e1769de101d3464a7df461fccfcd25fca07e6128bc9ef83972f4738e9c307"
+  ],
+  "fixture_script_sha256": "564da124ed67e8f517799f7943e0896907f2ed20ef9d791315a4199b269758ff",
+  "fixture_inventory_sha256": "49219fd1b0779756fb843b5e068edf09acd7ca828755d8ca8dceb69a4e31fed0",
+  "candidate_argv": [
+    "/Users/robmorris/.rustup/toolchains/1.99.1-aarch64-apple-darwin/bin/cargo",
+    "metadata",
+    "--format-version",
+    "1",
+    "--frozen"
+  ],
+  "candidate_environment": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/home",
+    "CARGO_HOME": "/private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/cargo-home",
+    "RUSTUP_HOME": "/private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/rustup-home",
+    "CARGO_TARGET_DIR": "/private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/target",
+    "RUSTC": "/Users/robmorris/.rustup/toolchains/1.95.0-aarch64-apple-darwin/bin/rustc",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_AUTHOR_NAME": "Authored fixture",
+    "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+    "GIT_COMMITTER_NAME": "Authored fixture",
+    "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+    "GIT_AUTHOR_DATE": "2026-11-09T00:00:00+0000",
+    "GIT_COMMITTER_DATE": "2026-11-09T00:00:00+0000",
+    "CARGO_NET_OFFLINE": "true"
+  },
+  "candidate_cwd": "/private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/workspace",
+  "cargo_findings": [
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0173/unmaintained/proc-macro-error2@2.0.1/cargo/aarch64-apple-darwin",
+      "rationale": "unmaintained: source corpus contains proc-macro-error2@2.0.1 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Unmaintained proc-macro-error2: build-time macro dependency; no compilation of Cargo or its dependencies in this proof. Maintenance risk remains."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0204/vulnerability/crossbeam-epoch@0.9.18/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains crossbeam-epoch@0.9.18 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Exact epoch affected fmt::Pointer implementations have no callers in epoch/deque; deque public Debug implementations emit literal strings. Exact source-lock reverse path is epoch \u2192 deque \u2192 ignore \u2192 Cargo. No affected formatter on this route."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0247/unmaintained/bitmaps@2.1.0/cargo/aarch64-apple-darwin",
+      "rationale": "unmaintained: source corpus contains bitmaps@2.1.0 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Unmaintained bitmaps: retained maintenance risk in resolver data structures; no universal library-safety claim."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0250/unmaintained/im-rc@15.1.0/cargo/aarch64-apple-darwin",
+      "rationale": "unmaintained: source corpus contains im-rc@15.1.0 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Unmaintained im-rc: used by Cargo resolver; retained maintenance risk."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0251/unmaintained/sized-chunks@0.6.5/cargo/aarch64-apple-darwin",
+      "rationale": "unmaintained: source corpus contains sized-chunks@0.6.5 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Unmaintained sized-chunks: used through im-rc; retained maintenance risk."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0255/unsound/sized-chunks@0.6.5/cargo/aarch64-apple-darwin",
+      "rationale": "unsound: source corpus contains sized-chunks@0.6.5 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {\"sized_chunks::Chunk::clear\": [\"<= 0.7.0\"], \"sized_chunks::Chunk::drop_left\": [\"<= 0.7.0\"], \"sized_chunks::Chunk::drop_right\": [\"<= 0.7.0\"], \"sized_chunks::InlineArray::clear\": [\"<= 0.7.0\"], \"sized_chunks::RingBuffer::clear\": [\"<= 0.7.0\"], \"sized_chunks::RingBuffer::drop_left\": [\"<= 0.7.0\"], \"sized_chunks::RingBuffer::drop_right\": [\"<= 0.7.0\"]}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Trigger requires element Drop to panic. Resolver im-rc elements are Cargo-owned data: PackageId (Copy), Summary/Dependency (Arc-owned metadata), DepsFrame (Summary plus RcVecIter<DepInfo>); DepInfo contains Dependency, Rc<Vec<Summary>>, Rc<BTreeSet<InternedString>>. im-rc has no custom Drop implementation; its non-pool wrappers use std::rc::Rc, and refpool is absent from source lock. Tiny fixture introduces no artifact/platform values or executable code into these types. Narrow trigger assessment, not a general soundness claim."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0258/vulnerability/h2@0.4.15/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains h2@0.4.15 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "HTTP/2 empty DATA-frame peer input absent: mandatory frozen metadata over already cached authored Git objects cannot contact HTTP peers."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0285/vulnerability/rustls@0.23.41/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains rustls@0.23.41 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "TLS handshake boundary peer input absent in mandatory offline fixture."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0306/unsound/faster-hex@0.10.0/cargo/aarch64-apple-darwin",
+      "rationale": "unsound: source corpus contains faster-hex@0.10.0 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [\"x86\", \"x86_64\"], OS [], function constraints {\"faster_hex::hex_decode_unchecked\": [\">= 0.3.0, < 0.10.1\"]}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Affected architecture is x86/x86_64 AVX2; exact executable and host are ARM64. Local Git hex parsing does not change that architecture constraint."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0346/vulnerability/rustls@0.23.41/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains rustls@0.23.41 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "No TLS sessions or custom session-cache Debug output in offline fixture; no secrets in the child environment."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0348/vulnerability/rustls@0.23.41/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains rustls@0.23.41 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "No Brotli certificate decompression or TLS peer in offline fixture."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0349/vulnerability/rustls@0.23.41/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains rustls@0.23.41 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "No unauthenticated ServerHello or persistent TLS session store in offline fixture."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0382/vulnerability/rustls-webpki@0.103.13/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains rustls-webpki@0.103.13 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "No certificate-chain verification or TLS peer in offline fixture."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0385/vulnerability/ctutils@0.4.2/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains ctutils@0.4.2 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "No secret-integer cryptographic operation in fixture; no credentials or private key material in child environment."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0386/unsound/tokio@1.52.3/cargo/aarch64-apple-darwin",
+      "rationale": "unsound: source corpus contains tokio@1.52.3 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {\"tokio::io::unix::AsyncFd::new\": [\">= 0.3.2\"], \"tokio::io::unix::AsyncFd::try_new\": [\">= 1.37.0\"], \"tokio::io::unix::AsyncFd::try_with_interest\": [\">= 1.37.0\"], \"tokio::io::unix::AsyncFd::with_interest\": [\">= 0.3.2\"]}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Exact source-lock Tokio paths pass through reqwest/gix-transport HTTP. Cargo cached locked-OID branch returns before transport; offline missing-cache branch refuses before fetching. No direct AsyncFd use in Cargo source. This closes the proposed cached metadata route without asserting Tokio is absent from every distributor build."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0387/vulnerability/crypto-bigint@0.5.5/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains crypto-bigint@0.5.5 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "No secret-integer cryptographic operation in fixture; no credentials or private key material in child environment."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0414/vulnerability/pulldown-cmark@0.13.4/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains pulldown-cmark@0.13.4 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Requires ENABLE_WIKILINKS Markdown parser. Source-lock reverse dependency is mdman workspace tooling; metadata proof has no Markdown/wikilink operation."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0418/vulnerability/libz-sys@1.1.29/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains libz-sys@1.1.29 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Requires compiling libz-sys build.rs with cc >=1.6. This uses prebuilt Cargo and metadata only, compiling no dependency. Git object decompression is not the affected build-script API."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0426/vulnerability/orion@0.17.15/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains orion@0.17.15 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [\"s390x\", \"x86\", \"x86_64\"], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Listed affected architectures are s390x/x86/x86_64, not ARM64; no ML-KEM/ML-DSA operation in fixture."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0428/vulnerability/orion@0.17.15/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains orion@0.17.15 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {\"orion::hazardous::mac::blake2b::Blake2b::reset\": [\"< 0.17.16\", \"< 0.18.1\", \">= 0.12.0\"]}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "No BLAKE2b keyed reset or authentication operation in fixture."
+    },
+    {
+      "change": "unknown",
+      "exposure": "unknown",
+      "id": "RUSTSEC-2026-0433/vulnerability/pulldown-cmark@0.13.4/cargo/aarch64-apple-darwin",
+      "rationale": "vulnerability: source corpus contains pulldown-cmark@0.13.4 in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture [], OS [], function constraints {}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",
+      "source": {
+        "kind": "advisories",
+        "scope": "cargo/aarch64-apple-darwin"
+      },
+      "bounded_assessment": "Requires ENABLE_WIKILINKS Markdown parser. Source-lock reverse dependency is mdman workspace tooling; metadata proof has no Markdown/wikilink operation."
+    }
+  ],
+  "native_result": {
+    "status": "PASS",
+    "candidate_sha256": "6d576d8058f8ca643e8fce55b64ee3c614ba64c9da2e536bae843e6a2e1f3951",
+    "rustc_sha256": "b829b733131d4e1673eeebd1f34d06ae1e9ff4977b051313cf42e2a9e79ecf1c",
+    "results": [
+      {
+        "case": "native-root",
+        "version": "1.0.0",
+        "source": "git+file:///private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/dependency#36c7ed7e0c17e595921f066ea8103d8ea6bf0df6",
+        "lock_sha256": [
+          "98811b93c0770b154f290e4f1e8aea6ff43c4375fc0072091c7f2d606404bd57",
+          "684e1769de101d3464a7df461fccfcd25fca07e6128bc9ef83972f4738e9c307"
+        ]
+      },
+      {
+        "case": "native-alternate",
+        "version": "1.1.0",
+        "source": "git+file:///private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/dependency#65c072600b7384319470483cd181f0a94ac433ee",
+        "lock_sha256": [
+          "98811b93c0770b154f290e4f1e8aea6ff43c4375fc0072091c7f2d606404bd57",
+          "684e1769de101d3464a7df461fccfcd25fca07e6128bc9ef83972f4738e9c307"
+        ]
+      },
+      {
+        "case": "native-restored",
+        "version": "1.0.0",
+        "source": "git+file:///private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/dependency#36c7ed7e0c17e595921f066ea8103d8ea6bf0df6",
+        "lock_sha256": [
+          "98811b93c0770b154f290e4f1e8aea6ff43c4375fc0072091c7f2d606404bd57",
+          "684e1769de101d3464a7df461fccfcd25fca07e6128bc9ef83972f4738e9c307"
+        ]
+      }
+    ]
+  },
+  "fixed_refusal_result": {
+    "status": "PASS",
+    "binary": "/private/tmp/barbican-lockfile-identity.aydBhg/target/debug/cargo-barbican",
+    "binary_sha256": "1885b373025707cacc807a69fdd4a07b0591fa6546659e89729a709bc1872f08",
+    "environment": {
+      "PATH": "/Users/robmorris/.rustup/toolchains/1.95.0-aarch64-apple-darwin/bin:/usr/bin:/bin",
+      "HOME": "/private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/home",
+      "CARGO_HOME": "/private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/cargo-home",
+      "RUSTUP_HOME": "/private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/rustup-home",
+      "CARGO_TARGET_DIR": "/private/tmp/barbican-lockfile-identity.aydBhg/native-proof/fixture/target",
+      "RUSTC": "/Users/robmorris/.rustup/toolchains/1.95.0-aarch64-apple-darwin/bin/rustc",
+      "GIT_CONFIG_NOSYSTEM": "1",
+      "GIT_CONFIG_GLOBAL": "/dev/null",
+      "GIT_TERMINAL_PROMPT": "0",
+      "GIT_AUTHOR_NAME": "Authored fixture",
+      "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+      "GIT_COMMITTER_NAME": "Authored fixture",
+      "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+      "GIT_AUTHOR_DATE": "2026-11-09T00:00:00+0000",
+      "GIT_COMMITTER_DATE": "2026-11-09T00:00:00+0000",
+      "CARGO_NET_OFFLINE": "true"
+    },
+    "argv": [
+      "pin",
+      "check"
+    ],
+    "results": [
+      {
+        "case": "fixed-root",
+        "exit_code": 0,
+        "stdout_sha256": "4c9ce65f23e5016a19578560c9865e6f3430696e903baf2c9f7a47158b40a543",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fixed-alternate",
+        "exit_code": 1,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "90f7275c1756df311982da58572073ac3742ee08cb777f734c516c16bd0eb819"
+      },
+      {
+        "case": "fixed-restored",
+        "exit_code": 0,
+        "stdout_sha256": "4c9ce65f23e5016a19578560c9865e6f3430696e903baf2c9f7a47158b40a543",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "lock_sha256": [
+      "98811b93c0770b154f290e4f1e8aea6ff43c4375fc0072091c7f2d606404bd57",
+      "684e1769de101d3464a7df461fccfcd25fca07e6128bc9ef83972f4738e9c307"
+    ],
+    "scope": "Pre-policy guard refusal; root/restored controls intentionally have no reviewed-targets policy and skip. Not a full reviewed-family conformance proof."
+  },
+  "evidence_sha256": {
+    "fixture-native-result.json": "595c23fe7440e8ebcb94715c6668e6e6ea6a2033e592ea4031b7bce9875b40bc",
+    "fixture-fixed-result.json": "e9012c9e4a6c8fe33b2f98f80adb99e574486949428675fe00844057818abf21",
+    "fixed-refusal.py": "abb9b3f36fefe2a368bd040aa4d2aad0af1e1b0562c867745a7446bcaaf954ff",
+    "native-root.stdout": "16486f78619662f88003924389b7bb3c22ab317b4bfef9d547efdf5e085f5c87",
+    "native-root.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-alternate.stdout": "359a7f8d827f49f439ac8a1b10ad0476927d11158d8f0c705aef81d4c42a08f0",
+    "native-alternate.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-restored.stdout": "16486f78619662f88003924389b7bb3c22ab317b4bfef9d547efdf5e085f5c87",
+    "native-restored.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixed-root.stdout": "4c9ce65f23e5016a19578560c9865e6f3430696e903baf2c9f7a47158b40a543",
+    "fixed-root.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixed-alternate.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixed-alternate.stderr": "90f7275c1756df311982da58572073ac3742ee08cb777f734c516c16bd0eb819",
+    "fixed-restored.stdout": "4c9ce65f23e5016a19578560c9865e6f3430696e903baf2c9f7a47158b40a543",
+    "fixed-restored.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

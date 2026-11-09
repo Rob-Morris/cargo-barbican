@@ -63,8 +63,19 @@ diff:
   crate fails closed, and the detection resolves the
   `alias = { package = "real-crate", ... }` rename form to the real package
   name, so aliasing the patch does not hide it.
+- **Cargo lockfile selection stays aligned with review.** Ordinary repository
+  commands reject effective `resolver.lockfile-path`, configured
+  `[env].CARGO_RESOLVER_LOCKFILE_PATH`, and `include` before Cargo workspace
+  discovery, regardless of whether reviewed families are configured. Explicit
+  default paths are also refused: remove the setting and use Cargo's ordinary
+  workspace `Cargo.lock`. The configured environment form is refused as a
+  possible child-Cargo re-entry control; direct inherited resolver variables
+  are already removed from Barbican's Cargo subprocess environment. The same
+  guard covers discovered execution roots, verification's captured config and
+  candidate/update-preview temporary roots before graph operations. It is not
+  a sandbox for arbitrary processes launched by build scripts or tests.
 - **Effective Cargo-config source controls.** While any reviewed family is
-  active, an `include`, `[source]` table, config-defined `[patch]` table, or
+  active, a `[source]` table, config-defined `[patch]` table, or
   top-level `paths` override in effective Cargo configuration fails `pin check`.
   Inspection covers the workspace root, its ancestors, and Cargo home, using
   Cargo's effective `.cargo/config` / `.cargo/config.toml` selection. These

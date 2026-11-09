@@ -276,6 +276,7 @@ fn establish_toolchain_config_snapshot_with_home(
 ) -> Result<Vec<EffectiveCargoConfig>, String> {
     let configs =
         load_effective_cargo_configs(current_dir, cargo_home).map_err(|error| error.to_string())?;
+    super::lockfile_identity::check_configs(&configs).map_err(|error| error.to_string())?;
     for config in &configs {
         match cargo_config_toolchain_executable_control_key(&config.text) {
             Ok(Some("include")) => {

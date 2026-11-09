@@ -512,8 +512,9 @@ fn verify_rejects_indirect_cargo_configuration() {
     let (exit_code, _, stderr) = run_verify_fixture(&temp_dir, &runner);
 
     assert_eq!(exit_code, ExitCode::from(1));
-    assert!(stderr.contains("toolchain effect cannot be established"));
+    assert!(stderr.contains("lockfile selection cannot be established"));
     assert_eq!(runner.rustup_active_toolchain_calls(), 0);
+    assert!(runner.cargo_locate_project_calls.borrow().is_empty());
 }
 
 #[cfg(unix)]

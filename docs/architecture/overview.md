@@ -72,6 +72,18 @@ defaults remain native; acceptance precedes its internal candidate probe.
 This is scoped admission and correspondence, not binary benignness,
 reproducible-build proof, compatibility testing or a hostile-process sandbox.
 
+Ordinary repository dispatch checks effective Cargo configuration for unsupported
+lockfile selection before Cargo workspace discovery, independently of optional
+reviewed-family policy. The pure Cargo-config classifier owns presence detection;
+the binary's shared lockfile-identity guard owns configuration loading and safe
+diagnostics. Changed execution roots and candidate/update-preview temporary roots
+are checked before their graph operations. Toolchain preflight applies the same
+rule to its captured configuration before returning the snapshot used by strict
+verification and Gatehouse. This preserves the default workspace `Cargo.lock`
+boundary without introducing alternate-lockfile support or constraining static
+toolchain intake. See the [CLI contract](../functional/cli.md#cargo-lockfile-identity)
+for exact keys and the existing filesystem/concurrent-writer limits below.
+
 `pin refresh` updates existing registry pin facts, withdraws changed targets'
 grants and reopens review records. `gatehouse re-pin` composes explicit-baseline
 proof and existing age/assessment before one aggregate refresh. Record writes

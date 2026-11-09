@@ -634,6 +634,16 @@ fn advisory_database_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn direct_resolver_environment_is_removed_from_nested_cargo() {
+        assert!(super::should_strip_from_nested_cargo_env(
+            std::ffi::OsStr::new("CARGO_RESOLVER_LOCKFILE_PATH")
+        ));
+        assert!(super::should_strip_from_nested_cargo_env(
+            std::ffi::OsStr::new("CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS")
+        ));
+    }
+
     use std::env;
     use std::ffi::OsStr;
     use std::fs;

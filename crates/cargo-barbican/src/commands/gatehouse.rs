@@ -292,6 +292,14 @@ where
 
     dossier.push_sandbox_path(sandbox.path(), args.preserve_sandbox);
 
+    if let Err(error) = super::lockfile_identity::check_execution_root(sandbox.path(), runner) {
+        dossier.push_sandbox_failure(&error.to_string());
+        dossier.mark_failed();
+        dossier.push_next_step(args.preserve_sandbox);
+        write!(stdout, "{}", dossier.finish()).map_err(CommandError::Io)?;
+        return Ok(ExitCode::from(1));
+    }
+
     if let Err(error) = runner.cargo_generate_lockfile(sandbox.path()) {
         dossier.push_command_failure("Sandbox lockfile", &error);
         dossier.mark_failed();

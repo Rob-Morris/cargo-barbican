@@ -83,6 +83,8 @@ admission, installation or activation commands.
 - [Scoped native cancellation dependencies](2026-11-04-toolchain-cancellation.md).
 - [Native toolchain scope and connected qualification](2026-11-04-native-toolchain-qualification.md).
 - [Exact native fixture evaluator CI provisioning](2026-11-08-native-fixture-evaluator-ci.md).
+- [Cargo-only qualification and native lockfile fixture](2026-11-09-cargo-lockfile-fixture.md)
+  and [authentication, advisory and execution receipt](2026-11-09-cargo-lockfile-fixture.json).
 
 These records accompany the runtime integration. Foundation qualification,
 explicit approval, current repository policy and independent installed

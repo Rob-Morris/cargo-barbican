@@ -134,31 +134,30 @@ fn failed_delegate_never_echoes_source_credentials() {
 }
 
 #[test]
-fn audit_explains_unavailable_source_policy_without_echoing_config_contents() {
+fn audit_refuses_unparseable_config_before_discovery_without_echoing_contents() {
     let root = git_audit_workspace();
     fs::create_dir_all(root.join(".cargo")).unwrap();
     fs::write(root.join(".cargo/config.toml"), "[source.SECRET\n").unwrap();
     for format in ["text", "json"] {
         let mut out = Vec::new();
         let mut err = Vec::new();
-        run_cli_with_runner(
+        let runner = FakeCommandRunner::default();
+        let exit = run_cli_with_runner(
             Cli::parse_from(["cargo-barbican", "audit", "--format", format]),
             &root,
             &FakeCratesIoClient::default(),
-            &FakeCommandRunner::default(),
+            &runner,
             &mut out,
             &mut err,
         )
         .unwrap();
-        let text = String::from_utf8(out.clone()).unwrap();
-        assert!(!text.contains("SECRET"));
-        if format == "json" {
-            let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
-            assert_eq!(report["source_policy_context"]["status"], "unavailable");
-        } else {
-            assert!(text.contains("source-policy context unavailable"));
-            assert!(text.contains("reviewed advisory exceptions disabled"));
-        }
+        assert_eq!(exit, ExitCode::from(1));
+        assert!(out.is_empty());
+        let error = String::from_utf8(err).unwrap();
+        assert!(!error.contains("SECRET"));
+        assert!(error.contains("invalid Cargo configuration"));
+        assert!(runner.cargo_locate_project_calls.borrow().is_empty());
+        assert!(runner.delegate_probes.borrow().is_empty());
     }
 }
 

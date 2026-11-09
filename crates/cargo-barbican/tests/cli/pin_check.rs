@@ -609,7 +609,7 @@ registry = "https://internal.example/index"
 }
 
 #[test]
-fn pin_check_fails_when_cargo_config_includes_unknown_source_policy() {
+fn pin_check_refuses_includes_before_reaching_source_policy() {
     let temp_dir = fresh_temp_dir();
     write_serde_reviewed_fixture(&temp_dir);
     write_review_record(&temp_dir, "docs/dependency-reviews/2026-05-27-serde.md");
@@ -620,11 +620,26 @@ fn pin_check_fails_when_cargo_config_includes_unknown_source_policy() {
     )
     .expect("cargo config should write");
 
-    let (exit_code, rendered) = run_pin_check(&temp_dir);
-
+    let runner = FakeCommandRunner::default();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let exit_code = run_cli_with_runner(
+        Cli::parse_from(["cargo-barbican", "pin", "check"]),
+        &temp_dir,
+        &FakeCratesIoClient::default(),
+        &runner,
+        &mut stdout,
+        &mut stderr,
+    )
+    .unwrap();
     assert_eq!(exit_code, ExitCode::from(1));
-    assert!(rendered.contains("source replacement detected"));
-    assert!(rendered.contains("top-level `include` key"));
+    assert!(stdout.is_empty());
+    assert!(
+        String::from_utf8(stderr).unwrap().contains(
+            "include imports configuration whose lockfile selection cannot be established"
+        )
+    );
+    assert!(runner.cargo_locate_project_calls.borrow().is_empty());
 }
 
 #[test]

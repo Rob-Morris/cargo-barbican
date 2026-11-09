@@ -9,6 +9,7 @@ mod gatehouse;
 mod inspect;
 mod inventory;
 mod loaders;
+mod lockfile_identity;
 mod lockfile_ops;
 mod pick;
 mod pin;
@@ -201,9 +202,13 @@ where
     let static_root = crate::toolchain_intake::gate_preflight(&cli, current_dir, now)
         .map_err(CommandError::ToolchainIntake)?;
     let current_dir = static_root.as_deref().unwrap_or(current_dir);
+    lockfile_identity::check_execution_root(current_dir, runner)?;
     let allow_manifest_degradation = matches!(&cli.command, Command::Audit { .. });
     let workspace =
         workspace::discover_workspace_root(current_dir, runner, allow_manifest_degradation)?;
+    if workspace.root() != current_dir {
+        lockfile_identity::check_execution_root(workspace.root(), runner)?;
+    }
     let current_dir = workspace.root();
 
     match cli.command {

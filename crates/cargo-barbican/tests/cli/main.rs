@@ -10,6 +10,7 @@ mod gatehouse_policy;
 mod git_policy;
 mod inspect;
 mod inventory;
+mod lockfile_identity;
 mod misc;
 mod pick;
 mod pin_add;

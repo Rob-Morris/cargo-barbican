@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.39.0](changelog/v0.39.0.md) | 2026-11-09 | Preserve reviewed lockfile identity before Cargo operations |
 | [v0.38.0](changelog/v0.38.0.md) | 2026-11-08 | Check required tools before expensive verification |
 | [v0.37.0](changelog/v0.37.0.md) | 2026-11-04 | Review and admit Rust toolchains before execution |
 | [v0.36.0](changelog/v0.36.0.md) | 2026-10-27 | Manage reviewed families without bypassing policy |

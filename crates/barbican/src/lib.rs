@@ -45,8 +45,8 @@ pub use assessment::{
 };
 pub use cargo_config::{
     CARGO_TOOLCHAIN_EXECUTABLE_CONTROLS, CargoConfigError, CargoToolchainExecutableControl,
-    cargo_config_has_nextest_alias, cargo_config_source_override_key,
-    cargo_config_toolchain_executable_control_key,
+    cargo_config_has_nextest_alias, cargo_config_lockfile_selection_key,
+    cargo_config_source_override_key, cargo_config_toolchain_executable_control_key,
 };
 pub use config::{
     AdvisoryDelegatesConfig, BarbicanConfig, CargoDenyCheck, CargoDenyDelegatesConfig,

@@ -103,6 +103,9 @@ where
         .as_ref()
         .map(DryRunWorkspace::path)
         .unwrap_or(current_dir);
+    if dry_run {
+        super::lockfile_identity::check_execution_root(resolve_dir, runner)?;
+    }
     let mut guard = if dry_run {
         LockfileRestoreGuard::capture(resolve_dir, false)?
     } else {

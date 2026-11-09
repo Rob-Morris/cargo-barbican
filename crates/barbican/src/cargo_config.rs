@@ -67,6 +67,32 @@ pub fn cargo_config_has_nextest_alias(text: &str) -> Result<bool, CargoConfigErr
         .is_some_and(|aliases| aliases.contains_key("nextest")))
 }
 
+/// Reports unsupported explicit lockfile selection, including configuration
+/// that can reintroduce selection in a child Cargo process. Presence is refused
+/// even when a value appears to name the ordinary workspace lockfile.
+pub fn cargo_config_lockfile_selection_key(
+    text: &str,
+) -> Result<Option<&'static str>, CargoConfigError> {
+    let table = parse_cargo_config(text)?;
+    if has_indirect_configuration(&table) {
+        return Ok(Some("include"));
+    }
+    if table
+        .get("resolver")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|resolver| resolver.contains_key("lockfile-path"))
+    {
+        return Ok(Some("resolver.lockfile-path"));
+    }
+    match table.get("env") {
+        Some(toml::Value::Table(env)) if env.contains_key("CARGO_RESOLVER_LOCKFILE_PATH") => {
+            Ok(Some("env.CARGO_RESOLVER_LOCKFILE_PATH"))
+        }
+        Some(value) if !value.is_table() => Err(CargoConfigError::InvalidEnvironmentTable),
+        _ => Ok(None),
+    }
+}
+
 /// Detects authority-root environment controls without invoking Cargo. Includes
 /// are conservatively reported because their environment effects are unknown.
 pub fn cargo_config_defines_environment(
@@ -136,6 +162,63 @@ pub enum CargoConfigError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lockfile_selection_refuses_presence_without_interpreting_values() {
+        for input in [
+            "resolver.lockfile-path = 'alternate/Cargo.lock'",
+            "[resolver]\nlockfile-path = 'Cargo.lock'",
+            "[resolver]\nlockfile-path = ''",
+            "[resolver]\nlockfile-path = false",
+            "[resolver]\nlockfile-path = { unexpected = 'value' }",
+            "['resolver']\n'lockfile-path' = '/workspace/Cargo.lock'",
+            "[resolver]\nlockfile-path = 'elsewhere/Cargo.lock'\n[unstable]\nlockfile-path = true",
+        ] {
+            assert_eq!(
+                super::cargo_config_lockfile_selection_key(input).unwrap(),
+                Some("resolver.lockfile-path"),
+                "{input}"
+            );
+        }
+        for input in [
+            "[env]\nCARGO_RESOLVER_LOCKFILE_PATH = 'alternate/Cargo.lock'",
+            "[env]\nCARGO_RESOLVER_LOCKFILE_PATH = {value = 'Cargo.lock', force = true}",
+            "[env]\nCARGO_RESOLVER_LOCKFILE_PATH = {value = 'Cargo.lock', relative = true, force = false}",
+            "[env.CARGO_RESOLVER_LOCKFILE_PATH]\nvalue = 'Cargo.lock'\nrelative = true",
+            "[env]\nCARGO_RESOLVER_LOCKFILE_PATH = ''",
+        ] {
+            assert_eq!(
+                super::cargo_config_lockfile_selection_key(input).unwrap(),
+                Some("env.CARGO_RESOLVER_LOCKFILE_PATH"),
+                "{input}"
+            );
+        }
+        for input in ["include = ['shared.toml']", "include = []"] {
+            assert_eq!(
+                super::cargo_config_lockfile_selection_key(input).unwrap(),
+                Some("include")
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_config_does_not_select_an_alternate_lockfile() {
+        for input in [
+            "",
+            "[resolver]\nincompatible-rust-versions = 'fallback'",
+            "[unstable]\nlockfile-path = true",
+            "[build]\njobs = 2",
+            "[alias]\ncheck-all = 'check --workspace'",
+            "[env]\nHOME = '/ordinary/home'\nCARGO_HOME = '/ordinary/cargo'",
+        ] {
+            assert_eq!(
+                super::cargo_config_lockfile_selection_key(input).unwrap(),
+                None
+            );
+        }
+        assert!(super::cargo_config_lockfile_selection_key("resolver = '").is_err());
+        assert!(super::cargo_config_lockfile_selection_key("env = false").is_err());
+    }
+
     #[test]
     fn authority_environment_detection_handles_all_cargo_value_forms_and_includes() {
         for input in [
