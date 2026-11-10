@@ -33,6 +33,14 @@ impl NativeCancellation {
     }
 }
 
+pub(crate) fn check_cancelled(cancelled: &AtomicBool, phase: &str) -> Result<()> {
+    if cancelled.load(Ordering::SeqCst) {
+        Err(format!("cancelled {phase}"))
+    } else {
+        Ok(())
+    }
+}
+
 struct OwnedChild {
     child: Child,
     finished: bool,

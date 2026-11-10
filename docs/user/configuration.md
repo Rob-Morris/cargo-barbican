@@ -87,7 +87,10 @@ Completed toolchain admissions use separate `[[rust.toolchains]]` records in
 scope and digests of portable evidence and completed prose. Optional
 `review_by` deadlines and exact scoped age exceptions remain explicit. These
 records do not count as crate families or satisfy the existing active-family
-coverage floor. See [toolchains.md](toolchains.md#trust-and-storage).
+coverage floor. Component evidence and supported native profile selection are
+reviewed inputs, not additional configuration switches. An omitted repository
+profile resolves to minimal and never inherits Rustup's ambient profile; explicit
+supported components are additive. See [toolchains.md](toolchains.md#trust-and-storage).
 
 ### `[high_scrutiny]`
 

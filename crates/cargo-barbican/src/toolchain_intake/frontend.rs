@@ -326,6 +326,8 @@ pub(crate) fn run(
                 cancellation.flag(),
                 now,
             )?;
+            super::installation::check_cancelled(cancellation.flag(), "before installation result output")
+                .map_err(|error| format!("{error}; installed data retained at {}; initial default assigned: {}; any completed continuing-use binding retained; repository pin unchanged", outcome.correspondence.slot.display(), outcome.initial_default_assigned))?;
             output(
                 stdout,
                 options.format,
@@ -525,6 +527,25 @@ fn output(stdout: &mut dyn Write, format: AuditOutputFormat, value: &Value) -> R
             ))?;
         }
         if let Some(evidence) = value.get("evidence") {
+            if let Some(components) = evidence["component_sources"].as_array() {
+                for component in components {
+                    line(format!(
+                        "Component {} / {}: {} source {}",
+                        component["archive"]["package"].as_str().unwrap_or("?"),
+                        component["archive"]["target"].as_str().unwrap_or("?"),
+                        component["corpus"].as_str().unwrap_or("?"),
+                        component["source_revision"].as_str().unwrap_or("?")
+                    ))?;
+                    line(format!(
+                        "  {}",
+                        component["relationship"].as_str().unwrap_or("")
+                    ))?;
+                    line(format!(
+                        "  Coverage limits: {}",
+                        component["residual_coverage"].as_str().unwrap_or("")
+                    ))?;
+                }
+            }
             if let Some(observations) = evidence["observations"].as_array() {
                 for source in observations {
                     line(format!(

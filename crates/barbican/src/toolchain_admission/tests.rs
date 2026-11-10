@@ -10,23 +10,43 @@ fn fixture_inputs(
     AuthenticationIdentity,
     Vec<ArchiveInventory>,
 ) {
+    fixture_inputs_for(metadata, Profile::Minimal, false)
+}
+
+fn fixture_inputs_for(
+    metadata: &[u8],
+    profile: Profile,
+    docs: bool,
+) -> (
+    Manifest,
+    SelectionRequest,
+    AuthenticationIdentity,
+    Vec<ArchiveInventory>,
+) {
     let host = "aarch64-apple-darwin";
-    let packages = ["rustc", "cargo", "rust-std"];
+    let mut packages = vec!["rustc", "cargo", "rust-std"];
+    if docs {
+        packages.push("rust-docs");
+    }
     let mut raw = format!(
         "manifest-version = '2'\ndate = '2026-01-01'\n[profiles]\nminimal = ['rustc','cargo','rust-std']\ndefault = ['rustc','cargo','rust-std']\n[pkg.rust]\nversion = '1.99.1 (abc 2026-01-01)'\n[pkg.rust.target.{host}]\navailable = true\ncomponents = ["
     );
-    for package in packages {
+    for package in &packages {
         raw.push_str(&format!("{{pkg='{package}',target='{host}'}},"));
     }
     raw.push_str("]\n");
-    for package in packages {
+    for package in &packages {
         raw.push_str(&format!("[pkg.{package}]\nversion='1.99.1 (abc 2026-01-01)'\n[pkg.{package}.target.{host}]\navailable=true\nxz_url='https://static.rust-lang.org/dist/2026-01-01/{package}-1.99.1-{host}.tar.xz'\nxz_hash='{}'\n", "a".repeat(64)));
     }
     let manifest = Manifest::parse(raw.as_bytes(), "1.99.1").unwrap();
     let request = SelectionRequest {
         host: host.into(),
-        profile: Profile::Minimal,
-        components: vec![],
+        profile,
+        components: if docs {
+            vec!["rust-docs".into()]
+        } else {
+            vec![]
+        },
         targets: vec![],
         encoding: Encoding::Xz,
     };
@@ -139,6 +159,7 @@ impl Fixture {
             })
             .collect();
         let evidence = EvidenceRecord {
+            component_sources: vec![],
             schema_version: 1,
             subject_id: subject.id().clone(),
             publication: PublicationFacts {
@@ -1017,4 +1038,92 @@ fn standalone_installation_inspection_is_read_only_and_never_an_execution_grant(
     );
     input.repository = None;
     assert!(evaluate_eligibility(input).is_err());
+}
+
+#[test]
+fn component_matrix_changes_assessment_identity_and_missing_rows_cannot_be_accepted() {
+    let mut f = Fixture::new();
+    let legacy = f.evidence.content_id(&f.subject).unwrap();
+    assert!(
+        !String::from_utf8(serde_json::to_vec(&f.evidence).unwrap())
+            .unwrap()
+            .contains("component_sources")
+    );
+    let restored: EvidenceRecord = parse_record(&serde_json::to_vec(&f.evidence).unwrap()).unwrap();
+    assert_eq!(restored.content_id(&f.subject).unwrap(), legacy);
+    f.evidence.schema_version = 2;
+    assert!(
+        f.evidence
+            .content_id(&f.subject)
+            .unwrap_err()
+            .to_string()
+            .contains("incomplete")
+    );
+    for archive in &f.subject.record().archives {
+        let snapshot = super::component_evidence::tests::snapshot(archive);
+        let bytes = serde_json::to_vec(&snapshot).unwrap();
+        let sha = digest_bytes(&bytes);
+        let path = format!("docs/sources/{sha}.json");
+        f.evidence.component_sources.push(snapshot.component);
+        let observation = f
+            .evidence
+            .observations
+            .iter_mut()
+            .find(|o| {
+                o.source.kind == SourceKind::SourceIdentity
+                    && o.source.scope == format!("{}/{}", archive.package, archive.target)
+            })
+            .unwrap();
+        observation.content_sha256 = sha.clone();
+        observation.snapshot = RecordReference {
+            path: path.clone(),
+            sha256: sha,
+        };
+        f.snapshots.insert(path, bytes);
+    }
+    let cached = || FreshnessRequest::Cached {
+        reason: "explicit fixture cache use".into(),
+    };
+    assert_ne!(f.evidence.content_id(&f.subject).unwrap(), legacy);
+    assert!(evaluate_eligibility(f.input(EligibilityPurpose::Installation, cached())).is_err());
+    f.rebind();
+    evaluate_eligibility(f.input(EligibilityPurpose::Installation, cached())).unwrap();
+    let good = f.evidence.clone();
+    f.evidence.component_sources[0].archive.sha256 = digest_bytes(b"wrong archive");
+    assert!(evaluate_eligibility(f.input(EligibilityPurpose::Installation, cached())).is_err());
+    f.evidence = good.clone();
+    f.evidence.component_sources[0] = f.evidence.component_sources[1].clone();
+    assert!(f.evidence.content_id(&f.subject).is_err());
+    f.evidence = good;
+    f.evidence.component_sources[0].residual_coverage.clear();
+    assert!(f.evidence.content_id(&f.subject).is_err());
+}
+
+#[test]
+fn legacy_default_and_explicit_docs_cached_acceptance_require_new_component_review() {
+    for (profile, docs) in [(Profile::Default, false), (Profile::Minimal, true)] {
+        let mut f = Fixture::new();
+        let (manifest, request, auth, inventories) =
+            fixture_inputs_for(b"file:bin/tool\n", profile, docs);
+        f.subject = Subject::reconstruct(&manifest, &request, auth, inventories).unwrap();
+        f.evidence.subject_id = f.subject.id().clone();
+        f.evidence.publication.subject_id = f.subject.id().clone();
+        for purpose in [
+            EligibilityPurpose::Installation,
+            EligibilityPurpose::FirstAdoption,
+            EligibilityPurpose::Activation,
+        ] {
+            let error = evaluate_eligibility(f.input(
+                purpose,
+                FreshnessRequest::Cached {
+                    reason: "fresh old generic default/docs acceptance".into(),
+                },
+            ))
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("legacy generic evidence"),
+                "{error}"
+            );
+        }
+    }
 }

@@ -177,7 +177,17 @@ impl PrivateStore {
     }
 
     pub fn publish(&self, relative: &Path, bytes: &[u8]) -> Result<()> {
+        self.publish_checked(relative, bytes, || Ok(()))
+    }
+
+    pub fn publish_checked(
+        &self,
+        relative: &Path,
+        bytes: &[u8],
+        check: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
         let path = self.path(relative, true)?;
+        check()?;
         let mut file = private_create(&path)?;
         if let Err(error) = file.write_all(bytes) {
             return Err(format!(
@@ -246,6 +256,15 @@ impl PrivateStore {
     }
 
     pub fn replace(&self, captured: &CapturedFile, bytes: &[u8]) -> Result<()> {
+        self.replace_checked(captured, bytes, || Ok(()))
+    }
+
+    pub fn replace_checked(
+        &self,
+        captured: &CapturedFile,
+        bytes: &[u8],
+        check: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
         self.check_capture(captured)?;
         let parent = captured.path.parent().ok_or("record has no parent")?;
         let temporary = parent.join(unique_name("publication"));
@@ -253,6 +272,7 @@ impl PrivateStore {
             let mut file = private_create(&temporary)?;
             file.write_all(bytes).map_err(io_error)?;
             self.check_capture(captured)?;
+            check()?;
             fs::rename(&temporary, &captured.path).map_err(io_error)?;
             self.recheck()
         })();
@@ -362,6 +382,26 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn cancellation_at_publication_boundary_preserves_existing_bindings() {
+        let root = std::env::temp_dir().join(unique_name("cancelled-binding"));
+        let store = PrivateStore::open(&root, &[]).unwrap();
+        let existing = Path::new("continuing/existing.json");
+        store.publish(existing, b"old binding").unwrap();
+        let captured = store.read(existing, 100).unwrap();
+        let cancel = || Err("cancelled before continuing-use binding publication".into());
+        assert!(
+            store
+                .replace_checked(&captured, b"new binding", cancel)
+                .is_err()
+        );
+        assert_eq!(store.read(existing, 100).unwrap().bytes(), b"old binding");
+        let new = Path::new("continuing/new.json");
+        assert!(store.publish_checked(new, b"new binding", cancel).is_err());
+        assert!(store.read_optional(new, 100).unwrap().is_none());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -57,6 +57,15 @@ profile means `minimal`; `default` and explicitly supported additions are also
 available. The review reports the complete effective selection. It cannot
 silently discard requested components or accept extra installed files.
 
+Each selected archive has a component evidence row: authenticated archive identity,
+source revision and package relationship, represented advisory corpus, and explicit
+coverage limits. Rustc/rustdoc, Cargo, std, docs, Clippy and rustfmt do not acquire
+coverage merely by sharing a Rust release. Docs include a static inventory of
+files and embedded JavaScript/CSS; these assets are not executed, and their full
+dependency graph and browser behaviour remain for explicit assessment. Missing
+required provenance blocks acceptance; a stated residual uncertainty can be
+assessed but cannot replace missing evidence.
+
 Read the collected sources and findings and complete the generated review
 record. Its exact identity lines and assessed findings/unknowns bind your
 decision to this investigation and policy. Removing `PENDING` markers alone
@@ -85,6 +94,17 @@ These are alternatives, not a required sequence. Native installation may
 internally probe `rustc`, so acceptance and exact input checks happen before
 Rustup is invoked. Verification after installation does not retrospectively
 authorise a first execution.
+
+After install or adoption, diagnose installed correspondence or continuing
+repository admission with the same review ID:
+
+```sh
+cargo-barbican toolchain installation-check <review-id>
+cargo-barbican toolchain admission-check <review-id>
+```
+
+`admission-check` requires a matching installation; it is not a pre-install
+eligibility check. Acceptance and installation apply that earlier decision.
 
 Finally, activate the admitted, verified toolchain deliberately:
 
@@ -149,6 +169,12 @@ review deadline, known adverse information, source expiry and actual
 installed contents. That continuing-use status cannot authorise a new
 repository, installation or consumer context.
 
+Earlier generic default/docs evidence cannot authorise the newly qualified scope,
+even when its cached observations are less than 24 hours old. Run a new review and
+complete its component-specific assessment. Existing schema-1 evidence for the
+previously supported macOS ARM64 minimal selection, including its optional host
+Clippy/rustfmt additions, keeps its identity and continuing-use semantics.
+
 ## Trust And Storage
 
 `toolchain trust show` displays the per-user approved public distribution
@@ -176,6 +202,14 @@ installation path or another machine's installed-content receipt.
 
 ## Installation Edges And Recovery
 
+Fresh native installation requires effective creation modes `0644` for files
+and `0755` for directories. Barbican checks these in private scratch space
+before starting Rustup. If the check refuses a restrictive shell umask, retry
+only the install command with a command-local setting, for example
+`(umask 022; cargo-barbican toolchain install <review-id>)`. Barbican does not
+change the process umask or repair an installed payload. Checking an existing
+slot does not require this creation-mode preflight.
+
 Existing defaults, unrelated toolchains and repository edits are preserved.
 When Rustup has no default, installation refuses unless you explicitly choose
 `--allow-initial-default`. If that owned first assignment is followed by a
@@ -183,6 +217,13 @@ supported failure, Barbican attempts native default unsetting only while the
 assignment still matches its captured state. A conflicting external edit is
 preserved and reported. Installed files remain for inspection; this is not a
 transactional rollback of installation or prior execution.
+
+SIGINT and SIGTERM are checked during installed-file verification, including
+bounded hash reads, and before an installed-success result or new continuing-use
+binding. Cancellation retains installed data and prior bindings; it does not
+erase operation intent/history. An owned initial-default assignment follows the
+same recovery rules above. If publication completed before cancellation was
+observed, the diagnostic reports that retained outcome instead of claiming rollback.
 
 Use one writer. Changed inputs, symlinks, unknown extra files, modified
 payloads, unsupported metadata or an unqualified evaluator cause refusal.
@@ -202,10 +243,15 @@ executable SHA256
 (the reviewed Homebrew 1.29.0_1 libexec build). The current CLI review route
 selects XZ inputs; it does not offer a Gzip selection or fallback.
 Barbican does not install that evaluator automatically. A version banner alone
-does not qualify a different binary. Authentic installed-output proof covers
-native minimal Rust with supported Clippy/rustfmt additions; broader
-default/docs and cross-target native scope remain unavailable pending their
-own qualification.
+does not qualify a different binary. Qualified native selections cover minimal
+and default profiles, including explicit host docs, Clippy and rustfmt additions.
+Other hosts, cross targets and components outside that set remain unavailable.
+The [authentic default/docs qualification](../dependency-reviews/2026-11-10-native-default-docs-qualification.md)
+exercises already-trusted Rust 1.95.0 through the production mapping and public
+admission workflow. It qualifies the machinery; each selected release still
+requires its own authenticated evidence, assessment and local acceptance.
+Documentation is inventoried and checked as installed data; this proof does not
+render it, execute its scripts or establish repository compatibility.
 
 ## CI Bootstrap
 

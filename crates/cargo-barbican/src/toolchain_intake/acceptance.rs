@@ -28,6 +28,12 @@ pub(super) fn template(review: &ReconstructedReview, id: &Sha256Digest) -> Resul
         review.subject.id(),
         review.record.policy.id().map_err(|e| e.to_string())?
     );
+    for row in &review.record.evidence.component_sources {
+        text.push_str(&format!("Component: {}/{} archive {}\nSource: {} @ {} ({:?})\nRelationship: {}\nCoverage limits: {}\n\n", row.archive.package, row.archive.target, row.archive.sha256, row.corpus.repository(), row.source_revision, row.corpus, row.relationship, row.residual_coverage));
+        if let Some(assets) = &row.documentation_assets {
+            text.push_str(&format!("Docs assets: {} files, {} bytes, {} JavaScript files, {} CSS files; payload {}. Static only.\n\n", assets.files, assets.bytes, assets.javascript_files, assets.css_files, assets.payload_sha256));
+        }
+    }
     for unknown in review.record.evidence.residual_unknowns() {
         text.push_str(&format!("Assessed-Unknown: {}\n", source_key(&unknown)?));
     }

@@ -2,7 +2,7 @@
 mod effects;
 mod files;
 mod process;
-pub(super) use process::NativeCancellation;
+pub(super) use process::{NativeCancellation, check_cancelled};
 #[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
 mod tests;
 pub(super) use effects::{
@@ -19,6 +19,25 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+
+struct VerificationReader<'a> {
+    file: File,
+    cancelled: &'a AtomicBool,
+}
+impl std::io::Read for VerificationReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        check_cancelled(self.cancelled, "during installed verification")
+            .map_err(std::io::Error::other)?;
+        std::io::Read::read(&mut self.file, buffer)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static VERIFICATION_CHECKPOINT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
 
 pub(super) const QUALIFIED_RUSTUP_SHA256: &str =
     "16c7599bf448e4e7512779154f6b05042bf2ff715e5e09d9cf5d465a3b750496";
@@ -54,9 +73,6 @@ fn require_qualified_selection(selection: &Selection) -> Result<()> {
     if selection.host != compiled_host()? {
         return Err("selected host differs from qualified native host".into());
     }
-    if selection.profile != barbican::rust_distribution::Profile::Minimal {
-        return Err("native default-profile/docs correspondence is not qualified; review remains available, but native operations require minimal plus qualified explicit host components".into());
-    }
     let packages: BTreeSet<_> = selection
         .archives
         .iter()
@@ -71,13 +87,14 @@ fn require_qualified_selection(selection: &Selection) -> Result<()> {
                     "rustc",
                     "cargo",
                     "rust-std",
+                    "rust-docs",
                     "clippy-preview",
                     "rustfmt-preview",
                 ]
                 .contains(&a.package.as_str())
         })
     {
-        return Err("unqualified native component/target scope; supported scope is minimal plus optional host clippy/rustfmt; docs and cross targets require native correspondence qualification".into());
+        return Err("unqualified native component/target scope; supported scope is minimal/default with host docs/clippy/rustfmt; cross targets require native correspondence qualification".into());
     }
     Ok(())
 }
@@ -197,7 +214,8 @@ impl<'a> ExpectedInstallation<'a> {
         })
     }
 
-    fn verify(&self, slot: &Path, uid: u32) -> Result<usize> {
+    fn verify(&self, slot: &Path, uid: u32, cancelled: &AtomicBool) -> Result<usize> {
+        check_cancelled(cancelled, "before installed verification")?;
         let root = Directory::capture(slot, uid)?;
         let mut observed = vec![(slot.to_owned(), fs::symlink_metadata(slot).map_err(error)?)];
         let mut pending = vec![PathBuf::new()];
@@ -217,6 +235,7 @@ impl<'a> ExpectedInstallation<'a> {
             .collect();
         while let Some(relative) = pending.pop() {
             for item in fs::read_dir(slot.join(&relative)).map_err(error)? {
+                check_cancelled(cancelled, "during installed verification")?;
                 let item = item.map_err(error)?;
                 let relative = relative.join(item.file_name());
                 let name = relative.to_str().ok_or("non-UTF8 installed path")?;
@@ -250,7 +269,15 @@ impl<'a> ExpectedInstallation<'a> {
                             {
                                 return Err("installed file changed while opening".into());
                             }
-                            let (actual, count) = digest_reader(file, *size).map_err(error)?;
+                            #[cfg(test)]
+                            VERIFICATION_CHECKPOINT.with(|checkpoint| {
+                                if let Some(checkpoint) = checkpoint.borrow_mut().take() {
+                                    checkpoint();
+                                }
+                            });
+                            let (actual, count) =
+                                digest_reader(VerificationReader { file, cancelled }, *size)
+                                    .map_err(error)?;
                             if count != *size || actual != *sha256 {
                                 return Err(format!("installed content mismatch at {name:?}"));
                             }
@@ -301,6 +328,7 @@ impl<'a> ExpectedInstallation<'a> {
             return Err("selected installed files are missing".into());
         }
         for (path, before) in observed {
+            check_cancelled(cancelled, "during installed verification recheck")?;
             let after = fs::symlink_metadata(path).map_err(error)?;
             if Identity::of(&before) != Identity::of(&after)
                 || before.len() != after.len()
@@ -314,6 +342,7 @@ impl<'a> ExpectedInstallation<'a> {
             }
         }
         root.recheck()?;
+        check_cancelled(cancelled, "before installed verification success")?;
         Ok(files)
     }
 }
@@ -325,14 +354,33 @@ pub(super) fn verify_selected(
     inventories: &[ArchiveInventory],
     rustup_home: &Path,
 ) -> Result<InstalledCorrespondence> {
+    verify_selected_with_cancellation(
+        subject,
+        selection,
+        original_manifest,
+        inventories,
+        rustup_home,
+        &AtomicBool::new(false),
+    )
+}
+
+fn verify_selected_with_cancellation(
+    subject: &Subject,
+    selection: &Selection,
+    original_manifest: &[u8],
+    inventories: &[ArchiveInventory],
+    rustup_home: &Path,
+    cancelled: &AtomicBool,
+) -> Result<InstalledCorrespondence> {
     let uid = super::store::effective_owner()?;
     let home = Directory::capture(rustup_home, uid)?;
     let slot = rustup_home
         .join("toolchains")
         .join(format!("{}-{}", selection.release, selection.host));
     let expected = ExpectedInstallation::derive(selection, original_manifest, inventories)?;
-    let checked_files = expected.verify(&slot, uid)?;
+    let checked_files = expected.verify(&slot, uid, cancelled)?;
     home.recheck()?;
+    check_cancelled(cancelled, "before installed correspondence success")?;
     correspondence(subject, slot, checked_files)
 }
 

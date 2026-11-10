@@ -167,13 +167,63 @@ pub struct EvidenceRecord {
     pub publication: PublicationFacts,
     pub observations: Vec<SourceObservation>,
     pub findings: Vec<Finding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub component_sources: Vec<ComponentEvidence>,
 }
 
 impl EvidenceRecord {
     /// Refresh times are deliberately absent from this identity. Source expiry and
     /// coverage remain binding facts: a changed conclusion needs a new assessment.
     pub fn content_id(&self, subject: &Subject) -> Result<Sha256Digest> {
-        version(self.schema_version)?;
+        require(
+            matches!(self.schema_version, 1 | 2),
+            "unsupported toolchain evidence schema",
+        )?;
+        let selected = subject.record();
+        if self.schema_version == 1 {
+            let packages: BTreeSet<_> = selected
+                .archives
+                .iter()
+                .map(|a| a.package.as_str())
+                .collect();
+            require(
+                self.component_sources.is_empty(),
+                "component matrix requires evidence schema 2",
+            )?;
+            require(
+                selected.profile == "minimal"
+                    && selected.host == "aarch64-apple-darwin"
+                    && ["rustc", "cargo", "rust-std"]
+                        .iter()
+                        .all(|p| packages.contains(p))
+                    && selected.archives.iter().all(|a| {
+                        a.target == selected.host
+                            && [
+                                "rustc",
+                                "cargo",
+                                "rust-std",
+                                "clippy-preview",
+                                "rustfmt-preview",
+                            ]
+                            .contains(&a.package.as_str())
+                    }),
+                "this selection requires a new component source matrix and explicit review; legacy generic evidence cannot authorise default/docs or wider native scope",
+            )?;
+        } else {
+            require(
+                self.component_sources.len() == selected.archives.len(),
+                "required component source matrix is incomplete",
+            )?;
+            let mut seen = BTreeSet::new();
+            for row in &self.component_sources {
+                row.validate()?;
+                require(
+                    selected.archives.contains(&row.archive)
+                        && seen.insert((&row.archive.package, &row.archive.target)),
+                    "component evidence archive identity mismatch or duplicate",
+                )?;
+            }
+        }
         require(
             &self.subject_id == subject.id(),
             "evidence subject mismatch",
@@ -235,6 +285,13 @@ impl EvidenceRecord {
                 kind: SourceKind::Advisories,
                 scope,
             }];
+            if self.schema_version == 2 {
+                require(
+                    identity.coverage == Coverage::ResidualUnknown
+                        && advisories.coverage == Coverage::ResidualUnknown,
+                    "component source inventory does not establish complete binary/advisory coverage",
+                )?;
+            }
             require(
                 identity.coverage == Coverage::Covered
                     || advisories.coverage == Coverage::ResidualUnknown,
@@ -280,6 +337,7 @@ impl EvidenceRecord {
                 publication,
                 sources: sources.into_values().collect(),
                 findings: findings.into_values().collect(),
+                component_sources: &self.component_sources,
             },
         )
     }
@@ -298,6 +356,23 @@ impl EvidenceRecord {
                     .ok_or_else(|| AdmissionError("required source snapshot missing".into()))?,
             )?;
         }
+        for row in &self.component_sources {
+            let scope = format!("{}/{}", row.archive.package, row.archive.target);
+            let observation = self
+                .observations
+                .iter()
+                .find(|o| o.source.kind == SourceKind::SourceIdentity && o.source.scope == scope)
+                .ok_or_else(|| AdmissionError("component source observation missing".into()))?;
+            let bytes = snapshots
+                .get(&observation.snapshot.path)
+                .ok_or_else(|| AdmissionError("component source snapshot missing".into()))?;
+            let snapshot: ComponentSourceSnapshot = parse_record(bytes)?;
+            require(
+                &snapshot.component == row,
+                "component matrix differs from source snapshot",
+            )?;
+            snapshot.validate()?;
+        }
         Ok(())
     }
 }
@@ -309,6 +384,8 @@ struct EvidenceContent<'a> {
     publication: PublicationFacts,
     sources: Vec<SourceContent<'a>>,
     findings: Vec<&'a Finding>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    component_sources: &'a Vec<ComponentEvidence>,
 }
 #[derive(Serialize)]
 struct SourceContent<'a> {

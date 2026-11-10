@@ -718,7 +718,11 @@ fn authentic_existing_installation_static_only() {
         .collect();
     let expected = ExpectedInstallation::derive(&selection, &bytes, &inventories).unwrap();
     let count = expected
-        .verify(&slot, super::super::store::effective_owner().unwrap())
+        .verify(
+            &slot,
+            super::super::store::effective_owner().unwrap(),
+            &AtomicBool::new(false),
+        )
         .unwrap();
     println!(
         "authentic static installed correspondence: {count} files; original manifest {}; no candidate execution or adoption",
@@ -808,17 +812,13 @@ fn activation_refuses_preserved_wider_pin_without_changing_bytes_or_permissions(
 }
 
 #[test]
-fn native_scope_table_refuses_default_docs_and_cross_targets() {
+fn native_scope_table_keeps_unknown_components_and_cross_targets_closed() {
     let fixture = Fixture::new();
     let mut selection = fixture.selection.clone();
     selection.profile = Profile::Default;
-    assert!(
-        require_qualified_selection(&selection)
-            .unwrap_err()
-            .contains("default-profile/docs")
-    );
+    require_qualified_selection(&selection).unwrap();
     let mut selection = fixture.selection.clone();
-    selection.archives[0].package = "rust-docs".into();
+    selection.archives[0].package = "unknown-component".into();
     assert!(require_qualified_selection(&selection).is_err());
     let mut selection = fixture.selection.clone();
     selection.archives[0].target = "x86_64-unknown-linux-gnu".into();
@@ -960,4 +960,419 @@ fn raw_native_dangling_update_hash_control_demonstrates_external_fixture_write()
         "raw native write must demonstrate the bypass detector"
     );
     assert!(fixture.root.join("candidate-probes").exists());
+}
+
+#[test]
+fn signals_during_static_install_verification_never_return_success() {
+    if !isolated(
+        "toolchain_intake::installation::tests::signals_during_static_install_verification_never_return_success",
+    ) {
+        return;
+    }
+    let cancellation = NativeCancellation::install().unwrap();
+    for signal in ["-INT", "-TERM"] {
+        for existing in [false, true] {
+            cancellation.flag().store(false, Ordering::SeqCst);
+            let fixture = Fixture::new();
+            if existing {
+                fixture.install().unwrap();
+            }
+            let before = fs::read(fixture.home().join("settings.toml")).ok();
+            VERIFICATION_CHECKPOINT.with(|checkpoint| {
+                *checkpoint.borrow_mut() = Some(Box::new(move || {
+                    let result = std::process::Command::new("/bin/kill")
+                        .args([signal, &std::process::id().to_string()])
+                        .status()
+                        .unwrap();
+                    assert!(result.success());
+                }));
+            });
+            let result = install_selected(
+                &fixture.inputs(),
+                &fixture.archives,
+                &fixture.home(),
+                &Fixture::evaluator(),
+                true,
+                cancellation.flag(),
+                || Ok(()),
+            );
+            assert!(cancellation.flag().load(Ordering::SeqCst));
+            let error = result
+                .err()
+                .expect("signal inside verification must refuse success");
+            assert!(
+                error.contains("cancelled during installed verification"),
+                "{error}"
+            );
+            assert!(error.contains("installed data retained"), "{error}");
+            let slot = fixture
+                .home()
+                .join("toolchains/1.99.99-aarch64-apple-darwin");
+            assert!(slot.join("bin/rustc").is_file());
+            let after = fs::read(fixture.home().join("settings.toml")).unwrap();
+            if existing {
+                assert_eq!(Some(after), before);
+            } else {
+                assert!(error.contains("owned initial default unset"), "{error}");
+                assert!(
+                    barbican::rust_distribution::rustup_default(Some(&after))
+                        .unwrap()
+                        .is_none()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "authentic trusted 1.95 machinery proof: explicit reviewed inputs, execution authority and private roots required"]
+fn authentic_trusted_baseline_profile_matrix() {
+    use serde_json::json;
+    use std::time::Instant;
+    let cancellation = NativeCancellation::install().unwrap();
+    assert_eq!(
+        std::env::var("BARBICAN_AUTHENTIC_BASELINE_PROOF").unwrap(),
+        "approved-existing-1.95.0-only"
+    );
+    let root = PathBuf::from(
+        std::env::var_os("BARBICAN_AUTHENTIC_PROOF_ROOT").expect("new task-owned proof root"),
+    );
+    assert!(root.is_absolute() && root.starts_with("/private/tmp/"));
+    assert!(!root.exists(), "proof must not overwrite an earlier run");
+    let data_path = PathBuf::from(
+        std::env::var_os("BARBICAN_AUTHENTIC_DATA").expect("reviewed private data store"),
+    );
+    let id = barbican::Sha256Digest::try_from(
+        std::env::var("BARBICAN_AUTHENTIC_REVIEW_ID").expect("exact review ID"),
+    )
+    .unwrap();
+    let data = super::super::store::PrivateStore::open(&data_path, &[]).unwrap();
+    let seed = super::super::trust::bundled_seed().unwrap();
+    let started = Instant::now();
+    let review = super::super::review::load(
+        &data,
+        &id,
+        &seed,
+        barbican::OffsetDateTime::now_utc().unix_timestamp(),
+    )
+    .unwrap();
+    assert_eq!(review.subject.record().release, "1.95.0");
+    assert_eq!(review.subject.record().host, "aarch64-apple-darwin");
+    assert_eq!(
+        review
+            .subject
+            .record()
+            .authentication
+            .manifest_sha256
+            .as_str(),
+        "821ff14e4c4a1cbe1e8915f35aff0a3fbbdf8d293ad48ab8f31e3b0440c581f9"
+    );
+    assert_eq!(review.record.evidence.schema_version, 2);
+    assert_eq!(review.subject.record().profile, "default");
+    assert_eq!(review.selection.archives.len(), 6);
+    println!(
+        "{}",
+        json!({"phase":"authenticate-and-reconstruct", "seconds":started.elapsed().as_secs_f64(), "review_id":id, "authority":"explicit already-trusted 1.95.0 machinery qualification; no new personal acceptance"})
+    );
+    let captured = data
+        .read(
+            Path::new(&format!("reviews/{id}.json")),
+            barbican::toolchain_admission::MAX_RECORD_BYTES as u64,
+        )
+        .unwrap();
+    let evaluator = Fixture::evaluator();
+    let manifest = Manifest::parse(&review.manifest_bytes, "1.95.0").unwrap();
+    fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+    for (name, profile, components) in [
+        ("minimal", Profile::Minimal, vec![]),
+        (
+            "minimal-docs",
+            Profile::Minimal,
+            vec!["rust-docs".to_owned()],
+        ),
+        (
+            "minimal-tools",
+            Profile::Minimal,
+            vec!["clippy".to_owned(), "rustfmt".to_owned()],
+        ),
+        ("default", Profile::Default, vec![]),
+    ] {
+        let request = SelectionRequest {
+            host: "aarch64-apple-darwin".into(),
+            profile,
+            components,
+            targets: vec![],
+            encoding: Encoding::Xz,
+        };
+        let selection = manifest.select(&request).unwrap();
+        let inventories: Vec<_> = review
+            .inventories
+            .iter()
+            .filter(|i| selection.archives.contains(&i.identity))
+            .cloned()
+            .collect();
+        let archives: Vec<_> = review
+            .archives
+            .iter()
+            .filter(|(a, _)| selection.archives.contains(a))
+            .cloned()
+            .collect();
+        let subject = Subject::reconstruct(
+            &manifest,
+            &request,
+            review.subject.record().authentication.clone(),
+            inventories.clone(),
+        )
+        .unwrap();
+        let inputs = SelectedInputs {
+            subject: &subject,
+            selection: &selection,
+            manifest: &review.manifest_bytes,
+            inventories: &inventories,
+        };
+        let case = root.join(name);
+        fs::DirBuilder::new().mode(0o700).create(&case).unwrap();
+        let home = case.join("rustup");
+        let cancelled = cancellation.flag();
+        let started = Instant::now();
+        let installed = install_selected(
+            &inputs,
+            &archives,
+            &home,
+            &evaluator,
+            true,
+            cancelled,
+            || data.check_capture(&captured),
+        )
+        .unwrap();
+        assert!(!installed.already_present);
+        assert!(installed.initial_default_assigned);
+        let install_seconds = started.elapsed().as_secs_f64();
+        let started = Instant::now();
+        let checked = verify_selected_with_cancellation(
+            &subject,
+            &selection,
+            &review.manifest_bytes,
+            &inventories,
+            &home,
+            cancelled,
+        )
+        .unwrap();
+        let inspection_seconds = started.elapsed().as_secs_f64();
+        assert_eq!(
+            checked.checked_files,
+            installed.correspondence.checked_files
+        );
+        let existing = install_selected(
+            &inputs,
+            &archives,
+            &home,
+            &case.join("must-not-dispatch-evaluator"),
+            false,
+            cancelled,
+            || data.check_capture(&captured),
+        )
+        .unwrap();
+        assert!(existing.already_present);
+        let repo = case.join("repo");
+        fs::create_dir(&repo).unwrap();
+        let pin = repo.join("rust-toolchain.toml");
+        let before = format!(
+            "# preserve authentic proof context\n[toolchain]\nchannel = '1.94.0'\nprofile = '{}'\ncomponents = {}\n",
+            subject.record().profile,
+            serde_json::to_string(&request.components).unwrap()
+        );
+        fs::write(&pin, &before).unwrap();
+        fs::set_permissions(&pin, fs::Permissions::from_mode(0o640)).unwrap();
+        let activated = activate_selected(&inputs, &home, &repo, cancelled, |actual| {
+            data.check_capture(&captured)?;
+            if actual.subject_id != subject.id().to_string() {
+                return Err("qualified baseline identity changed".into());
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert!(activated.changed);
+        let after = fs::read_to_string(&pin).unwrap();
+        assert_eq!(after, before.replace("'1.94.0'", "\"1.95.0\""));
+        assert_eq!(fs::metadata(&pin).unwrap().mode() & 0o777, 0o640);
+        assert!(
+            !activate_selected(&inputs, &home, &repo, cancelled, |_| data
+                .check_capture(&captured))
+            .unwrap()
+            .changed
+        );
+        if let Some(docs) = inventories
+            .iter()
+            .find(|i| i.identity.package == "rust-docs")
+        {
+            let relative = docs
+                .payload
+                .iter()
+                .find(|(_, e)| matches!(e.kind,EntryKind::File {size,..} if size < 4096))
+                .unwrap()
+                .0;
+            let path = checked.slot.join(relative);
+            let original = fs::read(&path).unwrap();
+            let mode = fs::metadata(&path).unwrap().mode() & 0o777;
+            fs::write(&path, b"authored tamper control").unwrap();
+            assert!(
+                verify_selected_with_cancellation(
+                    &subject,
+                    &selection,
+                    &review.manifest_bytes,
+                    &inventories,
+                    &home,
+                    cancelled
+                )
+                .is_err()
+            );
+            check_cancelled(cancelled, "during authentic negative control").unwrap();
+            fs::write(&path, &original).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode ^ 0o100)).unwrap();
+            assert!(
+                verify_selected_with_cancellation(
+                    &subject,
+                    &selection,
+                    &review.manifest_bytes,
+                    &inventories,
+                    &home,
+                    cancelled
+                )
+                .is_err()
+            );
+            check_cancelled(cancelled, "during authentic negative control").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            let held = case.join("held-doc");
+            fs::rename(&path, &held).unwrap();
+            assert!(
+                verify_selected_with_cancellation(
+                    &subject,
+                    &selection,
+                    &review.manifest_bytes,
+                    &inventories,
+                    &home,
+                    cancelled
+                )
+                .is_err()
+            );
+            check_cancelled(cancelled, "during authentic negative control").unwrap();
+            fs::create_dir(&path).unwrap();
+            assert!(
+                verify_selected_with_cancellation(
+                    &subject,
+                    &selection,
+                    &review.manifest_bytes,
+                    &inventories,
+                    &home,
+                    cancelled
+                )
+                .is_err()
+            );
+            check_cancelled(cancelled, "during authentic negative control").unwrap();
+            fs::remove_dir(&path).unwrap();
+            fs::rename(&held, &path).unwrap();
+            let extra = checked.slot.join("share/doc/authored-unexpected");
+            fs::write(&extra, b"authored extra control").unwrap();
+            assert!(
+                verify_selected_with_cancellation(
+                    &subject,
+                    &selection,
+                    &review.manifest_bytes,
+                    &inventories,
+                    &home,
+                    cancelled
+                )
+                .is_err()
+            );
+            check_cancelled(cancelled, "during authentic negative control").unwrap();
+            fs::remove_file(extra).unwrap();
+            verify_selected_with_cancellation(
+                &subject,
+                &selection,
+                &review.manifest_bytes,
+                &inventories,
+                &home,
+                cancelled,
+            )
+            .unwrap();
+        }
+        check_cancelled(cancelled, "before authentic proof result").unwrap();
+        println!(
+            "{}",
+            json!({"case":name,"status":"PASS","scope":"authentic baseline machinery, not personal/repository admission","subject_id":subject.id(),"checked_files":checked.checked_files,"install_seconds":install_seconds,"inspection_seconds":inspection_seconds,"slot":checked.slot,"initial_default_assigned":installed.initial_default_assigned,"activation":"changed then unchanged; compatibility unchecked"})
+        );
+    }
+}
+
+#[test]
+fn native_creation_modes_refuse_before_first_probe_and_preserve_defaults() {
+    const MODE: &str = "BARBICAN_NATIVE_CREATION_MODE_CHILD";
+    let mode = match std::env::var(MODE) {
+        Ok(mode) => mode,
+        Err(_) => {
+            for mode in ["077", "022"] {
+                let output = std::process::Command::new("/bin/sh")
+                    .args(["-c", "umask \"$1\"; shift; exec \"$@\"", "native-permission-control", mode])
+                    .arg(std::env::current_exe().unwrap())
+                    .args(["--exact", "toolchain_intake::installation::tests::native_creation_modes_refuse_before_first_probe_and_preserve_defaults", "--nocapture"])
+                    .env(MODE, mode)
+                    .env_remove("RUSTUP_OVERRIDE_UNIX_FALLBACK_SETTINGS")
+                    .env_remove("RUSTUP_DIST_SERVER")
+                    .env_remove("RUSTUP_UPDATE_ROOT")
+                    .output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{mode}: {}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            return;
+        }
+    };
+    for existing_default in [false, true] {
+        let fixture = Fixture::new();
+        let settings = fixture.home().join("settings.toml");
+        let before = if existing_default {
+            fs::create_dir(fixture.home()).unwrap();
+            let bytes = b"version='12'\ndefault_toolchain='1.95.0-aarch64-apple-darwin'\nprofile='default'\n".to_vec();
+            fs::write(&settings, &bytes).unwrap();
+            Some(bytes)
+        } else {
+            None
+        };
+        let result = if mode == "077" {
+            // A missing evaluator proves refusal precedes even evaluator validation/help.
+            install_selected(
+                &fixture.inputs(),
+                &fixture.archives,
+                &fixture.home(),
+                &fixture.root.join("must-not-open-evaluator"),
+                true,
+                &AtomicBool::new(false),
+                || Ok(()),
+            )
+        } else {
+            fixture.install()
+        };
+        if mode == "077" {
+            let error = result
+                .err()
+                .expect("restrictive creation modes must refuse before a probe");
+            assert!(error.contains("command-local umask 022"), "{error}");
+            assert!(error.contains("no native process started"), "{error}");
+            assert!(!fixture.root.join("candidate-probes").exists());
+            assert!(
+                !fixture
+                    .home()
+                    .join("toolchains/1.99.99-aarch64-apple-darwin")
+                    .exists()
+            );
+            assert_eq!(fs::read(&settings).ok(), before);
+        } else {
+            result.unwrap();
+            assert!(fixture.root.join("candidate-probes").is_file());
+        }
+    }
 }

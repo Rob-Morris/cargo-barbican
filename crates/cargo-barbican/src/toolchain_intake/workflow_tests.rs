@@ -26,11 +26,16 @@ impl Fixture {
         Self::prepared(false)
     }
     fn prepared(authenticated: bool) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "barbican-workflow-fixture-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
+        Self::prepared_at(authenticated, None)
+    }
+    fn prepared_at(authenticated: bool, clock: Option<i64>) -> Self {
+        let root = fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!(
+                "barbican-workflow-fixture-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
         fs::create_dir(&root).unwrap();
         let host = "aarch64-apple-darwin";
         let mut raw = format!(
@@ -146,6 +151,7 @@ impl Fixture {
                 .unix_timestamp()
                 + 3600
         };
+        let now = clock.unwrap_or(now);
         let body = b"bounded source fixture".to_vec();
         let sha = digest_bytes(&body);
         let reference = RecordReference {
@@ -170,6 +176,7 @@ impl Fixture {
             })
             .collect();
         let evidence = EvidenceRecord {
+            component_sources: vec![],
             schema_version: 1,
             subject_id: subject.id().clone(),
             publication: PublicationFacts {
@@ -746,5 +753,139 @@ fn standalone_age_override_is_explicit_on_every_operation_not_a_saved_waiver() {
             .recheck_before_effects(EligibilityPurpose::Installation, None, now)
             .unwrap();
         assert!(super::review::invocation_policy(Some(&fixture.repo()), Some(days)).is_err());
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn observed_signal_during_context_install_preserves_binding_and_intent_history() {
+    use clap::Parser;
+    use std::sync::atomic::AtomicBool;
+    const CHILD: &str = "BARBICAN_CONTEXT_SIGNAL_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "toolchain_intake::workflow_tests::observed_signal_during_context_install_preserves_binding_and_intent_history", "--nocapture"])
+            .env(CHILD, "1")
+            .env_remove("RUSTUP_OVERRIDE_UNIX_FALLBACK_SETTINGS")
+            .env_remove("RUSTUP_DIST_SERVER")
+            .env_remove("RUSTUP_UPDATE_ROOT")
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let cancellation = super::installation::NativeCancellation::install().unwrap();
+    let evaluator = PathBuf::from(
+        std::env::var_os("BARBICAN_TEST_RUSTUP").expect("explicit reviewed evaluator"),
+    );
+    for signal in ["-INT", "-TERM"] {
+        for existing in [false, true] {
+            cancellation.flag().store(false, Ordering::SeqCst);
+            let now = barbican::OffsetDateTime::now_utc().unix_timestamp();
+            let fixture = Fixture::prepared_at(true, Some(now));
+            let data = fixture.data("signal-data");
+            let cache = fixture.data("signal-cache");
+            super::trust::Trust::load(&data, &fixture_material(), now).unwrap();
+            for archive in &fixture.review.selection.archives {
+                let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/toolchain-intake/workflow/{}-1.99.1-aarch64-apple-darwin.tar.xz", archive.package));
+                cache
+                    .publish(
+                        Path::new(&format!("archives/{}", archive.sha256)),
+                        &fs::read(source).unwrap(),
+                    )
+                    .unwrap();
+            }
+            let repo = fixture.repo();
+            let id = fixture.id();
+            let prose = repo.root.join(&fixture.admission.review_record);
+            let cli = crate::cli::Cli::try_parse_from([
+                "cargo-barbican",
+                "--repo",
+                repo.root.to_str().unwrap(),
+                "--data-dir",
+                data.root().to_str().unwrap(),
+                "--cache-dir",
+                cache.root().to_str().unwrap(),
+                "toolchain",
+                "accept",
+                id.as_str(),
+                "--record",
+                prose.to_str().unwrap(),
+                "--cached-admission",
+                "--cache-reason",
+                "authored context cancellation control",
+            ])
+            .unwrap();
+            super::frontend::run(
+                &cli,
+                &fixture.root,
+                barbican::OffsetDateTime::from_unix_timestamp(now).unwrap(),
+                &mut Vec::new(),
+                false,
+            )
+            .unwrap();
+            let context = admission::AcceptedContext::load(
+                &data,
+                id,
+                Some(fixture.repo()),
+                fixture.review.record.policy.clone(),
+                FreshnessRequest::Cached {
+                    reason: "authored context cancellation control".into(),
+                },
+                now,
+            )
+            .unwrap();
+            let home = fixture.root.join("rustup");
+            let pin_before = fs::read(repo.root.join("rust-toolchain.toml")).unwrap();
+            let binding = data.root().join(format!(
+                "continuing/{}/{}.json",
+                admission::consumer_id(&repo).unwrap(),
+                fixture.review.subject.id()
+            ));
+            if existing {
+                context
+                    .install(&home, &evaluator, true, &AtomicBool::new(false), now)
+                    .unwrap();
+                assert!(binding.is_file());
+            }
+            let before = fs::read(&binding).ok();
+            super::installation::VERIFICATION_CHECKPOINT.with(|checkpoint| {
+                *checkpoint.borrow_mut() = Some(Box::new(move || {
+                    assert!(
+                        std::process::Command::new("/bin/kill")
+                            .args([signal, &std::process::id().to_string()])
+                            .status()
+                            .unwrap()
+                            .success()
+                    );
+                }));
+            });
+            let result = context.install(&home, &evaluator, true, cancellation.flag(), now);
+            let error = result
+                .err()
+                .expect("observed cancellation must suppress installed-verified outcome");
+            assert!(
+                cancellation.flag().load(Ordering::SeqCst),
+                "verification checkpoint not reached: {error}"
+            );
+            assert!(
+                error.contains("cancelled during installed verification"),
+                "{error}"
+            );
+            assert_eq!(fs::read(&binding).ok(), before);
+            assert!(
+                home.join("toolchains/1.99.1-aarch64-apple-darwin/bin/rustc")
+                    .is_file()
+            );
+            assert_eq!(
+                fs::read(repo.root.join("rust-toolchain.toml")).unwrap(),
+                pin_before
+            );
+            assert!(data.root().join("operations").is_dir());
+        }
     }
 }

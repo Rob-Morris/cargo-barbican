@@ -20,13 +20,14 @@ pub(crate) struct SelectedInputs<'a> {
     pub inventories: &'a [ArchiveInventory],
 }
 impl SelectedInputs<'_> {
-    fn verify(&self, home: &Path) -> Result<InstalledCorrespondence> {
-        verify_selected(
+    fn verify(&self, home: &Path, cancelled: &AtomicBool) -> Result<InstalledCorrespondence> {
+        verify_selected_with_cancellation(
             self.subject,
             self.selection,
             self.manifest,
             self.inventories,
             home,
+            cancelled,
         )
     }
 }
@@ -58,6 +59,26 @@ impl Scratch {
         let identity = Identity::of(&fs::symlink_metadata(&path).map_err(error)?);
         Ok(Self { path, identity })
     }
+    fn require_native_creation_modes(&self) -> Result<()> {
+        let directory = self.path.join("permission-directory");
+        DirBuilder::new()
+            .mode(0o777)
+            .create(&directory)
+            .map_err(error)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o666)
+            .open(self.path.join("permission-file"))
+            .map_err(error)?;
+        let file_mode = file.metadata().map_err(error)?.mode() & 0o7777;
+        let directory_mode = fs::symlink_metadata(&directory).map_err(error)?.mode() & 0o7777;
+        if file_mode != 0o644 || directory_mode != 0o755 {
+            return Err("native installation requires effective file/directory creation modes 0644/0755; retry this command in a shell with command-local umask 022, for example (umask 022; cargo-barbican toolchain install ...); no native process started".into());
+        }
+        Ok(())
+    }
+
     fn directory(&self, name: &str) -> Result<PathBuf> {
         let path = self.path.join(name);
         DirBuilder::new().mode(0o700).create(&path).map_err(error)?;
@@ -315,8 +336,12 @@ pub(crate) fn install_selected(
     ));
     match fs::symlink_metadata(&slot) {
         Ok(_) => {
-            let correspondence = inputs.verify(rustup_home)?;
-            recheck()?;
+            let correspondence = (|| {
+                let correspondence = inputs.verify(rustup_home, cancelled)?;
+                recheck()?;
+                check_cancelled(cancelled, "before existing installation success")?;
+                Ok(correspondence)
+            })().map_err(|reason: String| format!("{reason}; existing installed data retained at {}; default and repository pin unchanged", slot.display()))?;
             return Ok(InstallOutcome {
                 correspondence,
                 already_present: true,
@@ -353,8 +378,9 @@ pub(crate) fn install_selected(
         uid,
         1024,
     )?;
-    evaluator(executable)?;
     let scratch = Scratch::new()?;
+    scratch.require_native_creation_modes()?;
+    evaluator(executable)?;
     scratch.directory("cargo")?;
     scratch.directory("identity-home")?;
     scratch.write("fallback.toml", b"version = '12'\n")?;
@@ -455,7 +481,8 @@ pub(crate) fn install_selected(
             settings.recheck()?;
         }
         recheck()?;
-        let checked_files = expected.verify(&slot, uid)?;
+        let checked_files = expected.verify(&slot, uid, cancelled)?;
+        check_cancelled(cancelled, "before installed verification success")?;
         correspondence(inputs.subject, slot.clone(), checked_files)
     })();
     match result {
@@ -611,7 +638,7 @@ pub(crate) fn activate_selected(
         return Err("proposed repository pin requires archives outside the accepted selection; review the complete proposed profile/components/targets before activation".into());
     }
     require_qualified_selection(&proposed_selection)?;
-    let actual = inputs.verify(rustup_home)?;
+    let actual = inputs.verify(rustup_home, cancelled)?;
     recheck(&actual)?;
     if cancelled.load(Ordering::SeqCst) {
         return Err(

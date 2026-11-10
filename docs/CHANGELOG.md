@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.40.0](changelog/v0.40.0.md) | 2026-11-10 | Qualify default Rust profiles and component evidence |
 | [v0.39.0](changelog/v0.39.0.md) | 2026-11-09 | Preserve reviewed lockfile identity before Cargo operations |
 | [v0.38.0](changelog/v0.38.0.md) | 2026-11-08 | Check required tools before expensive verification |
 | [v0.37.0](changelog/v0.37.0.md) | 2026-11-04 | Review and admit Rust toolchains before execution |

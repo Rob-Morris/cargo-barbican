@@ -233,7 +233,7 @@ struct Mapping {
     package_metadata: Vec<MappingEntry>,
 }
 #[derive(Serialize)]
-struct MappingEntry {
+pub(super) struct MappingEntry {
     path: String,
     kind: &'static str,
     mode: u32,
@@ -241,7 +241,7 @@ struct MappingEntry {
     sha256: Option<Sha256Digest>,
 }
 impl MappingEntry {
-    fn new(path: &str, entry: &crate::rust_distribution::ExpectedEntry) -> Self {
+    pub(super) fn new(path: &str, entry: &crate::rust_distribution::ExpectedEntry) -> Self {
         let (kind, size, sha256) = match &entry.kind {
             EntryKind::File { size, sha256 } => ("file", *size, Some(sha256.clone())),
             EntryKind::Directory => ("directory", 0, None),

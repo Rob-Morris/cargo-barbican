@@ -210,6 +210,10 @@ pub(super) fn load(
         inventories.clone(),
     )
     .map_err(|e| e.to_string())?;
+    record
+        .evidence
+        .validate_component_inputs(&manifest_parsed, &inventories)
+        .map_err(|e| e.to_string())?;
     if record.id(&subject)? != *id {
         return Err("review content identity mismatch".into());
     }
@@ -269,7 +273,8 @@ pub(super) fn create(
         8 * 1024 * 1024,
     )?;
     let manifest = Manifest::parse(manifest_bytes.bytes(), release).map_err(|e| e.to_string())?;
-    let collected = super::collection::collect(&sources, &subject, &manifest, signed_at, now)?;
+    let collected =
+        super::collection::collect(&sources, &subject, &manifest, &inventories, signed_at, now)?;
     super::collection::persist(data, &snapshot_root, &collected)?;
     let record = ReviewRecord {
         schema_version: 1,
@@ -347,6 +352,7 @@ pub(super) fn refresh(
         &sources,
         &review.subject,
         &parsed,
+        &review.inventories,
         signer.signature_created_at,
         now,
     )?;

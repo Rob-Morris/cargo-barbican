@@ -135,6 +135,21 @@ independently verified archive cache bytes. It preserves the repository author's
 assessment and repository bytes while recording the new local acceptance time.
 A changed source identity produces a new review requiring assessment.
 
+Current review evidence uses nested `evidence.schema_version: 2` and a
+`component_sources` row for every exact selected archive. Each row binds source
+commit/tree/package provenance, the represented Rust-root/std/Cargo inventory,
+its source snapshot, coverage limits and, for docs, static asset counts/digest.
+Missing or mismatched required relationships refuse; residual unknowns still need
+explicit assessment. Legacy schema-1 evidence retains its original identity only
+for the previously supported macOS ARM64 minimal closure with optional host
+Clippy/rustfmt. Generic default/docs reviews require new collection and assessment,
+including on an otherwise fresh `--cached-admission` route.
+
+`admission-check [REVIEW-ID]` checks continuing repository admission and requires
+a matching existing installation. It does not replace accept/install's pre-install
+eligibility decision. Install/adopt/installation-check/activate continue to take
+the review ID; personal acceptance is a separate internal record.
+
 Trust show displays approved material, retained adverse observations and pending
 bundled proposals. Refresh displays exact proposed material, its base and the
 private proposal path; approve requires that exact proposal ID and unchanged
@@ -150,7 +165,12 @@ include `eligibility`, with the evaluated operation, exact identities, time and
 mode; explicit cached mode records its reason, oldest check and expiry.
 Success exits 0; operational/policy refusal exits 1 with a terminal-escaped
 `FAIL toolchain intake: …` diagnostic on stderr; parser usage errors exit 2.
-Failures do not promise a JSON result. Static review, acceptance and activation
+Failures do not promise a JSON result. During installation, observed SIGINT/TERM
+cancellation in static verification prevents an installed-success result and a
+new continuing-use binding. Prior bindings and operation intent/history remain.
+Diagnostics distinguish retained installed data/default effects and any binding
+already published before cancellation was observed; no deletion rollback is implied.
+Static review, acceptance and activation
 never claim compatibility success; activation directs the operator to the
 existing explicit verify or pre-release gate.
 
@@ -170,9 +190,18 @@ delegation. Existing trusted launchers remain the trust assumption; no arbitrary
 PATH attestation is implied. Opt-in false preserves legacy behavior.
 
 Native installation/adoption/activation qualification is narrower than manifest
-metadata support: see [toolchain workflows](../user/toolchains.md) and the
-[qualification record](../dependency-reviews/2026-11-04-native-toolchain-qualification.md).
+metadata support: see [toolchain workflows](../user/toolchains.md), the
+[original native qualification](../dependency-reviews/2026-11-04-native-toolchain-qualification.md)
+and [default/docs qualification](../dependency-reviews/2026-11-10-native-default-docs-qualification.md).
+The qualified macOS ARM64 route covers minimal/default profiles and supported
+host docs/Clippy/rustfmt additions; every selected release still needs its own
+current admission evidence and acceptance.
 Unsupported native evaluator cases fail closed before candidate execution.
+Fresh installation also checks that private file/directory creation yields
+`0644`/`0755` before the first evaluator process. Unsupported creation modes
+refuse with command-local `umask 022` guidance, without changing the umask,
+repairing payload modes or changing a default. Existing-slot verification does
+not require this creation-mode preflight.
 
 ## Subcommands
 

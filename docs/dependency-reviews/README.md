@@ -83,6 +83,9 @@ admission, installation or activation commands.
 - [Scoped native cancellation dependencies](2026-11-04-toolchain-cancellation.md).
 - [Native toolchain scope and connected qualification](2026-11-04-native-toolchain-qualification.md).
 - [Exact native fixture evaluator CI provisioning](2026-11-08-native-fixture-evaluator-ci.md).
+- [Authentic default/docs machinery and public admission qualification](2026-11-10-native-default-docs-qualification.md)
+  and [component, correspondence and execution receipt](2026-11-10-native-default-docs-qualification.json)
+  — already-trusted Rust 1.95 baseline, separately scoped from new compiler acceptance.
 - [Cargo-only qualification and native lockfile fixture](2026-11-09-cargo-lockfile-fixture.md)
   and [authentication, advisory and execution receipt](2026-11-09-cargo-lockfile-fixture.json).
 

@@ -2,12 +2,14 @@
 //! Effects adapters supply authenticated original bytes and checked archive inventories;
 //! persisted records are compared with those reconstructed facts before eligibility.
 mod advisory_source;
+mod component_evidence;
 mod eligibility;
 mod evidence;
 mod identity;
 mod source_inventory;
 
 pub use advisory_source::*;
+pub use component_evidence::*;
 pub use eligibility::*;
 pub use evidence::*;
 pub use identity::*;

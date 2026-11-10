@@ -534,7 +534,18 @@ impl<'a> AcceptedContext<'a> {
         })
     }
 
-    pub fn remember_installation(&self, installed: &InstalledCorrespondence) -> Result<()> {
+    pub fn remember_installation(
+        &self,
+        installed: &InstalledCorrespondence,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<bool> {
+        let check = || {
+            super::installation::check_cancelled(
+                cancelled,
+                "before continuing-use binding publication",
+            )
+        };
+        check()?;
         if let (Some(repo), Some(admission)) = (&self.repository, &self.admission) {
             let context_id = consumer_id(repo)?;
             let record = ContinuingUseBinding {
@@ -550,11 +561,13 @@ impl<'a> AcceptedContext<'a> {
                 .data
                 .read_optional(Path::new(&path), MAX_RECORD_BYTES as u64)?
             {
-                Some(captured) => self.data.replace(&captured, &bytes)?,
-                None => self.data.publish(Path::new(&path), &bytes)?,
+                Some(captured) if captured.bytes() == bytes => return Ok(false),
+                Some(captured) => self.data.replace_checked(&captured, &bytes, check)?,
+                None => self.data.publish_checked(Path::new(&path), &bytes, check)?,
             }
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -572,7 +585,7 @@ impl AcceptedContext<'_> {
             self.recheck_before_effects(EligibilityPurpose::FirstAdoption, Some(&installed), now)?;
         let operation = super::operation::OperationEvidence::new("adopt", &eligible, now);
         operation.retain(self.data)?;
-        self.remember_installation(&installed)?;
+        self.remember_installation(&installed, &std::sync::atomic::AtomicBool::new(false))?;
         Ok((actual, operation))
     }
     pub fn install(
@@ -612,7 +625,18 @@ impl AcceptedContext<'_> {
             },
         )?;
         let installed = self.correspondence(&outcome.correspondence)?;
-        self.remember_installation(&installed)?;
+        let retained = format!(
+            "installed data retained at {}; initial default assigned: {}; repository pin unchanged",
+            outcome.correspondence.slot.display(),
+            outcome.initial_default_assigned
+        );
+        let published = self
+            .remember_installation(&installed, cancelled)
+            .map_err(|error| {
+                format!("{error}; {retained}; continuing-use binding not confirmed")
+            })?;
+        super::installation::check_cancelled(cancelled, "before installation outcome")
+            .map_err(|error| format!("{error}; {retained}; new continuing-use binding published: {published}; any completed binding retained"))?;
         Ok((outcome, operation))
     }
     pub fn activate(

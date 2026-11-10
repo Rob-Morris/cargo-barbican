@@ -1,19 +1,13 @@
 use super::{sources::Sources, store::PrivateStore};
-use barbican::rust_distribution::Manifest;
+use barbican::rust_distribution::{ArchiveInventory, Manifest};
 use barbican::toolchain_admission::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
 
 pub(super) type Result<T> = std::result::Result<T, String>;
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Document {
-    location: String,
-    sha256: barbican::Sha256Digest,
-    body: String,
-}
+type Document = ComponentSourceDocument;
 
 pub(super) struct CollectedSources {
     pub evidence: EvidenceRecord,
@@ -119,6 +113,7 @@ pub(super) fn collect(
     sources: &Sources,
     subject: &Subject,
     manifest: &Manifest,
+    inventories: &[ArchiveInventory],
     signed_at: u32,
     now: i64,
 ) -> Result<CollectedSources> {
@@ -168,7 +163,7 @@ pub(super) fn collect(
         "commit",
         &mut identity_documents,
     )?;
-    let llvm_commit = tree_entry(
+    tree_entry(
         sources,
         &src_tree,
         "llvm-project",
@@ -188,6 +183,7 @@ pub(super) fn collect(
         .next()
         .ok_or("missing Cargo package version")?;
     let mut locks = Vec::new();
+    let mut inventory_documents = Vec::new();
     for (repository, revision, path) in [
         ("rust", rust_commit.as_str(), "Cargo.lock"),
         ("rust", rust_commit.as_str(), "library/Cargo.lock"),
@@ -199,6 +195,7 @@ pub(super) fn collect(
         let lock = parse_source_package_inventory(&document.body)
             .map_err(|e| format!("source package inventory {}: {e}", document.location))?;
         locks.push(lock);
+        inventory_documents.push(document.clone());
         identity_documents.push(document);
     }
     let cargo_manifest = collector.document(&format!(
@@ -214,13 +211,6 @@ pub(super) fn collect(
     }
     identity_documents.push(cargo_manifest);
     identity_documents.push(collector.document("https://llvm.org/docs/Security.html")?);
-    let identity_bytes = encode(&(
-        &rust_commit,
-        &cargo_commit,
-        cargo_version,
-        &llvm_commit,
-        &identity_documents,
-    ))?;
 
     let day = &record.publication_date;
     let date = barbican::parse_iso_date(day).map_err(|e| e.to_string())?;
@@ -258,8 +248,106 @@ pub(super) fn collect(
     ];
     collector.observe(SourceKind::SecurityAnnouncements,"distribution","https://blog.rust-lang.org/","current official announcement index and Cargo advisories",encode(&security)?,Coverage::ResidualUnknown,"Current official announcement index, Rust security scope and published Cargo advisories are retained. Exact affected-range/applicability and historical completeness require explicit human assessment; source inclusion is not execution reachability.");
     collector.observe(SourceKind::Authentication,"distribution","https://static.rust-lang.org/","qualified current public-only verification",encode(&record.authentication)?,Coverage::Covered,"Original exact manifest, detached signature and approved certificate identities verified; current nonrevocation cannot be proved and retained authenticated adverse knowledge blocks.");
+    let mut component_sources = Vec::new();
+    let mut component_documents = BTreeMap::new();
     for archive in &record.archives {
-        collector.observe(SourceKind::SourceIdentity,&format!("{}/{}",archive.package,archive.target),"https://github.com/rust-lang/rust",&rust_commit,identity_bytes.clone(),Coverage::ResidualUnknown,"Exact Rust commit, independent Cargo/LLVM gitlinks, separate Rust/std/Cargo lockfiles and Cargo package identity retained. Optional/dev/host/native inclusion and binary/source correspondence are not established.");
+        let corpus = ComponentCorpus::for_package(&archive.package).map_err(|e| e.to_string())?;
+        let revision = if corpus == ComponentCorpus::Cargo {
+            &cargo_commit
+        } else {
+            &rust_commit
+        };
+        let inventory = &inventory_documents[match corpus {
+            ComponentCorpus::RustRoot => 0,
+            ComponentCorpus::StandardLibrary => 1,
+            ComponentCorpus::Cargo => 2,
+        }];
+        let mut documents = Vec::new();
+        let mut packages = BTreeMap::new();
+        let paths = component_source_paths(&archive.package).map_err(|e| e.to_string())?;
+        for (path, package) in paths {
+            let url = format!(
+                "https://raw.githubusercontent.com/rust-lang/{}/{revision}/{path}",
+                corpus.repository()
+            );
+            if !component_documents.contains_key(&url) {
+                component_documents.insert(url.clone(), collector.document(&url)?);
+            }
+            let document = component_documents[&url].clone();
+            if !package.is_empty() {
+                packages.insert(
+                    package.to_string(),
+                    document
+                        .package_version(package)
+                        .map_err(|e| e.to_string())?,
+                );
+            }
+            documents.push(document);
+        }
+        let assets = if archive.package == "rust-docs" {
+            let inventory = inventories
+                .iter()
+                .find(|i| ArchiveRecord::from(&i.identity) == *archive)
+                .ok_or("selected docs archive inventory missing")?;
+            Some(DocumentationAssets::from_inventory(inventory).map_err(|e| e.to_string())?)
+        } else {
+            None
+        };
+        let relationship = match archive.package.as_str() {
+            "rustc" => {
+                "Rust-tree compiler and rustdoc package manifests matched to the Rust-root source inventory; rustdoc is shipped with rustc."
+            }
+            "cargo" => {
+                "Signed Cargo package version matched to its independently resolved Rust-tree Cargo gitlink and Cargo source inventory."
+            }
+            "rust-std" => {
+                "Signed Rust tree's std package manifest matched to the separate library source inventory."
+            }
+            "clippy-preview" => {
+                "Clippy package manifest in the signed Rust tree's src/tools/clippy subtree matched to the Rust-root source inventory."
+            }
+            "rustfmt-preview" => {
+                "rustfmt-nightly package manifest in the signed Rust tree's src/tools/rustfmt subtree matched to the Rust-root source inventory."
+            }
+            "rust-docs" => {
+                "Signed Rust tree's documentation build source and rustdoc renderer manifest retained; docs archive assets enumerated and hashed statically. Rust-root inventory represents renderer/tool dependencies, not a complete inventory of documentation content or embedded assets."
+            }
+            _ => return Err("unsupported selected component relationship".into()),
+        };
+        let residual = if archive.package == "rust-docs" {
+            "Documentation source/books, generated HTML, JavaScript/CSS and third-party assets are not a complete versioned dependency graph. Static asset counts/digests do not assess script behaviour, browser reachability or every embedded dependency. No docs were executed or rendered. Rust-root advisory matches are conservative renderer/tool source findings; missing asset-level advisory identities remain explicit residual uncertainty for human assessment."
+        } else {
+            "The represented source inventory includes optional/dev/build and other-host packages. Selected-host binary inclusion, reachability, complete native/LLVM dependency coverage and reproducible source-to-binary correspondence remain unproved; official security announcements and all represented source findings require explicit human assessment."
+        };
+        let row = ComponentEvidence {
+            archive: archive.clone(),
+            rust_revision: rust_commit.clone(),
+            source_revision: revision.clone(),
+            corpus,
+            source_paths: paths.iter().map(|(path, _)| path.to_string()).collect(),
+            inventory_sha256: inventory.sha256.clone(),
+            source_packages: packages,
+            documentation_assets: assets,
+            relationship: relationship.into(),
+            residual_coverage: residual.into(),
+        };
+        let snapshot = ComponentSourceSnapshot {
+            component: row.clone(),
+            identity_documents: identity_documents.clone(),
+            inventory: inventory.clone(),
+            source_documents: documents,
+        };
+        snapshot.validate().map_err(|e| e.to_string())?;
+        collector.observe(
+            SourceKind::SourceIdentity,
+            &format!("{}/{}", archive.package, archive.target),
+            &format!("https://github.com/rust-lang/{}", corpus.repository()),
+            revision,
+            encode(&snapshot)?,
+            Coverage::ResidualUnknown,
+            &format!("{relationship} {residual}"),
+        );
+        component_sources.push(row);
     }
     let findings = collect_advisories(&mut collector, &locks)?;
     let signature_day = barbican::OffsetDateTime::from_unix_timestamp(i64::from(signed_at))
@@ -267,7 +355,8 @@ pub(super) fn collect(
         .date()
         .to_string();
     let evidence = EvidenceRecord {
-        schema_version: 1,
+        schema_version: 2,
+        component_sources,
         subject_id: subject.id().clone(),
         publication: PublicationFacts {
             subject_id: subject.id().clone(),
@@ -282,6 +371,12 @@ pub(super) fn collect(
         observations: collector.observations,
         findings,
     };
+    evidence
+        .validate_component_inputs(manifest, inventories)
+        .map_err(|e| e.to_string())?;
+    evidence
+        .verify_snapshots(&collector.snapshots)
+        .map_err(|e| e.to_string())?;
     evidence.content_id(subject).map_err(|e| e.to_string())?;
     evidence
         .publication
@@ -326,11 +421,12 @@ fn collect_advisories(
     let selected_archives = collector.subject.record().archives.clone();
     for archive in &selected_archives {
         let scope = format!("{}/{}", archive.package, archive.target);
-        let lock = match archive.package.as_str() {
-            "cargo" => &locks[2],
-            "rust-std" => &locks[1],
-            _ => &locks[0],
-        };
+        let lock =
+            match ComponentCorpus::for_package(&archive.package).map_err(|e| e.to_string())? {
+                ComponentCorpus::Cargo => &locks[2],
+                ComponentCorpus::StandardLibrary => &locks[1],
+                ComponentCorpus::RustRoot => &locks[0],
+            };
         for advisory in &advisories {
             let versions: Vec<&str> = match advisory.corpus {
                 AdvisoryCorpus::Crates => lock

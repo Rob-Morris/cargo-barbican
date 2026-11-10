@@ -60,6 +60,22 @@ bounded parsing and eligibility; binary `toolchain_intake` owns HTTP, public
 verification, private storage, repository publication and native effects.
 Neither library module imports process/filesystem concerns.
 
+Component evidence is owned by the existing admission records and source collector.
+Schema-2 evidence binds every selected archive to its source relationship and
+represented inventory, while source inclusion and binary reachability remain
+distinct. Missing required provenance is blocking; explicit residual coverage is
+assessed by the existing human-assessment owner. Docs asset hashes/counts are
+static evidence, not a browser execution or complete dependency analysis. Legacy
+minimal evidence keeps its content identity; older generic default/docs evidence
+cannot gain the new scope through cached admission.
+
+Installed verification checks the existing cancellation flag while traversing
+entries, hashing bounded chunks and rechecking filesystem identities. The native
+install owner checks success boundaries, and the admission/store owners check
+before continuing-use binding publication. Existing bindings and diagnostic
+history survive cancellation; late observed cancellation reports completed effects.
+Activation retains its separate post-verification publication guard.
+
 Static entry runs before Cargo workspace discovery. Opted-in existing gates
 check admission and current installed correspondence before runtime probes;
 legacy configurations retain conformance-only behaviour. Per-user authority,
