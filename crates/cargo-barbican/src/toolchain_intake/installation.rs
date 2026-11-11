@@ -6,7 +6,8 @@ pub(super) use process::{NativeCancellation, check_cancelled};
 #[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
 mod tests;
 pub(super) use effects::{
-    ActivationOutcome, InstallOutcome, SelectedInputs, activate_selected, install_selected,
+    ActivationOutcome, InstallMode, InstallOutcome, SelectedInputs, activate_selected,
+    install_selected,
 };
 
 use self::files::{CapturedFile, Directory, Identity, Result, error};
@@ -42,12 +43,23 @@ thread_local! {
 pub(super) const QUALIFIED_RUSTUP_SHA256: &str =
     "16c7599bf448e4e7512779154f6b05042bf2ff715e5e09d9cf5d465a3b750496";
 
+const OFFICIAL_RUSTUP_SHA256: &str =
+    "63752a1919a3a4793173ec70f8f212621a7ce38ba6a246095984482f4de20f9f";
+
+fn qualified_rustup_version(sha256: &str) -> Option<&'static str> {
+    match sha256 {
+        QUALIFIED_RUSTUP_SHA256 => Some("1.29.0"),
+        OFFICIAL_RUSTUP_SHA256 => Some("1.29.3"),
+        _ => None,
+    }
+}
+
 pub(super) fn compiled_host() -> Result<&'static str> {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         Ok("aarch64-apple-darwin")
     } else {
         Err(format!(
-            "native Rustup installation mapping is qualified only for aarch64-apple-darwin Rustup 1.29.0 SHA256 {QUALIFIED_RUSTUP_SHA256}; this compiled host is unsupported; no automatic evaluator fetch or fallback"
+            "native Rustup installation mapping is qualified only for aarch64-apple-darwin reviewed Rustup builds {QUALIFIED_RUSTUP_SHA256} (1.29.0) and {OFFICIAL_RUSTUP_SHA256} (1.29.3); this compiled host is unsupported; no automatic evaluator fetch or fallback"
         ))
     }
 }
@@ -82,19 +94,25 @@ fn require_qualified_selection(selection: &Selection) -> Result<()> {
         .iter()
         .all(|p| packages.contains(p))
         || selection.archives.iter().any(|a| {
-            a.target != selection.host
+            let target = if a.package == "rust-src" {
+                "*"
+            } else {
+                selection.host.as_str()
+            };
+            a.target != target
                 || ![
                     "rustc",
                     "cargo",
                     "rust-std",
                     "rust-docs",
+                    "rust-src",
                     "clippy-preview",
                     "rustfmt-preview",
                 ]
                 .contains(&a.package.as_str())
         })
     {
-        return Err("unqualified native component/target scope; supported scope is minimal/default with host docs/clippy/rustfmt; cross targets require native correspondence qualification".into());
+        return Err("unqualified native component/target scope; supported scope is minimal/default with host docs/clippy/rustfmt and targetless rust-src; cross targets require native correspondence qualification".into());
     }
     Ok(())
 }
@@ -116,10 +134,14 @@ impl<'a> ExpectedInstallation<'a> {
                 return Err("inventory does not match selected archive".into());
             }
             let component = &inventory.identity.component;
-            let installed_component = format!(
-                "{}-{}",
-                inventory.identity.package, inventory.identity.target
-            );
+            let installed_component = if inventory.identity.package == "rust-src" {
+                "rust-src".to_owned()
+            } else {
+                format!(
+                    "{}-{}",
+                    inventory.identity.package, inventory.identity.target
+                )
+            };
             if !components.insert(installed_component.clone()) {
                 return Err("duplicate installed component identity".into());
             }
@@ -212,6 +234,31 @@ impl<'a> ExpectedInstallation<'a> {
             component_manifests,
             components,
         })
+    }
+
+    fn preserved_identities(&self, slot: &Path) -> Result<BTreeMap<PathBuf, Identity>> {
+        self.payload
+            .keys()
+            .chain(self.component_manifests.keys())
+            .map(String::as_str)
+            .chain(["", "lib/rustlib/rust-installer-version"])
+            .map(|name| {
+                let path = slot.join(name);
+                let identity = Identity::of(&fs::symlink_metadata(&path).map_err(error)?);
+                Ok((path, identity))
+            })
+            .collect()
+    }
+
+    fn recheck_preserved_identities(
+        &self,
+        slot: &Path,
+        before: &BTreeMap<PathBuf, Identity>,
+    ) -> Result<()> {
+        if self.preserved_identities(slot)? != *before {
+            return Err("component addition changed existing payload, ownership metadata or directory identities".into());
+        }
+        Ok(())
     }
 
     fn verify(&self, slot: &Path, uid: u32, cancelled: &AtomicBool) -> Result<usize> {
@@ -308,7 +355,8 @@ impl<'a> ExpectedInstallation<'a> {
                         }
                         "lib/rustlib/rust-installer-version" if bytes == b"3" => (),
                         "lib/rustlib/multirust-config.toml" => {
-                            check_rustup_config(self.selection, bytes).map_err(|e| e.to_string())?
+                            check_rustup_config(self.selection, self.original_manifest, bytes)
+                                .map_err(|e| e.to_string())?
                         }
                         "lib/rustlib/multirust-channel-manifest.toml" => {
                             check_rustup_manifest(self.original_manifest, bytes)

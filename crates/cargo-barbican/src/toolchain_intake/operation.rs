@@ -18,6 +18,13 @@ pub(super) enum Mode {
     ContinuingLocal,
     StaticInspection,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ComponentAddition {
+    pub installed_components: Vec<(String, String)>,
+    pub added_components: Vec<(String, String)>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct OperationEvidence {
@@ -29,11 +36,14 @@ pub(super) struct OperationEvidence {
     pub age_exception_id: Option<Sha256Digest>,
     pub evaluated_at: i64,
     pub eligibility: Mode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component_addition: Option<ComponentAddition>,
 }
 impl OperationEvidence {
     pub fn new(operation: &str, eligibility: &Eligibility, now: i64) -> Self {
         Self {
             schema_version: 1,
+            component_addition: None,
             operation: operation.into(),
             subject_id: eligibility.subject_id.clone(),
             policy_id: eligibility.policy_id.clone(),

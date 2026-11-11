@@ -98,6 +98,12 @@ fn run_at(
         )
         .map_err(CommandError::ToolchainIntake);
     }
+    if let Some(root) = crate::toolchain_intake::policy_init_root(&cli, &current_dir)
+        .map_err(CommandError::ToolchainIntake)?
+        && let Command::Policy { command } = cli.command
+    {
+        return policy::run_policy(command, &root, stdout);
+    }
     let base_url = crates_io_base_url()?;
     if base_url != DEFAULT_CRATES_IO_BASE_URL {
         writeln!(
@@ -198,6 +204,12 @@ where
     if crate::toolchain_intake::is_static(&cli) {
         return crate::toolchain_intake::run(&cli, current_dir, now, stdout, false)
             .map_err(CommandError::ToolchainIntake);
+    }
+    if let Some(root) = crate::toolchain_intake::policy_init_root(&cli, current_dir)
+        .map_err(CommandError::ToolchainIntake)?
+        && let Command::Policy { command } = cli.command
+    {
+        return policy::run_policy(command, &root, stdout);
     }
     let static_root = crate::toolchain_intake::gate_preflight(&cli, current_dir, now)
         .map_err(CommandError::ToolchainIntake)?;

@@ -592,7 +592,7 @@ impl AcceptedContext<'_> {
         &self,
         rustup_home: &Path,
         rustup_executable: &Path,
-        initial_default: bool,
+        mode: super::installation::InstallMode,
         cancelled: &std::sync::atomic::AtomicBool,
         now: i64,
     ) -> Result<(
@@ -600,7 +600,15 @@ impl AcceptedContext<'_> {
         super::operation::OperationEvidence,
     )> {
         let eligible = self.recheck_before_effects(EligibilityPurpose::Installation, None, now)?;
-        let operation = super::operation::OperationEvidence::new("install", &eligible, now);
+        let mut operation = super::operation::OperationEvidence::new(
+            if matches!(mode, super::installation::InstallMode::AddComponents) {
+                "add-components"
+            } else {
+                "install"
+            },
+            &eligible,
+            now,
+        );
         operation.retain(self.data)?;
         let inputs = super::installation::SelectedInputs {
             subject: &self.review.subject,
@@ -613,15 +621,20 @@ impl AcceptedContext<'_> {
             &self.review.archives,
             rustup_home,
             rustup_executable,
-            initial_default,
+            mode,
             cancelled,
-            || {
+            |addition| {
                 self.recheck_before_effects(
                     EligibilityPurpose::Installation,
                     None,
                     barbican::OffsetDateTime::now_utc().unix_timestamp(),
                 )
-                .map(|_| ())
+                .map(|_| ())?;
+                if let Some(addition) = addition {
+                    operation.component_addition = Some(addition.clone());
+                    operation.retain(self.data)?;
+                }
+                Ok(())
             },
         )?;
         let installed = self.correspondence(&outcome.correspondence)?;

@@ -1,6 +1,49 @@
 use super::common::*;
 
 #[test]
+fn verify_rejects_replace_before_any_build_or_test() {
+    for replaced in ["serde:1.0.228", "serde_core:1.0.228", "unreviewed:1.0.0"] {
+        let root = fresh_temp_dir();
+        write_covered_enforce_fixture(&root);
+        write_toolchain_pin(&root);
+        let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            format!("{manifest}\n[replace]\n'{replaced}'={{path='authored-replacement'}}\n"),
+        )
+        .unwrap();
+        let runner = FakeCommandRunner::default();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let outcome = run_cli_with_runner(
+            Cli::parse_from(["cargo-barbican", "verify"]),
+            &root,
+            &FakeCratesIoClient::default(),
+            &runner,
+            &mut stdout,
+            &mut stderr,
+        );
+        let diagnostic = match outcome {
+            Err(error) => error.to_string(),
+            Ok(code) => {
+                assert_eq!(code, ExitCode::from(1));
+                format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&stdout),
+                    String::from_utf8_lossy(&stderr)
+                )
+            }
+        };
+        assert!(
+            diagnostic.contains("[replace] source redirection is unsupported"),
+            "{diagnostic}"
+        );
+        assert_eq!(*runner.build_calls.borrow(), 0);
+        assert_eq!(*runner.test_calls.borrow(), 0);
+    }
+}
+
+#[test]
 fn verify_fails_when_reviewed_targets_manifest_is_absent() {
     let cli = Cli::parse_from(["cargo-barbican", "verify"]);
     let client = FakeCratesIoClient::default();

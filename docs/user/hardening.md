@@ -63,6 +63,11 @@ diff:
   crate fails closed, and the detection resolves the
   `alias = { package = "real-crate", ... }` rename form to the real package
   name, so aliasing the patch does not hide it.
+- **Unsupported manifest `[replace]` tables refuse explicitly.** Shared
+  dependency-policy parsing rejects the deprecated redirection mechanism.
+  A reviewed same-name/version replacement already failed the previous
+  downstream source/checksum gate; the new parser check gives a direct
+  diagnostic and removes ambiguity rather than establishing a prior bypass.
 - **Cargo lockfile selection stays aligned with review.** Ordinary repository
   commands reject effective `resolver.lockfile-path`, configured
   `[env].CARGO_RESOLVER_LOCKFILE_PATH`, and `include` before Cargo workspace
@@ -107,8 +112,9 @@ diff:
   `reviewed-targets.toml`, `deny.toml`, `.cargo/audit.toml`, and the repo-root
   cargo config are all read through a loader that refuses symlinks, and a
   review record only satisfies the gate when it is a regular file. This is
-  leaf-file protection: intermediate symlink containment for review-record
-  paths remains a known gap, described below. The external Cargo-home config
+  leaf-file protection plus canonical parent confinement for shared repository
+  policy/review-record reads. Safe in-root directory links are allowed;
+  escaping or dangling links refuse. The external Cargo-home config
   exception follows the boundary in the preceding source-controls rule.
 - **`verify` fails closed without policy.** Deleting `reviewed-targets.toml`,
   or emptying it of active families, does not turn the gate off: `verify`
@@ -141,15 +147,13 @@ repo-side recipe below exists to cover:
   builds. Per-user trust and acceptance assume that local account's authority;
   they are not protection against a hostile process rewriting all that user's
   state. Restoring a download cache cannot itself grant local approval.
-- **Intermediate symlink and concurrent-filesystem containment are incomplete.**
-  Review-record readers refuse a symlink at the file itself, but do not yet
-  prove every intermediate directory stays inside the workspace. Workspace
-  discovery and other filesystem paths also have separately deferred
-  containment work. Do not treat the gate as a race-free sandbox for an
-  untrusted checkout. See the [architecture boundaries](../architecture/overview.md).
-- **`[replace]` manifest tables are not detected.** The deprecated `[replace]`
-  mechanism can repoint a crate like `[patch]` can, and barbican does not yet
-  look for it. It does still show up as a manifest diff a reviewer can see.
+- **Concurrent-filesystem containment remains outside the guarantee.**
+  Shared repository loaders and manifest discovery now confine existing parents
+  and walked directories to their authority root. They still assume one writer;
+  a hostile concurrent process can race check-then-use operations. This is not
+  a sandbox for every filesystem path or executable. Conservative recursive
+  searches may refuse unsafe non-member directories under their search roots.
+  See the [architecture boundaries](../architecture/overview.md).
 - **Registry review coverage is deliberately bounded.** `pin check` enforces
   reviewed registry families, and `inventory --enforce` adds a direct-dependency
   coverage floor to pre-release. Uncovered registry transitive dependencies
@@ -178,6 +182,7 @@ to weaken the gate. A worked GitHub example (`.github/CODEOWNERS`):
 /.cargo/                                  @your-org/dependency-policy
 /.github/CODEOWNERS                       @your-org/dependency-policy
 /.github/workflows/barbican.yml           @your-org/dependency-policy
+/.github/workflows/barbican-admission.yml @your-org/dependency-policy
 ```
 
 Notes on the entries:
@@ -189,6 +194,8 @@ Notes on the entries:
   executables that `verify` and Gatehouse prove before execution.
 - The generated CI workflow is `.github/workflows/barbican.yml`. Adjust this
   entry for a custom name and include every workflow that enforces the gate.
+  Admission-enabled onboarding uses a separate protected-controller workflow;
+  see [its authority and rollout requirements](ci.md#maintainer-dispatched-admission).
   Those workflows and `CODEOWNERS` itself need protection because weakening
   either is equivalent to weakening the gate.
 - `Cargo.toml` and `Cargo.lock` are deliberately absent: they change with

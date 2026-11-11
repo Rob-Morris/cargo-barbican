@@ -14,7 +14,7 @@ impl ComponentCorpus {
     pub fn for_package(package: &str) -> Result<Self> {
         match package {
             "cargo" => Ok(Self::Cargo),
-            "rust-std" => Ok(Self::StandardLibrary),
+            "rust-std" | "rust-src" => Ok(Self::StandardLibrary),
             "rustc" | "rust-docs" | "clippy-preview" | "rustfmt-preview" => Ok(Self::RustRoot),
             _ => Err(AdmissionError(
                 "component source relationship is not qualified".into(),
@@ -43,6 +43,11 @@ pub fn component_source_paths(package: &str) -> Result<&'static [(&'static str, 
         ]),
         "cargo" => Ok(&[("Cargo.toml", "cargo")]),
         "rust-std" => Ok(&[("library/std/Cargo.toml", "std")]),
+        "rust-src" => Ok(&[
+            ("library/std/Cargo.toml", "std"),
+            ("library/Cargo.toml", ""),
+            ("src/bootstrap/src/core/build_steps/dist.rs", ""),
+        ]),
         "rust-docs" => Ok(&[
             ("src/librustdoc/Cargo.toml", "rustdoc"),
             ("src/bootstrap/src/core/build_steps/doc.rs", ""),
@@ -233,8 +238,11 @@ impl ComponentSourceSnapshot {
                 self.tree_entry(root, "compiler", "tree")?;
                 self.tree_entry(&src, "librustdoc", "tree")?;
             }
-            "rust-std" => {
+            "rust-std" | "rust-src" => {
                 self.tree_entry(root, "library", "tree")?;
+                if row.archive.package == "rust-src" {
+                    self.tree_entry(&src, "llvm-project", "commit")?;
+                }
             }
             "rust-docs" => {
                 self.tree_entry(&src, "doc", "tree")?;
@@ -421,6 +429,7 @@ pub(super) mod tests {
                     ("tools", "tree", &tools),
                     ("librustdoc", "tree", &other),
                     ("doc", "tree", &other),
+                    ("llvm-project", "commit", &other),
                 ],
             ),
             (
@@ -498,13 +507,19 @@ pub(super) mod tests {
             "rustc",
             "cargo",
             "rust-std",
+            "rust-src",
             "rust-docs",
             "clippy-preview",
             "rustfmt-preview",
         ] {
             let archive = ArchiveRecord {
                 package: package.into(),
-                target: "aarch64-apple-darwin".into(),
+                target: if package == "rust-src" {
+                    "*"
+                } else {
+                    "aarch64-apple-darwin"
+                }
+                .into(),
                 component: package.into(),
                 root: package.into(),
                 encoding: "xz".into(),

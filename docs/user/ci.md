@@ -6,14 +6,13 @@ example, not the only valid layout — adapt it to your existing workflow files.
 See [commands.md](commands.md#glossary) for term definitions (gate, family,
 reviewed target, and so on) used below.
 
-For repositories opting into Rust toolchain admission, provision an already
-trusted Barbican binary and qualified evaluator before installing or launching
-the target compiler. The generated workflow and worked example below install
-Rust before their ordinary conformance gate; they do not establish that
-pre-execution boundary. Follow the explicit
-[toolchain bootstrap](toolchains.md#ci-bootstrap), including fresh local
-acceptance from reviewed portable evidence. Native toolchain admission also
-has a narrower qualified host/evaluator matrix than the existing gate.
+For repositories opting into Rust toolchain admission, use the
+[maintainer-dispatched admission workflow](#maintainer-dispatched-admission).
+It starts with independently trusted prerequisites and approved review inputs,
+then establishes fresh local acceptance before installing or probing the target.
+The legacy workflow and worked example below install Rust before ordinary
+conformance checks. Native admission has a narrower qualified host/evaluator
+matrix than the existing general gate.
 
 ## Why pull-request and scheduled runs differ
 
@@ -38,7 +37,7 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.40.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.0
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -84,6 +83,148 @@ the worked example below. Everything else in the worked example mirrors the
 generated gate; treat it as the version to adapt when your repo already has
 workflow files.
 
+## Maintainer-dispatched admission
+
+With `[toolchain].require_admission = true`, `policy init --ci github`
+refuses to emit the legacy install-first workflow. Supply a strict JSON
+bootstrap configuration to generate `.github/workflows/barbican-admission.yml`:
+
+```sh
+cargo-barbican policy init --ci github --ci-bootstrap ci-bootstrap.json
+```
+
+Use the already trusted direct Barbican executable. Existing workflow files
+are preserved; a conflicting admission workflow is printed for manual
+reconciliation. Generation does not approve inputs, provision tools, configure
+GitHub protections or activate a compiler pin.
+Review and disable or migrate any existing install-first workflows when
+adopting pre-execution admission; generating this separate file does not
+change their behaviour.
+
+Admission-enabled `--ci` and explicit `--ci-bootstrap` resolve governance
+statically before Cargo workspace discovery or compiler probes. Run at the
+actual governance root, or supply `--repo <root>`; ambiguous nested roots and
+malformed governance refuse before Cargo. Legacy non-admission generation
+retains its ordinary workspace discovery.
+Relative bootstrap configuration paths resolve from the selected governance root.
+
+The configuration has exactly these fields. Replace the example identities
+with reviewed immutable commits and the completed review ID:
+
+```json
+{
+  "schema_version": 1,
+  "controller_tag": "barbican-ci-v1",
+  "provider_repository": "your-owner/your-repository",
+  "provider_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "provider_script": "ci/provision-barbican.sh",
+  "approved_repository": "your-owner/your-repository",
+  "approved_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "review_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}
+```
+
+The provider is an existing maintainer-controlled prerequisite script at the
+exact configured commit. It receives one fresh destination directory and
+must populate its `bin/` with trusted `cargo-barbican`, the exact qualified
+`rustup`, Rustup's `cargo`/`rustc`/`rustdoc` launchers, and reviewed
+`cargo-deny`/`cargo-audit` delegates. Provision an exact reviewed nextest too
+if the consumer selects it. The script and all its downloads/build inputs
+need independent review before approving the controller. It may compile an
+already-reviewed Barbican using an already-trusted host compiler, or supply
+an independently trusted existing binary. It must not install or probe the
+candidate compiler. Barbican does not introduce a binary distribution service
+or install these prerequisites itself.
+
+The three Rustup launchers must select the newly admitted private toolchain;
+do not supply fixed Cargo/rustc/rustdoc binaries from the bootstrap compiler.
+Candidate-stage shells remove an inherited `RUSTUP_TOOLCHAIN` override, use
+the fresh private Rustup home, and check actual conformance before fetching
+dependencies. A wrong-version launcher fails that check.
+
+The generated controller checks out and runs that provider before checking
+out the candidate. The separate approved checkout supplies a complete
+governance root: exact pin, admission-enabled toolchain policy, selected
+`rust.toolchains` entry, completed review, evidence, original distribution
+manifest/signature/certificate, and every referenced source and exception
+record. The repositories may be the consumer itself; a separate repository
+is not required. Cross-repository inputs must be publicly readable with the
+workflow's read-only token. Do not add privileged tokens or secrets to make
+private cross-repository inputs work.
+
+Before running the workflow:
+
+1. Review the emitted controller and its exact provider/approved-input
+   revisions. Commit the workflow and ensure it also exists on the default
+   branch, as required for dispatch.
+2. Create the configured controller tag at that exact reviewed commit.
+   Configure Active tag rules restricting creation, updates and deletion to
+   the authorised maintainer set; keep the tag immutable.
+3. A trusted maintainer deliberately dispatches from the approved controller
+   tag, with exact candidate and comparison-base commits. Never select the
+   candidate branch as the workflow's source ref.
+
+Where available, an Active Actions execution policy restricting this workflow
+to authorised maintainers and `workflow_dispatch` adds defence in depth.
+It is optional: neither that policy nor its plan entitlement is a prerequisite
+for this maintainer-dispatched route. The protected immutable controller tag
+and the trusted maintainer's deliberate selection of it establish the approval
+boundary.
+
+For example, after replacing the commit placeholders:
+
+```sh
+gh workflow run barbican-admission.yml --ref barbican-ci-v1 \
+  -f candidate_sha=<exact-candidate-commit> -f base_sha=<exact-base-commit>
+```
+
+The maintainer's reviewed tag selection and external platform protections
+provide approval origin. A check inside an arbitrary PR-defined workflow
+cannot authenticate itself. The generated guard catches a wrong or
+unprotected selected tag, but does not inspect or certify the repository's
+GitHub settings. See GitHub's [execution policy documentation](https://docs.github.com/en/enterprise-cloud@latest/actions/how-tos/administer/control-workflow-execution),
+[tag rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+and [dispatch instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+
+The run uses qualified macOS ARM64, pinned checkout actions without retained
+credentials, no referenced secrets, no privileged PR event and no restored
+approval state. It creates fresh private data/cache/Cargo/Rustup roots.
+`toolchain accept --approved-repo <approved-root>` first compares the
+candidate's toolchain governance, exact pin and complete selected review
+inputs with the protected checkout. It allows unrelated dependency review
+edits. This option checks bytes and policy; the applying controller remains
+responsible for authenticating the approved checkout's origin. Acceptance
+occurs in the candidate's actual root, since local bindings cannot be copied
+from another checkout.
+
+Ordinary fresh-evidence requirements remain active. Changed current evidence
+or an unapproved candidate refuses before installation; the generator does
+not emit a cached-admission fallback. The workflow then installs through the
+qualified evaluator, verifies installed correspondence and admission,
+checks conformance, fetches dependencies, and runs the existing gate. It never
+activates or edits the candidate pin. After an ordinary gate failure,
+independent release-age and assessment evidence still run when fresh
+eligibility and the explicit base are available. Failures keep the run red;
+recognised workflow cancellation stops subsequent evidence.
+Shell-observed SIGINT/SIGTERM and conventional 130/143 exits also mark the
+stage cancelled, block later independent evidence and keep the summary red.
+This does not infer a signal sent only to a child which reports an ordinary
+failure; process and hosted-run cancellation remain distinct observations.
+
+The summary identifies controller, provider, approved inputs, review,
+candidate and comparison base. A dispatch run belongs to the controller ref:
+**it is not an automatic required check on the candidate SHA**, and does not
+govern other repository workflows. An optional path-scoped execution policy
+cannot stop a PR adding another workflow. Optional repository-wide actor/event
+restrictions cover that wider boundary but also disable ordinary automatic
+workflows; configure them deliberately. Automatic PR enforcement through
+organisation-required workflows is a separate deployment with its own plan
+and ruleset requirements.
+
+Local tests exercise input comparison, fresh-state admission, refusal and
+generated ordering. Hosted assurance also requires verifying the actual
+GitHub protections and trusted provider in the consumer repository.
+
 ## Worked example
 
 ```yaml
@@ -124,7 +265,7 @@ jobs:
       - id: tools
         name: Install cargo-barbican, cargo-deny, and cargo-audit
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.40.0 cargo-barbican
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.0 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
       - id: fetch
@@ -262,7 +403,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.40.0
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.0
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -349,7 +490,7 @@ copy only to an absent destination:
 
 ```sh
 barbican_source=$(mktemp -d) &&
-git clone --depth 1 --branch v0.40.0 \
+git clone --depth 1 --branch v0.41.0 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream" &&
 cat "$barbican_source/upstream/templates/hooks/pre-commit"
 ```

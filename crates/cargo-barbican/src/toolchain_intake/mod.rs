@@ -3,6 +3,7 @@ mod verifier;
 
 mod acceptance;
 mod admission;
+mod approved;
 mod collection;
 mod frontend;
 #[cfg(unix)]
@@ -13,7 +14,7 @@ mod review;
 mod sources;
 mod store;
 mod trust;
-pub(crate) use frontend::{gate_preflight, is_static, run};
+pub(crate) use frontend::{gate_preflight, is_static, policy_init_root, run};
 mod operation;
 #[cfg(test)]
 mod workflow_tests;

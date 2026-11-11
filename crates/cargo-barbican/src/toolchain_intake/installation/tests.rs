@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 fn fixture_evaluator(selected: Option<std::ffi::OsString>) -> Result<PathBuf> {
-    let setup = "set BARBICAN_TEST_RUSTUP to the absolute path of the reviewed Rustup 1.29.0 executable; see docs/contributor/process.md";
+    let setup = "set BARBICAN_TEST_RUSTUP to the absolute path of the reviewed Rustup 1.29.0 or 1.29.3 executable; see docs/contributor/process.md";
     let path = PathBuf::from(selected.ok_or_else(|| format!("{setup}; no native tests skipped"))?);
     if !path.is_absolute() {
         return Err(format!(
@@ -21,9 +21,9 @@ fn fixture_evaluator(selected: Option<std::ffi::OsString>) -> Result<PathBuf> {
     let file =
         File::open(&path).map_err(|e| format!("{setup}; cannot read {}: {e}", path.display()))?;
     let (actual, _) = digest_reader(file, 100 * 1024 * 1024).map_err(error)?;
-    if actual.as_str() != QUALIFIED_RUSTUP_SHA256 {
+    if qualified_rustup_version(actual.as_str()).is_none() {
         return Err(format!(
-            "{setup}; {} has SHA256 {actual}, required {QUALIFIED_RUSTUP_SHA256}",
+            "{setup}; {} has SHA256 {actual}, required {QUALIFIED_RUSTUP_SHA256} or {OFFICIAL_RUSTUP_SHA256}",
             path.display()
         ));
     }
@@ -150,6 +150,57 @@ impl Fixture {
         fixture.subject =
             Subject::reconstruct(&manifest, &request, auth, fixture.inventories.clone()).unwrap();
         fixture
+    }
+    fn with_source() -> Self {
+        let mut fixture = Self::xz();
+        let bytes = include_bytes!("fixtures/rust-src.tar.xz");
+        fs::write(fixture.root.join("rust-src-1.99.99.tar.xz"), bytes).unwrap();
+        fixture.manifest = (String::from_utf8(fixture.manifest.clone()).unwrap()
+            .replace("components=[", "extensions=[{pkg='rust-src',target='*'}]\ncomponents=[")
+            + &format!("[pkg.rust-src]\nversion='1.99.99'\n[pkg.rust-src.target.'*']\navailable=true\nxz_url='https://static.rust-lang.org/dist/2026-10-15/rust-src-1.99.99.tar.xz'\nxz_hash='{}'\n", digest_bytes(bytes))).into_bytes();
+        fixture.select_source(false);
+        fixture
+    }
+    fn select_source(&mut self, source: bool) {
+        let manifest = Manifest::parse(&self.manifest, "1.99.99").unwrap();
+        let request = SelectionRequest {
+            host: "aarch64-apple-darwin".into(),
+            profile: Profile::Minimal,
+            components: if source {
+                vec!["rust-src".into()]
+            } else {
+                vec![]
+            },
+            targets: vec![],
+            encoding: Encoding::Xz,
+        };
+        self.selection = manifest.select(&request).unwrap();
+        self.archives = self
+            .selection
+            .archives
+            .iter()
+            .map(|a| (a.clone(), self.root.join(a.url.rsplit('/').next().unwrap())))
+            .collect();
+        self.inventories = self
+            .archives
+            .iter()
+            .map(|(a, p)| inspect_archive(File::open(p).unwrap(), a).unwrap())
+            .collect();
+        let mut auth = self.subject.record().authentication.clone();
+        auth.manifest_sha256 = manifest.sha256();
+        self.subject =
+            Subject::reconstruct(&manifest, &request, auth, self.inventories.clone()).unwrap();
+    }
+    fn add(&self, cancelled: &AtomicBool) -> Result<InstallOutcome> {
+        install_selected(
+            &self.inputs(),
+            &self.archives,
+            &self.home(),
+            &Self::evaluator(),
+            InstallMode::AddComponents,
+            cancelled,
+            |_| Ok(()),
+        )
     }
     fn new() -> Self {
         let root = fs::canonicalize(std::env::temp_dir())
@@ -290,9 +341,11 @@ impl Fixture {
             &self.archives,
             &self.home(),
             &Self::evaluator(),
-            true,
+            InstallMode::Install {
+                allow_initial_default: true,
+            },
             &AtomicBool::new(false),
-            || {
+            |_| {
                 calls += 1;
                 if calls <= 2 && self.root.join("candidate-probes").exists() {
                     return Err("candidate ran before synthetic acceptance/input recheck".into());
@@ -556,9 +609,11 @@ fn native_existing_default_and_unrelated_state_are_preserved() {
         &fixture.archives,
         &fixture.home(),
         &Fixture::evaluator(),
-        false,
+        InstallMode::Install {
+            allow_initial_default: false,
+        },
         &AtomicBool::new(false),
-        || Ok(()),
+        |_| Ok(()),
     )
     .unwrap();
     assert!(second.already_present);
@@ -582,9 +637,11 @@ fn native_preacceptance_corrupt_archive_default_and_path_refusals() {
         &fixture.archives,
         &fixture.home(),
         &Fixture::evaluator(),
-        false,
+        InstallMode::Install {
+            allow_initial_default: false,
+        },
         &AtomicBool::new(false),
-        || Ok(()),
+        |_| Ok(()),
     )
     .err()
     .unwrap();
@@ -645,9 +702,11 @@ fn native_owned_initial_default_restoration_and_external_conflict() {
             &fixture.archives,
             &fixture.home(),
             &Fixture::evaluator(),
-            true,
+            InstallMode::Install {
+                allow_initial_default: true,
+            },
             &AtomicBool::new(false),
-            || {
+            |_| {
                 calls += 1;
                 if calls == 3 {
                     if external {
@@ -992,9 +1051,11 @@ fn signals_during_static_install_verification_never_return_success() {
                 &fixture.archives,
                 &fixture.home(),
                 &Fixture::evaluator(),
-                true,
+                InstallMode::Install {
+                    allow_initial_default: true,
+                },
                 cancellation.flag(),
-                || Ok(()),
+                |_| Ok(()),
             );
             assert!(cancellation.flag().load(Ordering::SeqCst));
             let error = result
@@ -1140,9 +1201,11 @@ fn authentic_trusted_baseline_profile_matrix() {
             &archives,
             &home,
             &evaluator,
-            true,
+            InstallMode::Install {
+                allow_initial_default: true,
+            },
             cancelled,
-            || data.check_capture(&captured),
+            |_| data.check_capture(&captured),
         )
         .unwrap();
         assert!(!installed.already_present);
@@ -1168,9 +1231,11 @@ fn authentic_trusted_baseline_profile_matrix() {
             &archives,
             &home,
             &case.join("must-not-dispatch-evaluator"),
-            false,
+            InstallMode::Install {
+                allow_initial_default: false,
+            },
             cancelled,
-            || data.check_capture(&captured),
+            |_| data.check_capture(&captured),
         )
         .unwrap();
         assert!(existing.already_present);
@@ -1349,9 +1414,11 @@ fn native_creation_modes_refuse_before_first_probe_and_preserve_defaults() {
                 &fixture.archives,
                 &fixture.home(),
                 &fixture.root.join("must-not-open-evaluator"),
-                true,
+                InstallMode::Install {
+                    allow_initial_default: true,
+                },
                 &AtomicBool::new(false),
-                || Ok(()),
+                |_| Ok(()),
             )
         } else {
             fixture.install()
@@ -1375,4 +1442,258 @@ fn native_creation_modes_refuse_before_first_probe_and_preserve_defaults() {
             assert!(fixture.root.join("candidate-probes").is_file());
         }
     }
+}
+
+#[test]
+fn native_targetless_source_fresh_and_additive_preserve_verified_base() {
+    if !isolated(
+        "toolchain_intake::installation::tests::native_targetless_source_fresh_and_additive_preserve_verified_base",
+    ) {
+        return;
+    }
+    let cancelled = AtomicBool::new(false);
+    let mut fresh = Fixture::with_source();
+    fresh.select_source(true);
+    assert!(
+        fresh
+            .add(&cancelled)
+            .err()
+            .unwrap()
+            .contains("existing occupied")
+    );
+    fresh.install().unwrap();
+    let mut fixture = Fixture::with_source();
+    let installed = fixture.install().unwrap();
+    let prior_subject = fixture.subject.clone();
+    let prior_selection = fixture.selection.clone();
+    let prior_inventories = fixture.inventories.clone();
+    let base =
+        ExpectedInstallation::derive(&fixture.selection, &fixture.manifest, &fixture.inventories)
+            .unwrap();
+    let identities = base
+        .preserved_identities(&installed.correspondence.slot)
+        .unwrap();
+    let probes = fs::read(fixture.root.join("candidate-probes")).unwrap();
+    let settings = fs::read(fixture.home().join("settings.toml")).unwrap();
+    fixture.select_source(true);
+    let mut observed_scope = None;
+    let outcome = install_selected(
+        &fixture.inputs(),
+        &fixture.archives,
+        &fixture.home(),
+        &Fixture::evaluator(),
+        InstallMode::AddComponents,
+        &cancelled,
+        |addition| {
+            if let Some(addition) = addition {
+                assert!(
+                    !installed
+                        .correspondence
+                        .slot
+                        .join("lib/rustlib/manifest-rust-src")
+                        .exists()
+                );
+                assert_eq!(
+                    fs::read(fixture.root.join("candidate-probes")).unwrap(),
+                    probes
+                );
+                observed_scope = Some(addition.clone());
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    let scope = observed_scope.expect("verified addition scope before delegate");
+    assert_eq!(
+        scope.added_components,
+        vec![("rust-src".into(), "*".into())]
+    );
+    assert_eq!(
+        scope.installed_components,
+        prior_selection
+            .archives
+            .iter()
+            .map(|a| (a.package.clone(), a.target.clone()))
+            .collect::<Vec<_>>()
+    );
+    assert!(!outcome.already_present);
+    assert!(!outcome.initial_default_assigned);
+    for (path, identity) in identities {
+        assert_eq!(Identity::of(&fs::symlink_metadata(path).unwrap()), identity);
+    }
+    assert_eq!(
+        fs::read(fixture.root.join("candidate-probes")).unwrap(),
+        probes
+    );
+    assert_eq!(
+        fs::read(fixture.home().join("settings.toml")).unwrap(),
+        settings
+    );
+    assert!(
+        verify_selected(
+            &prior_subject,
+            &prior_selection,
+            &fixture.manifest,
+            &prior_inventories,
+            &fixture.home()
+        )
+        .is_err(),
+        "old narrower subject must not silently gain continuing use"
+    );
+    let repeated = install_selected(
+        &fixture.inputs(),
+        &fixture.archives,
+        &fixture.home(),
+        &fixture.root.join("must-not-dispatch-evaluator"),
+        InstallMode::AddComponents,
+        &cancelled,
+        |addition| {
+            if let Some(addition) = addition {
+                assert!(addition.added_components.is_empty());
+                assert_eq!(addition.installed_components.len(), 4);
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(repeated.already_present);
+    assert!(!repeated.initial_default_assigned);
+    assert_eq!(
+        fs::read(fixture.root.join("candidate-probes")).unwrap(),
+        probes
+    );
+}
+
+#[test]
+fn native_addition_refuses_unverified_base_before_any_dispatch() {
+    if !isolated(
+        "toolchain_intake::installation::tests::native_addition_refuses_unverified_base_before_any_dispatch",
+    ) {
+        return;
+    }
+    for change in ["payload", "extra", "manifest", "config", "cancel"] {
+        let mut fixture = Fixture::with_source();
+        let installed = fixture.install().unwrap();
+        fixture.select_source(true);
+        let slot = installed.correspondence.slot;
+        match change {
+            "payload" => fs::write(slot.join("bin/cargo"), b"changed").unwrap(),
+            "extra" => fs::write(slot.join("unreviewed-extra"), b"retain").unwrap(),
+            "manifest" => fs::write(
+                slot.join("lib/rustlib/multirust-channel-manifest.toml"),
+                b"changed=true",
+            )
+            .unwrap(),
+            "config" => fs::write(
+                slot.join("lib/rustlib/multirust-config.toml"),
+                b"config_version='1'\ncomponents=[]\n",
+            )
+            .unwrap(),
+            _ => (),
+        }
+        let probes = fs::read(fixture.root.join("candidate-probes")).unwrap();
+        let settings = fs::read(fixture.home().join("settings.toml")).unwrap();
+        assert!(
+            fixture.add(&AtomicBool::new(change == "cancel")).is_err(),
+            "{change}"
+        );
+        assert_eq!(
+            fs::read(fixture.root.join("candidate-probes")).unwrap(),
+            probes
+        );
+        assert_eq!(
+            fs::read(fixture.home().join("settings.toml")).unwrap(),
+            settings
+        );
+        assert!(!slot.join("lib/rustlib/manifest-rust-src").exists());
+    }
+}
+
+#[test]
+fn native_addition_rechecks_identity_after_effects_and_cancellation_during_base() {
+    if !isolated(
+        "toolchain_intake::installation::tests::native_addition_rechecks_identity_after_effects_and_cancellation_during_base",
+    ) {
+        return;
+    }
+    let mut fixture = Fixture::with_source();
+    let installed = fixture.install().unwrap();
+    fixture.select_source(true);
+    let cancelled = std::sync::Arc::new(AtomicBool::new(false));
+    let trigger = cancelled.clone();
+    VERIFICATION_CHECKPOINT.with(|checkpoint| {
+        *checkpoint.borrow_mut() = Some(Box::new(move || trigger.store(true, Ordering::SeqCst)));
+    });
+    let probes = fs::read(fixture.root.join("candidate-probes")).unwrap();
+    assert!(fixture.add(&cancelled).is_err());
+    assert_eq!(
+        fs::read(fixture.root.join("candidate-probes")).unwrap(),
+        probes
+    );
+    assert!(
+        !installed
+            .correspondence
+            .slot
+            .join("lib/rustlib/manifest-rust-src")
+            .exists()
+    );
+    cancelled.store(false, Ordering::SeqCst);
+    let payload = installed.correspondence.slot.join("bin/cargo");
+    let original = fs::read(&payload).unwrap();
+    let mut calls = 0;
+    let result = install_selected(
+        &fixture.inputs(),
+        &fixture.archives,
+        &fixture.home(),
+        &Fixture::evaluator(),
+        InstallMode::AddComponents,
+        &cancelled,
+        |addition| {
+            if addition.is_none() {
+                calls += 1;
+            }
+            if calls == 3 {
+                let replacement = payload.with_extension("replacement");
+                fs::write(&replacement, &original).unwrap();
+                fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).unwrap();
+                fs::rename(replacement, &payload).unwrap();
+            }
+            Ok(())
+        },
+    );
+    let error = result
+        .err()
+        .expect("same bytes in a replaced base inode must refuse success");
+    assert!(error.contains("identities"), "{error}");
+    assert!(error.contains("retained"), "{error}");
+    assert!(
+        installed
+            .correspondence
+            .slot
+            .join("lib/rustlib/manifest-rust-src")
+            .exists()
+    );
+    assert_eq!(
+        fs::read(fixture.root.join("candidate-probes")).unwrap(),
+        probes
+    );
+}
+
+#[test]
+fn evaluator_build_table_is_exact_and_excludes_unqualified_official_releases() {
+    assert_eq!(
+        qualified_rustup_version(QUALIFIED_RUSTUP_SHA256),
+        Some("1.29.0")
+    );
+    assert_eq!(
+        qualified_rustup_version(OFFICIAL_RUSTUP_SHA256),
+        Some("1.29.3")
+    );
+    assert_eq!(
+        qualified_rustup_version(
+            "aeb4105778ca1bd3c6b0e75768f581c656633cd51368fa61289b6a71696ac7e1"
+        ),
+        None
+    );
+    assert_eq!(qualified_rustup_version(&"0".repeat(64)), None);
 }

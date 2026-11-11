@@ -79,9 +79,10 @@ before Barbican starts. Neither launcher selection nor static review grants
 candidate execution authority.
 
 Global `--repo <root>`, `--data-dir <private-root>` and `--cache-dir <private-root>`
-are available for intake and applicable early gates. Relative explicit paths
-resolve from the invocation directory. Other legacy commands reject these intake
-options. Default data is per-user Application Support on macOS or XDG data on
+are available for intake and applicable early gates; static admission CI
+scaffolding also accepts `--repo`. These global paths resolve from the invocation
+directory. Other legacy commands reject these intake options. Default data is
+per-user Application Support on macOS or XDG data on
 Linux, separate from disposable cache. Explicit storage paths do not waive
 ownership, containment, file-type or applicable Cargo environment checks.
 
@@ -91,11 +92,11 @@ cargo-barbican [--repo ROOT] toolchain review EXACT-STABLE
     [--component COMPONENT,...] [--target TARGET,...]
     [--min-age-days DAYS] [--format text|json]
 cargo-barbican [--repo ROOT] toolchain accept REVIEW-ID --record COMPLETED-PATH
-    [operation options]
+    [--approved-repo APPROVED-ROOT] [operation options]
 cargo-barbican [--repo ROOT] toolchain admission-check [REVIEW-ID]
     [operation options]
 cargo-barbican [--repo ROOT] toolchain install REVIEW-ID
-    --rustup-executable EXACT-TRUSTED-PATH [--allow-initial-default]
+    --rustup-executable EXACT-TRUSTED-PATH [--allow-initial-default | --add-components]
     [operation options]
 cargo-barbican [--repo ROOT] toolchain adopt REVIEW-ID [operation options]
 cargo-barbican [--repo ROOT] toolchain installation-check REVIEW-ID [operation options]
@@ -117,7 +118,9 @@ an implicit waiver. Repository review and operation overrides are rejected;
 configure checked-in `release_age.minimum_days` or an exact scoped age exception.
 Installation inspection accepts standalone context; it verifies current accepted
 bytes and known facts without creating an installation, execution or admission
-grant. Cached admission is an explicit per-operation request, bounded by the
+grant. `installation-check` is static inspection: omit `--cached-admission`
+and `--cache-reason`; fresh-admission modes do not apply and are refused.
+Cached admission is an explicit per-operation request, bounded by the
 oldest required mutable-source check (at most 24 hours) and any earlier expiry.
 It is never an automatic fallback or a saved operating mode. Continuing admitted
 use in the same repository checks current policy, deadlines, adverse facts and
@@ -135,6 +138,19 @@ independently verified archive cache bytes. It preserves the repository author's
 assessment and repository bytes while recording the new local acceptance time.
 A changed source identity produces a new review requiring assessment.
 
+`accept --approved-repo APPROVED-ROOT` additionally requires an independent
+governance checkout whose origin the caller has already authenticated. Before
+opening local data/cache stores, it compares the candidate's admission-enabled
+toolchain and release-age policy, exact pin, selected toolchain admission and
+complete referenced review/evidence/original-input/source/exception bytes with
+that checkout. Unrelated dependency review edits are allowed. `--record` must
+name the exact review path in the approved checkout. Both roots and their bound
+inputs are rechecked before acceptance publication. This option compares inputs;
+it does not authenticate GitHub approval origin or turn prose into authority.
+Fresh acceptance is established in the candidate's actual repository root;
+local bindings cannot be copied from an approved checkout. Normal fresh-evidence
+requirements still apply. See the [maintainer-dispatched CI contract](../user/ci.md#maintainer-dispatched-admission).
+
 Current review evidence uses nested `evidence.schema_version: 2` and a
 `component_sources` row for every exact selected archive. Each row binds source
 commit/tree/package provenance, the represented Rust-root/std/Cargo inventory,
@@ -144,6 +160,29 @@ explicit assessment. Legacy schema-1 evidence retains its original identity only
 for the previously supported macOS ARM64 minimal closure with optional host
 Clippy/rustfmt. Generic default/docs reviews require new collection and assessment,
 including on an otherwise fresh `--cached-admission` route.
+
+`install FINAL-REVIEW-ID --add-components` explicitly extends an occupied
+exact-release slot. The final accepted subject supplies every existing and new
+archive; claimed installed component names are only a subset hypothesis until
+the full base is verified against those authenticated inputs. Require minimal
+compiler closure, same original manifest/release/host, no unknown extra files,
+and only the missing selected components. Preserve old payload identities,
+bytes, ownership and modes; allow only the exact aggregate bookkeeping delta.
+An absent slot or `--allow-initial-default` conflict refuses. Full final
+correspondence is a verified no-op before evaluator/creation-mode checks.
+Ordinary install never silently switches to additive repair. Failed/cancelled
+addition preserves observed state. No binding is published before complete
+final verification; cancellation observed after completed publication reports
+and retains that binding.
+No prior execution or other repository admission is inferred.
+
+Addition output and retained operation intent use `operation: "add-components"`.
+Eligibility includes optional `component_addition` with exact
+`installed_components` and `added_components` arrays of `[package, target]`
+pairs; the subject binds the complete final selection. Intent is retained
+before effects, and verified base/delta scope before even isolated evaluator
+help. A no-op has an empty added array and `already_present: true`. Ordinary
+operation receipts omit the new optional field, preserving their encoding.
 
 `admission-check [REVIEW-ID]` checks continuing repository admission and requires
 a matching existing installation. It does not replace accept/install's pre-install
@@ -194,7 +233,9 @@ metadata support: see [toolchain workflows](../user/toolchains.md), the
 [original native qualification](../dependency-reviews/2026-11-04-native-toolchain-qualification.md)
 and [default/docs qualification](../dependency-reviews/2026-11-10-native-default-docs-qualification.md).
 The qualified macOS ARM64 route covers minimal/default profiles and supported
-host docs/Clippy/rustfmt additions; every selected release still needs its own
+host docs/Clippy/rustfmt and target-independent rust-src additions, including
+explicit existing-slot additions. Exact qualified evaluator identities and
+regular-file invocation constraints are listed in the linked guide; every selected release still needs its own
 current admission evidence and acceptance.
 Unsupported native evaluator cases fail closed before candidate execution.
 Fresh installation also checks that private file/directory creation yields
@@ -486,7 +527,8 @@ cargo barbican gatehouse candidate [--preserve-sandbox] <crate@version>
     manual inspection and prints the sandbox path. Any failed required evidence
     step returns exit 1 after rendering the failure in the dossier.
 
-cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>] [--pre-commit-hook]
+cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>]
+    [--ci-bootstrap CONFIG.json] [--pre-commit-hook]
     Create the explicit policy scaffold for adopting cargo-barbican in a repo.
     It creates missing:
     - `barbican.toml`
@@ -512,8 +554,8 @@ cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>] [--pre-
     created. Symlinks, directories, and other wrong-type paths at scaffold
     locations or existing scaffold ancestors fail closed rather than being
     followed or overwritten.
-    `--ci <system>` additionally emits a ready-to-run CI enforcement workflow.
-    The only supported value is `github`, which writes
+    `--ci <system>` additionally emits a CI workflow. The only supported value
+    is `github`. Without toolchain admission enabled, it writes
     `.github/workflows/barbican.yml`: a workflow that installs cargo-barbican,
     cargo-deny, and cargo-audit with `--locked`, pins its third-party actions
     by full commit SHA, fetches the locked dependency graph for every target
@@ -521,14 +563,34 @@ cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>] [--pre-
     resolves frozen cross-platform cargo metadata and would otherwise fail on
     a runner cache missing other platforms' crates), and runs the gate —
     `cargo barbican gatehouse pre-release`, plus `cargo barbican age-lock` and
-    `cargo barbican assess` against the pull-request base. This flag is
-    independent of the base scaffold above and of `barbican.toml` validity.
+    `cargo barbican assess` against the pull-request base. Workflow generation
+    requires valid toolchain/configuration inputs.
     Unlike the idempotent base scaffold, an existing
     `.github/workflows/barbican.yml` is not overwritten: the command fails
     closed (exit 1), reports the path as blocked, and re-prints the intended
     workflow contents so the difference can be reconciled by hand. Wrong-type
     paths at the workflow location fail closed the same way as other scaffold
     paths.
+    With `[toolchain].require_admission = true`, `--ci github` requires
+    `--ci-bootstrap CONFIG.json` and an admission scope; it never emits the
+    install-first legacy workflow. The strict JSON schema binds the protected
+    controller tag, immutable provider and approved-input repository commits,
+    provider script and completed review ID. It writes the separate
+    `.github/workflows/barbican-admission.yml`, preserving any legacy workflow.
+    Existing admission workflows are likewise refused and the intended contents
+    reprinted. The admission mode requires a supported exact stable pin;
+    bootstrap configuration never silently enables admission.
+    Invoke the already trusted direct `cargo-barbican` executable. Explicit
+    `--ci-bootstrap` and admission-enabled `--ci` resolve the governance root
+    statically before Cargo discovery or compiler probes, at the current root
+    or explicit global `--repo ROOT`. Malformed or ambiguous governance refuses
+    before Cargo. Relative bootstrap paths resolve from that governance root.
+    Legacy non-admission init retains ordinary workspace discovery.
+    Generation does not provision tools, approve inputs or configure GitHub.
+    A trusted maintainer dispatches from the reviewed immutable protected tag;
+    actor/event execution policies are optional defence in depth, and this run
+    is not an automatic required check on the candidate SHA. Follow the exact
+    provider and approval setup in `docs/user/ci.md#maintainer-dispatched-admission`.
     For Windows, see the project-level Platform Support posture in
     `docs/architecture/overview.md`; until full Windows support lands, run
     from trusted checkouts without junctions in scaffold paths.
@@ -867,8 +929,8 @@ cargo barbican pin check [--config reviewed-targets.toml]
       they require the same family's structured `resolved` entry to carry
       `checksum_sha256`
     - stronger installed-tree or broader non-crates.io artefact parity remains
-      out of scope for this slice; `[replace]` manifest tables are also out of
-      scope and are not yet detected
+      out of scope for this slice; unsupported `[replace]` manifest tables
+      fail explicitly in shared dependency-policy parsing
 
 cargo barbican review [--base-dir PATH]
     Print a diff of policy-relevant files with a checklist printed above.
@@ -1280,7 +1342,8 @@ Ordinary terminal control escaping still applies to safe diagnostic text.
 
 ## Generated PR evidence after gate failure
 
-`policy init --ci github` keeps the authoritative pre-release gate fail-fast.
+The legacy non-admission `policy init --ci github` workflow keeps the
+authoritative pre-release gate fail-fast.
 PR evidence has two independent steps: `age-lock` and strict `assess`, each with
 `!cancelled()` plus explicit successful checkout/toolchain-install/grouped-tool/
 fetch outcomes, fresh post-gate `toolchain check` and explicit PR-base commit

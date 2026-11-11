@@ -11,6 +11,12 @@ Install a rustup-managed Rust environment with `rustup`, `cargo`, `rustc` and
 locked dependencies from source; allow build time and disk space for that
 bootstrap. Choose/preinstall the consumer's exact compiler separately.
 
+For admission-enabled CI, provision Barbican with an already trusted compiler
+and use the [maintainer-dispatched bootstrap](ci.md#maintainer-dispatched-admission)
+before installing or launching the candidate compiler. Its reviewed provider
+and protected-input comparison establish that earlier boundary; the ordinary
+install instructions here do not establish candidate admission.
+
 Review the release, source, build options and install identity of each tool,
 including Barbican itself, before installing it. Tool-install records are
 separate from graph-family records. First-principles review is the default;
@@ -107,7 +113,7 @@ Follow [Adoption](adoption.md) for the ordered new/existing project journey.
 Install this release using its immutable identity:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.40.0 cargo-barbican
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.0 cargo-barbican
 ```
 
 Init preserves regular policy/process/template files and completed records.
@@ -121,7 +127,7 @@ release into a scratch area. This does not assume an upstream checkout:
 
 ```sh
 barbican_source=$(mktemp -d)
-git clone --depth 1 --branch v0.40.0 \
+git clone --depth 1 --branch v0.41.0 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream"
 # Review templates in "$barbican_source/upstream/templates" before copying.
 ```
@@ -142,7 +148,7 @@ and copying desired files.
 
 ## Versioning and re-sync
 
-Every shipped template carries `Synced from cargo-barbican v0.40.0` provenance.
+Every shipped template carries `Synced from cargo-barbican v0.41.0` provenance.
 The process README and record template are consumer-owned and may be tailored.
 On upgrade, install the reviewed immutable release, obtain its templates in a
 scratch checkout as above, and review diffs before merging desired changes.
@@ -172,8 +178,8 @@ exceptions never authorise Git targets; cargo-deny permission remains separate.
 
 Upgrade to v0.33.0 or later before adding `toolchain check` to a consumer workflow.
 Generate the intended workflow in a disposable consumer directory, or use
-`policy init --ci github`'s existing-file refusal/reprint; it never overwrites
-your workflow. Review the complete gate job in [CI](ci.md), preserving custom
+the legacy non-admission `policy init --ci github`'s existing-file refusal/reprint;
+it never overwrites your workflow. Review the complete gate job in [CI](ci.md), preserving custom
 steps, reviewed pins, permissions and the separate scheduled audit.
 
 Replace the old combined `Age-lock and assess` step with both independent steps

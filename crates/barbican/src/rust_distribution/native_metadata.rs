@@ -134,10 +134,21 @@ pub fn check_rustup_manifest(original: &[u8], installed: &[u8]) -> Result<(), Di
     Ok(())
 }
 
-pub fn check_rustup_config(
-    selection: &Selection,
+/// Untrusted installed claims, suitable only for selecting an independently verified subset.
+pub fn rustup_configured_components(
+    original: &[u8],
+    host: &str,
     installed: &[u8],
-) -> Result<(), DistributionError> {
+) -> Result<BTreeMap<(String, String), bool>, DistributionError> {
+    let projection = rustup_manifest_projection(original)?;
+    let extensions = projection
+        .get("pkg")
+        .and_then(|v| v.get("rust"))
+        .and_then(|v| v.get("target"))
+        .and_then(|v| v.get(host))
+        .and_then(|v| v.get("extensions"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid("missing original host extensions"))?;
     let value = parse(installed)?;
     let root = table(&value)?;
     if root.len() != 2 || value.get("config_version").and_then(Value::as_str) != Some("1") {
@@ -147,11 +158,13 @@ pub fn check_rustup_config(
         .get("components")
         .and_then(Value::as_array)
         .ok_or_else(|| invalid("missing configured components"))?;
-    let mut actual = BTreeSet::new();
+    let mut actual = BTreeMap::new();
     for component in components {
-        if table(component)?.len() != 3
-            || component.get("is_extension").and_then(Value::as_bool) != Some(false)
-        {
+        let extension = component
+            .get("is_extension")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| invalid("missing component extension flag"))?;
+        if table(component)?.len() != 3 || (extension && !extensions.contains(component)) {
             return Err(invalid("unqualified installed component config"));
         }
         let package = component
@@ -162,16 +175,28 @@ pub fn check_rustup_config(
             .get("target")
             .and_then(Value::as_str)
             .ok_or_else(|| invalid("missing component target"))?;
-        if !actual.insert((package, target)) {
+        if actual
+            .insert((package.to_owned(), target.to_owned()), extension)
+            .is_some()
+        {
             return Err(invalid("duplicate configured component"));
         }
     }
+    Ok(actual)
+}
+
+pub fn check_rustup_config(
+    selection: &Selection,
+    original: &[u8],
+    installed: &[u8],
+) -> Result<(), DistributionError> {
+    let actual = rustup_configured_components(original, &selection.host, installed)?;
     let expected: BTreeSet<_> = selection
         .archives
         .iter()
-        .map(|a| (a.package.as_str(), a.target.as_str()))
+        .map(|a| (a.package.clone(), a.target.clone()))
         .collect();
-    if actual != expected {
+    if actual.into_keys().collect::<BTreeSet<_>>() != expected {
         return Err(invalid(
             "installed component scope differs; explicitly review expanded scope",
         ));
@@ -327,6 +352,31 @@ mod tests {
         assert!(
             check_rustup_manifest(original, toml::to_string(&changed).unwrap().as_bytes()).is_err()
         );
+    }
+    #[test]
+    fn configured_extension_flags_are_bound_to_original_host_closure() {
+        let original = b"manifest-version='2'\ndate='2026-10-15'\n[pkg.rust]\nversion='1.99.1'\n[pkg.rust.target.host]\navailable=true\nextensions=[{pkg='rust-src',target='*'}]\n";
+        for flag in [false, true] {
+            let text = format!(
+                "config_version='1'\ncomponents=[{{pkg='rust-src',target='*',is_extension={flag}}}]\n"
+            );
+            assert_eq!(
+                rustup_configured_components(original, "host", text.as_bytes()).unwrap(),
+                BTreeMap::from([(("rust-src".into(), "*".into()), flag)])
+            );
+        }
+        for component in [
+            "{pkg='rust-src',target='host',is_extension=true}",
+            "{pkg='rustc',target='host',is_extension=true}",
+            "{pkg='rust-src',is_extension=true}",
+            "{pkg='rust-src',target='*',is_extension='true'}",
+            "{pkg='rust-src',target='*',is_extension=true,unknown=1}",
+        ] {
+            let text = format!("config_version='1'\ncomponents=[{component}]\n");
+            assert!(rustup_configured_components(original, "host", text.as_bytes()).is_err());
+        }
+        let duplicate = b"config_version='1'\ncomponents=[{pkg='rust-src',target='*',is_extension=false},{pkg='rust-src',target='*',is_extension=true}]\n";
+        assert!(rustup_configured_components(original, "host", duplicate).is_err());
     }
     #[test]
     fn default_ownership_preserves_other_settings_and_normalises_only_empty_overrides() {

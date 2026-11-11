@@ -331,6 +331,165 @@ fn write(root: &Path, path: &str, bytes: &[u8]) {
     fs::write(path, bytes).unwrap();
 }
 
+fn copy_approved_fixture(source: &Path, destination: &Path) {
+    fs::create_dir(destination).unwrap();
+    for entry in fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let target = destination.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_approved_fixture(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn approved_inputs_bind_all_toolchain_authority_before_creating_local_state() {
+    use clap::Parser;
+    for mutation in [
+        "pin",
+        "governance",
+        "age",
+        "admission",
+        "evidence",
+        "prose",
+        "manifest",
+        "signature",
+        "certificate",
+        "source",
+        "exception",
+        "missing",
+        "symlink",
+        "intermediate-link",
+        "shadow-pin",
+        "self",
+    ] {
+        let fixture = Fixture::prepared(true);
+        let approved = fixture.root.join("approved");
+        copy_approved_fixture(&fixture.repo().root, &approved);
+        let candidate = fixture.repo().root;
+        let id = fixture.id();
+        let bundle = format!("docs/dependency-reviews/toolchains/{id}");
+        let path = match mutation {
+            "pin" => "rust-toolchain.toml".into(),
+            "governance" | "age" => "barbican.toml".into(),
+            "admission" => "reviewed-targets.toml".into(),
+            "evidence" | "missing" | "symlink" => fixture.admission.evidence_record.clone(),
+            "prose" => fixture.admission.review_record.clone(),
+            "manifest" => format!("{bundle}/manifest.toml"),
+            "signature" => format!("{bundle}/manifest.asc"),
+            "certificate" => format!("{bundle}/certificate.pgp"),
+            "source" => fixture.review.record.evidence.observations[0]
+                .snapshot
+                .path
+                .clone(),
+            "exception" => "docs/dependency-reviews/toolchains/exception.md".into(),
+            "self" | "intermediate-link" | "shadow-pin" => String::new(),
+            _ => unreachable!(),
+        };
+        if mutation == "shadow-pin" {
+            fs::write(candidate.join("rust-toolchain"), b"1.99.1\n").unwrap();
+        } else if mutation == "intermediate-link" {
+            let relative = "docs/dependency-reviews/toolchains";
+            fs::rename(candidate.join(relative), fixture.root.join("retained-tree")).unwrap();
+            std::os::unix::fs::symlink(approved.join(relative), candidate.join(relative)).unwrap();
+        } else if mutation == "missing" {
+            fs::remove_file(candidate.join(&path)).unwrap();
+        } else if mutation == "symlink" {
+            fs::remove_file(candidate.join(&path)).unwrap();
+            std::os::unix::fs::symlink(approved.join(&path), candidate.join(&path)).unwrap();
+        } else if mutation != "self" {
+            let mut bytes = fs::read(candidate.join(&path)).unwrap();
+            if mutation == "governance" {
+                bytes =
+                    b"[toolchain]\nrequire_admission=false\nadmission_scope='repo-a'\n".to_vec();
+            } else if mutation == "age" {
+                bytes.extend_from_slice(b"\n[release_age]\nminimum_days=8\n");
+            } else if mutation == "admission" {
+                bytes = String::from_utf8(bytes)
+                    .unwrap()
+                    .replace("repo-a", "repo-b")
+                    .into_bytes();
+            } else {
+                bytes.extend_from_slice(b"\nchanged candidate bytes\n");
+            }
+            fs::write(candidate.join(&path), bytes).unwrap();
+        }
+        let approved_arg = if mutation == "self" {
+            &candidate
+        } else {
+            &approved
+        };
+        let record = approved_arg.join(&fixture.admission.review_record);
+        let data = fixture.root.join("must-remain-absent");
+        let cache = fixture.root.join("cache-must-remain-absent");
+        let cli = crate::cli::Cli::try_parse_from([
+            "cargo-barbican",
+            "--repo",
+            candidate.to_str().unwrap(),
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--cache-dir",
+            cache.to_str().unwrap(),
+            "toolchain",
+            "accept",
+            id.as_str(),
+            "--approved-repo",
+            approved_arg.to_str().unwrap(),
+            "--record",
+            record.to_str().unwrap(),
+        ])
+        .unwrap();
+        let result = super::frontend::run(
+            &cli,
+            &fixture.root,
+            barbican::OffsetDateTime::from_unix_timestamp(fixture.now).unwrap(),
+            &mut Vec::new(),
+            false,
+        );
+        assert!(result.is_err(), "{mutation}");
+        assert!(!data.exists(), "{mutation}: {result:?}");
+        assert!(!cache.exists(), "{mutation}");
+    }
+}
+
+#[test]
+fn approved_inputs_allow_unrelated_dependency_edits_but_recheck_both_checkouts() {
+    let fixture = Fixture::prepared(true);
+    let approved = fixture.root.join("approved");
+    copy_approved_fixture(&fixture.repo().root, &approved);
+    let candidate = fixture.repo().root;
+    let mut policy = fs::read_to_string(candidate.join("reviewed-targets.toml")).unwrap();
+    policy.push_str("\n[[rust.families]]\nname='other'\nreview_record='docs/other.md'\n[rust.families.resolved]\nserde='1.0.228'\n");
+    fs::write(candidate.join("reviewed-targets.toml"), policy).unwrap();
+    let capture = || {
+        super::approved::ApprovedInputs::capture(
+            &fixture.repo(),
+            &approved,
+            &fixture.id(),
+            &approved.join(&fixture.admission.review_record),
+        )
+    };
+    let guard = capture().unwrap();
+    guard.recheck().unwrap();
+    let original = fs::read(approved.join(&fixture.admission.review_record)).unwrap();
+    fs::write(
+        approved.join(&fixture.admission.review_record),
+        b"changed approval",
+    )
+    .unwrap();
+    assert!(guard.recheck().is_err());
+    fs::write(approved.join(&fixture.admission.review_record), &original).unwrap();
+    let guard = capture().unwrap();
+    fs::write(
+        candidate.join(&fixture.admission.review_record),
+        b"changed candidate",
+    )
+    .unwrap();
+    assert!(guard.recheck().is_err());
+}
+
 #[test]
 fn fresh_user_reuses_portable_assessment_and_exact_age_exception_without_rewriting_repo() {
     let fixture = Fixture::new();
@@ -511,7 +670,13 @@ fn fixture_material() -> super::trust::Material {
 #[test]
 fn empty_state_cli_import_authenticates_archives_and_preserves_portable_author_assessment() {
     use clap::Parser;
-    for tamper in [None, Some("signature"), Some("archive"), Some("source")] {
+    for tamper in [
+        None,
+        Some("signature"),
+        Some("archive"),
+        Some("source"),
+        Some("stale"),
+    ] {
         let fixture = Fixture::prepared(true);
         let data = fixture.data("empty-ci-data");
         let cache = fixture.data("disposable-ci-cache");
@@ -534,10 +699,12 @@ fn empty_state_cli_import_authenticates_archives_and_preserves_portable_author_a
                 .unwrap();
         }
         let repo = fixture.repo();
+        let approved = fixture.root.join("approved");
+        copy_approved_fixture(&repo.root, &approved);
         let before = fs::read(repo.root.join("reviewed-targets.toml")).unwrap();
         let evidence_before = fs::read(repo.root.join(&fixture.admission.evidence_record)).unwrap();
         let id = fixture.id();
-        let prose = repo.root.join(&fixture.admission.review_record);
+        let prose = approved.join(&fixture.admission.review_record);
         let cli = crate::cli::Cli::try_parse_from([
             "cargo-barbican",
             "--repo",
@@ -549,6 +716,8 @@ fn empty_state_cli_import_authenticates_archives_and_preserves_portable_author_a
             "toolchain",
             "accept",
             id.as_str(),
+            "--approved-repo",
+            approved.to_str().unwrap(),
             "--record",
             prose.to_str().unwrap(),
             "--cached-admission",
@@ -558,7 +727,7 @@ fn empty_state_cli_import_authenticates_archives_and_preserves_portable_author_a
             "json",
         ])
         .unwrap();
-        if let Some(tamper) = tamper {
+        if let Some(tamper) = tamper.filter(|value| *value != "stale") {
             let path = match tamper {
                 "signature" => repo.root.join(format!(
                     "docs/dependency-reviews/toolchains/{id}/manifest.asc"
@@ -574,7 +743,7 @@ fn empty_state_cli_import_authenticates_archives_and_preserves_portable_author_a
             fs::write(path, b"tampered independently supplied input").unwrap();
         }
         let mut output = Vec::new();
-        let now = fixture.now + 60;
+        let now = fixture.now + if tamper == Some("stale") { 86_401 } else { 60 };
         let result = super::frontend::run(
             &cli,
             &fixture.root,
@@ -848,7 +1017,15 @@ fn observed_signal_during_context_install_preserves_binding_and_intent_history()
             ));
             if existing {
                 context
-                    .install(&home, &evaluator, true, &AtomicBool::new(false), now)
+                    .install(
+                        &home,
+                        &evaluator,
+                        super::installation::InstallMode::Install {
+                            allow_initial_default: true,
+                        },
+                        &AtomicBool::new(false),
+                        now,
+                    )
                     .unwrap();
                 assert!(binding.is_file());
             }
@@ -864,7 +1041,15 @@ fn observed_signal_during_context_install_preserves_binding_and_intent_history()
                     );
                 }));
             });
-            let result = context.install(&home, &evaluator, true, cancellation.flag(), now);
+            let result = context.install(
+                &home,
+                &evaluator,
+                super::installation::InstallMode::Install {
+                    allow_initial_default: true,
+                },
+                cancellation.flag(),
+                now,
+            );
             let error = result
                 .err()
                 .expect("observed cancellation must suppress installed-verified outcome");

@@ -86,6 +86,12 @@ admission, installation or activation commands.
 - [Authentic default/docs machinery and public admission qualification](2026-11-10-native-default-docs-qualification.md)
   and [component, correspondence and execution receipt](2026-11-10-native-default-docs-qualification.json)
   — already-trusted Rust 1.95 baseline, separately scoped from new compiler acceptance.
+- [Target-independent rust-src and reviewed component additions](2026-11-12-rust-src-additive-qualification.md)
+  and [assessment/native evidence summary](2026-11-12-rust-src-additive-qualification.json)
+  — exact source/native scope, retained-state semantics and qualification results.
+- [Exact official Rustup 1.29.3 evaluator](2026-11-12-official-rustup-evaluator.md)
+  and [static assessment/native result](2026-11-12-official-rustup-evaluator.json)
+  — scoped ARM64 qualification with supplier-build uncertainty retained.
 - [Cargo-only qualification and native lockfile fixture](2026-11-09-cargo-lockfile-fixture.md)
   and [authentication, advisory and execution receipt](2026-11-09-cargo-lockfile-fixture.json).
 

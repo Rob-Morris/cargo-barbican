@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.40.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.41.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -69,8 +69,8 @@ certification:
 - path-outside-workspace and alternate-registry direct dependencies remain
   unsupported and fail the coverage floor
 - crates.io publication and Windows support are not part of this release
-- cross-command hostile-checkout symlink containment and race-free filesystem
-  guarantees remain deferred
+- repository policy/manifest reads confine intermediate paths; race-free
+  filesystem guarantees and a general hostile-checkout sandbox remain deferred
 - `gatehouse candidate` gathers crates.io candidate evidence; it does not prove
   a Cargo tool-install workflow or execute the candidate
 
@@ -80,8 +80,10 @@ cargo-barbican is developed and tested on macOS and Linux. The current binary
 requires Unix APIs and does not support Windows.
 
 **Rust toolchain installation/adoption has narrower support:** native macOS
-ARM64 only, using the exact reviewed Homebrew Rustup 1.29.0_1 build, minimal
-or default Rust profiles, and supported host docs/Clippy/rustfmt additions.
+ARM64 only, using exact qualified official Rustup 1.29.3 or existing reviewed
+Homebrew 1.29.0_1 bytes, minimal/default Rust profiles, and supported host
+docs/Clippy/rustfmt or target-independent rust-src selections. Explicit
+`toolchain install --add-components` handles reviewed additions to existing slots.
 Broader distribution metadata support does not qualify native installation. See the
 [toolchain guide](docs/user/toolchains.md#installation-edges-and-recovery) for
 the exact evaluator identity, archive route and refusal boundaries.
@@ -94,7 +96,7 @@ explicitly select your trusted toolchain with `RUSTUP_TOOLCHAIN`. Install the
 insiders release candidate from its immutable git tag:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.40.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.0
 ```
 
 The tag is the install identity; do not replace it with a moving branch in

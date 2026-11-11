@@ -303,6 +303,9 @@ pub(super) fn collect(
             "rust-std" => {
                 "Signed Rust tree's std package manifest matched to the separate library source inventory."
             }
+            "rust-src" => {
+                "Signed Rust tree's standard-library package/workspace and rust-src distribution recipe retained; target-independent archive includes standard-library/path dependency sources and the Rust tree's pinned LLVM libunwind sources. The separate library lock represents the standard-library source corpus."
+            }
             "clippy-preview" => {
                 "Clippy package manifest in the signed Rust tree's src/tools/clippy subtree matched to the Rust-root source inventory."
             }
@@ -316,6 +319,8 @@ pub(super) fn collect(
         };
         let residual = if archive.package == "rust-docs" {
             "Documentation source/books, generated HTML, JavaScript/CSS and third-party assets are not a complete versioned dependency graph. Static asset counts/digests do not assess script behaviour, browser reachability or every embedded dependency. No docs were executed or rendered. Rust-root advisory matches are conservative renderer/tool source findings; missing asset-level advisory identities remain explicit residual uncertainty for human assessment."
+        } else if archive.package == "rust-src" {
+            "The library lock is not a complete inventory of native libunwind, vendored/path-source dependencies or every distributed file. Archive identity and mapping cover every payload file, but source inclusion does not establish editor/build/runtime reachability, benignness or reproducible source correspondence. Standard-library and represented source advisory findings require explicit assessment; no source file is executed by static collection."
         } else {
             "The represented source inventory includes optional/dev/build and other-host packages. Selected-host binary inclusion, reachability, complete native/LLVM dependency coverage and reproducible source-to-binary correspondence remain unproved; official security announcements and all represented source findings require explicit human assessment."
         };
@@ -440,7 +445,8 @@ fn collect_advisories(
                             "unsupported RustSec Rust-corpus package/version semantics".into()
                         );
                     }
-                    if (advisory.package == "std" && archive.package != "rust-std")
+                    if (advisory.package == "std"
+                        && !matches!(archive.package.as_str(), "rust-std" | "rust-src"))
                         || (advisory.package == "rustdoc" && archive.package != "rustc")
                         || (advisory.package == "cargo" && archive.package != "cargo")
                     {

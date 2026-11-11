@@ -10,11 +10,12 @@ const HOSTS: [&str; 4] = [
     "aarch64-unknown-linux-gnu",
     "x86_64-unknown-linux-gnu",
 ];
-const PACKAGES: [&str; 6] = [
+const PACKAGES: [&str; 7] = [
     "rustc",
     "cargo",
     "rust-std",
     "rust-docs",
+    "rust-src",
     "rustfmt-preview",
     "clippy-preview",
 ];
@@ -259,7 +260,11 @@ impl Manifest {
             let package = self.canonical(member)?;
             let component = Component {
                 pkg: package.to_owned(),
-                target: request.host.clone(),
+                target: if package == "rust-src" {
+                    "*".into()
+                } else {
+                    request.host.clone()
+                },
             };
             if package == "rust-mingw" && !closure.contains(&component) {
                 skipped.push(member.clone());
@@ -272,9 +277,14 @@ impl Manifest {
         }
         for member in &request.components {
             path(member)?;
+            let package = self.canonical(member)?;
             wanted.insert(Component {
-                pkg: self.canonical(member)?.to_owned(),
-                target: request.host.clone(),
+                pkg: package.to_owned(),
+                target: if package == "rust-src" {
+                    "*".into()
+                } else {
+                    request.host.clone()
+                },
             });
         }
         for target in &request.targets {
@@ -301,6 +311,13 @@ impl Manifest {
                     component.pkg, component.target
                 )));
             }
+            if component.pkg == "rust-src"
+                && self.raw.pkg.get("rust-src").is_none_or(|p| {
+                    p.version.split_whitespace().next() != Some(self.release.as_str())
+                })
+            {
+                return Err(invalid("rust-src release identity mismatch"));
+            }
             let target = self
                 .raw
                 .pkg
@@ -325,7 +342,11 @@ impl Manifest {
                 "clippy-preview" => "clippy",
                 other => other,
             };
-            let root = format!("{archive_package}-{}-{}", self.release, component.target);
+            let root = if component.pkg == "rust-src" && component.target == "*" {
+                format!("rust-src-{}", self.release)
+            } else {
+                format!("{archive_package}-{}-{}", self.release, component.target)
+            };
             let expected_url = format!(
                 "https://static.rust-lang.org/dist/{}/{}.tar.{}",
                 self.raw.date,
@@ -369,7 +390,7 @@ mod tests {
         let mut text = String::from(
             "manifest-version='2'\ndate='2026-10-15'\n[profiles]\nminimal=['rustc','cargo','rust-std','rust-mingw']\ndefault=['rustc','cargo','rust-std','rust-mingw','rust-docs','rustfmt','clippy']\n[renames.rustfmt]\nto='rustfmt-preview'\n[renames.clippy]\nto='clippy-preview'\n[pkg.rust]\nversion='1.99.1 (abc 2026-10-13)'\n[pkg.rust.target.aarch64-apple-darwin]\navailable=true\ncomponents=[{pkg='rustc',target='aarch64-apple-darwin'},{pkg='cargo',target='aarch64-apple-darwin'},{pkg='rust-std',target='aarch64-apple-darwin'}]\nextensions=[{pkg='rust-docs',target='aarch64-apple-darwin'},{pkg='rustfmt-preview',target='aarch64-apple-darwin'},{pkg='clippy-preview',target='aarch64-apple-darwin'},{pkg='rust-std',target='x86_64-unknown-linux-gnu'}]\n",
         );
-        for package in PACKAGES {
+        for package in PACKAGES.into_iter().filter(|p| *p != "rust-src") {
             text.push_str(&format!("[pkg.{package}]\nversion='component-version'\n"));
             let alias = package.strip_suffix("-preview").unwrap_or(package);
             for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
@@ -414,6 +435,43 @@ mod tests {
         );
         req.components.push("rust-mingw".into());
         assert!(manifest.select(&req).is_err());
+    }
+    #[test]
+    fn source_archive_is_targetless_and_bound_to_original_release() {
+        let text = manifest().replace("extensions=[", "extensions=[{pkg='rust-src',target='*'},")
+            + &format!(
+                "[pkg.rust-src]\nversion='1.99.1'\n[pkg.rust-src.target.'*']\navailable=true\nxz_url='https://static.rust-lang.org/dist/2026-10-15/rust-src-1.99.1.tar.xz'\nxz_hash='{}'\n",
+                "c".repeat(64)
+            );
+        let mut request = request();
+        request.components.push("rust-src".into());
+        let selection = Manifest::parse(text.as_bytes(), "1.99.1")
+            .unwrap()
+            .select(&request)
+            .unwrap();
+        let source = selection
+            .archives
+            .iter()
+            .find(|a| a.package == "rust-src")
+            .unwrap();
+        assert_eq!(source.target, "*");
+        assert_eq!(source.component, "rust-src");
+        assert_eq!(source.root, "rust-src-1.99.1");
+        for changed in [
+            text.replace("version='1.99.1'", "version='1.99.2'"),
+            text.replace("target='*'", "target='aarch64-apple-darwin'"),
+            text.replace(
+                "rust-src-1.99.1.tar",
+                "rust-src-1.99.1-aarch64-apple-darwin.tar",
+            ),
+        ] {
+            assert!(
+                Manifest::parse(changed.as_bytes(), "1.99.1")
+                    .unwrap()
+                    .select(&request)
+                    .is_err()
+            );
+        }
     }
     #[test]
     fn encoding_digest_and_exact_official_url_are_bound() {

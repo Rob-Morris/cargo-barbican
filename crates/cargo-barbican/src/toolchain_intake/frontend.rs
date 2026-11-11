@@ -26,6 +26,39 @@ pub(crate) fn is_static(cli: &Cli) -> bool {
     matches!(&cli.command,Command::Toolchain{command} if !matches!(command,ToolchainCommand::Check))
 }
 
+pub(crate) fn policy_init_root(cli: &Cli, current: &Path) -> Result<Option<PathBuf>> {
+    let Command::Policy {
+        command:
+            crate::cli::PolicyCommand::Init {
+                ci: Some(_),
+                ci_bootstrap,
+                ..
+            },
+    } = &cli.command
+    else {
+        return Ok(None);
+    };
+    let root = cli.repo.as_deref().unwrap_or(current);
+    let root = if root.is_absolute() {
+        root.to_owned()
+    } else {
+        current.join(root)
+    };
+    let malformed_current =
+        repo::read_optional(&root, Path::new("barbican.toml"))?.is_some_and(|bytes| {
+            std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(|text| barbican::BarbicanConfig::from_toml_str(text).ok())
+                .is_none()
+        });
+    if ci_bootstrap.is_some() || malformed_current {
+        return repo::scaffold_root(&root).map(Some);
+    }
+    Ok(repo::discover(current, cli.repo.as_deref())?
+        .filter(|repo| repo.config.toolchain.require_admission)
+        .map(|repo| repo.root))
+}
+
 pub(crate) fn run(
     cli: &Cli,
     current: &Path,
@@ -181,12 +214,6 @@ pub(crate) fn run(
     };
     let repo = resolve_repo(cli, current, options.standalone)?;
     let current_policy = review::invocation_policy(repo.as_ref(), options.min_age_days)?;
-    let stores = Stores::open(
-        current,
-        repo.as_ref().map(|r| r.root.as_path()),
-        cli.data_dir.as_deref(),
-        cli.cache_dir.as_deref(),
-    )?;
     let id = match id_text {
         Some(id) => digest(id)?,
         None => repo_review_id(
@@ -194,6 +221,36 @@ pub(crate) fn run(
                 .ok_or("admission-check requires --repo or an explicit review ID")?,
         )?,
     };
+    let approved = if let ToolchainCommand::Accept {
+        approved_repo: Some(root),
+        record,
+        ..
+    } = command
+    {
+        let absolute = |path: &Path| {
+            if path.is_absolute() {
+                path.to_owned()
+            } else {
+                current.join(path)
+            }
+        };
+        Some(super::approved::ApprovedInputs::capture(
+            repo.as_ref().ok_or(
+                "--approved-repo requires candidate repository governance, not --standalone",
+            )?,
+            &absolute(root),
+            &id,
+            &absolute(record),
+        )?)
+    } else {
+        None
+    };
+    let stores = Stores::open(
+        current,
+        repo.as_ref().map(|r| r.root.as_path()),
+        cli.data_dir.as_deref(),
+        cli.cache_dir.as_deref(),
+    )?;
     let seed = trust::bundled_seed()?;
     let freshness = freshness(
         options,
@@ -227,6 +284,9 @@ pub(crate) fn run(
             assessment = original;
         }
         let knowledge = admission::knowledge(&stores.data, &review.subject)?;
+        if let Some(approved) = &approved {
+            approved.recheck()?;
+        }
         let (accepted, operation) = acceptance::publish_personal(
             &stores.data,
             &id,
@@ -238,6 +298,9 @@ pub(crate) fn run(
             repo.as_ref(),
             now,
         )?;
+        if let Some(approved) = &approved {
+            approved.recheck()?;
+        }
         let admission = repo
             .as_ref()
             .map(|repo| {
@@ -313,6 +376,7 @@ pub(crate) fn run(
         ToolchainCommand::Install {
             rustup_executable,
             allow_initial_default,
+            add_components,
             ..
         } => {
             if !real_cli {
@@ -322,7 +386,13 @@ pub(crate) fn run(
             let (outcome, operation) = context.install(
                 &home,
                 rustup_executable,
-                *allow_initial_default,
+                if *add_components {
+                    super::installation::InstallMode::AddComponents
+                } else {
+                    super::installation::InstallMode::Install {
+                        allow_initial_default: *allow_initial_default,
+                    }
+                },
                 cancellation.flag(),
                 now,
             )?;
@@ -331,7 +401,7 @@ pub(crate) fn run(
             output(
                 stdout,
                 options.format,
-                &json!({"schema_version":1,"operation":"install","status":"installed-verified","review_id":id,"eligibility":operation,"already_present":outcome.already_present,"initial_default_assigned":outcome.initial_default_assigned,"checked_files":outcome.correspondence.checked_files}),
+                &json!({"schema_version":1,"operation":if *add_components { "add-components" } else { "install" },"status":"installed-verified","review_id":id,"eligibility":operation,"already_present":outcome.already_present,"initial_default_assigned":outcome.initial_default_assigned,"checked_files":outcome.correspondence.checked_files}),
             )
         }
         ToolchainCommand::Activate { .. } => {

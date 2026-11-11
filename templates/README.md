@@ -24,13 +24,20 @@ documentation that *uses* cargo-barbican.
   Activation stays explicit; review PATH, Cargo cwd and existing hooks first.
   CI needs operator-configured required checks/branch protection.
 
+- `ci/github-admission.yml` — opt-in protected-controller admission workflow,
+  rendered by `policy init --ci github --ci-bootstrap CONFIG.json`; see the
+  [CI authority and provider contract](../docs/user/ci.md#maintainer-dispatched-admission).
+
 `barbican.toml`, `deny.toml`, `reviewed-targets.toml`, and the
 `docs/dependency-reviews/` scaffold are also created directly by
 `cargo barbican policy init`. Supply `--toolchain <exact-channel>` when the
 consumer lacks `rust-toolchain.toml`; the tool creates that native pin only
-from the explicit operator choice. `cargo barbican policy init --ci github`
-additionally emits a ready-to-run enforcement workflow to
-`.github/workflows/barbican.yml`.
+from the explicit operator choice. For legacy non-admission consumers,
+`cargo barbican policy init --ci github` additionally emits the conventional
+`.github/workflows/barbican.yml` enforcement workflow. Admission-enabled
+consumers must use the direct trusted `cargo-barbican` executable and explicit
+`--ci-bootstrap CONFIG.json`; that separate workflow needs reviewed protected
+controller/provider rollout before use.
 
 ## Planned templates
 
@@ -42,7 +49,7 @@ additionally emits a ready-to-run enforcement workflow to
 Each template file shipped to a consumer should include a header comment:
 
 ```
-# Synced from cargo-barbican v0.40.0
+# Synced from cargo-barbican v0.41.0
 ```
 
 Template-specific follow-up comments may differ. Some copied templates, such

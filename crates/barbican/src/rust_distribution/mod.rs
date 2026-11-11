@@ -15,7 +15,8 @@ pub use manifest::{
 };
 pub use native_metadata::{
     check_rustup_config, check_rustup_default_assignment, check_rustup_default_restoration,
-    check_rustup_manifest, rustup_default, rustup_manifest_projection,
+    check_rustup_manifest, rustup_configured_components, rustup_default,
+    rustup_manifest_projection,
 };
 pub use pin_edit::replace_channel;
 pub use repository_selection::parse_repository_selection;

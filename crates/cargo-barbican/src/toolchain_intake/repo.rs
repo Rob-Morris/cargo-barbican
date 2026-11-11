@@ -38,31 +38,7 @@ impl RepoContext {
             .bytes
             .as_deref()
             .ok_or("explicit repository has no Cargo.toml")?;
-        let directive = parse_workspace_root_directive("Cargo.toml", text(manifest)?)
-            .map_err(|e| e.to_string())?;
-        if matches!(directive, WorkspaceRootDirective::MemberOf { .. }) {
-            return Err("package.workspace points elsewhere; pass --repo with the actual governance root or cd to that root".into());
-        }
-        if !matches!(directive, WorkspaceRootDirective::WorkspaceRoot) {
-            for ancestor in root.ancestors().skip(1) {
-                if let Some(bytes) = read_optional(ancestor, Path::new("barbican.toml"))? {
-                    let config =
-                        BarbicanConfig::from_toml_str(text(&bytes)?).map_err(|e| e.to_string())?;
-                    if config.toolchain.require_admission {
-                        return Err("explicit repository is nested under an admission-governed root; select that governance root before Cargo discovery".into());
-                    }
-                }
-                if let Some(bytes) = read_optional(ancestor, Path::new("Cargo.toml"))?
-                    && matches!(
-                        parse_workspace_root_directive("ancestor Cargo.toml", text(&bytes)?)
-                            .map_err(|e| e.to_string())?,
-                        WorkspaceRootDirective::WorkspaceRoot
-                    )
-                {
-                    return Err("explicit repository is nested under another workspace root; use its actual governance root before Cargo discovery".into());
-                }
-            }
-        }
+        validate_governance_root(&root, manifest)?;
         let config = match &inputs[1].bytes {
             Some(bytes) => {
                 BarbicanConfig::from_toml_str(text(bytes)?).map_err(|e| e.to_string())?
@@ -98,6 +74,43 @@ impl RepoContext {
         }
         Ok(())
     }
+}
+
+pub(super) fn scaffold_root(root: &Path) -> Result<PathBuf> {
+    let root = fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let manifest = read_optional(&root, Path::new("Cargo.toml"))?
+        .ok_or("explicit repository has no Cargo.toml")?;
+    validate_governance_root(&root, &manifest)?;
+    Ok(root)
+}
+
+fn validate_governance_root(root: &Path, manifest: &[u8]) -> Result<()> {
+    let directive =
+        parse_workspace_root_directive("Cargo.toml", text(manifest)?).map_err(|e| e.to_string())?;
+    if matches!(directive, WorkspaceRootDirective::MemberOf { .. }) {
+        return Err("package.workspace points elsewhere; pass --repo with the actual governance root or cd to that root".into());
+    }
+    if !matches!(directive, WorkspaceRootDirective::WorkspaceRoot) {
+        for ancestor in root.ancestors().skip(1) {
+            if let Some(bytes) = read_optional(ancestor, Path::new("barbican.toml"))? {
+                let config =
+                    BarbicanConfig::from_toml_str(text(&bytes)?).map_err(|e| e.to_string())?;
+                if config.toolchain.require_admission {
+                    return Err("explicit repository is nested under an admission-governed root; select that governance root before Cargo discovery".into());
+                }
+            }
+            if let Some(bytes) = read_optional(ancestor, Path::new("Cargo.toml"))?
+                && matches!(
+                    parse_workspace_root_directive("ancestor Cargo.toml", text(&bytes)?)
+                        .map_err(|e| e.to_string())?,
+                    WorkspaceRootDirective::WorkspaceRoot
+                )
+            {
+                return Err("explicit repository is nested under another workspace root; use its actual governance root before Cargo discovery".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Ambiguous package/workspace membership is never delegated to Cargo pre-trust.

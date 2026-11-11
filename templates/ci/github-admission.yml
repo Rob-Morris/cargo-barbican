@@ -1,0 +1,222 @@
+# Synced from cargo-barbican v0.41.0
+# Review the version-matched docs/user/ci.md#maintainer-dispatched-admission.
+# A trusted maintainer must dispatch from the reviewed immutable protected
+# controller tag. Optional actor/event policies add defence in depth.
+# This file cannot authenticate its own approval.
+name: barbican admission
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact candidate commit in this repository
+        required: true
+        type: string
+      base_sha:
+        description: Exact comparison base commit in this repository
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  admission:
+    runs-on: macos-26
+    defaults:
+      run:
+        shell: bash
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      BASE_SHA: ${{ inputs.base_sha }}
+      REVIEW_ID: '@@REVIEW_ID@@'
+    steps:
+      - id: controller
+        name: Check the selected controller and qualified host
+        env:
+          CONTROLLER_REF: ${{ github.ref }}
+          PROTECTED_REF: ${{ github.ref_protected }}
+        run: |
+          @@SIGNAL_GUARD@@
+          [[ "$CONTROLLER_REF" == 'refs/tags/@@CONTROLLER_TAG@@' && "$PROTECTED_REF" == true ]] || {
+            echo 'Use the independently reviewed protected immutable controller tag.' >&2; exit 1;
+          }
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ && "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'Candidate and base must be explicit full lowercase commit SHAs.' >&2; exit 1;
+          }
+          [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
+            echo 'Admission bootstrap requires qualified macOS ARM64.' >&2; exit 1;
+          }
+      - id: provider_checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: '@@PROVIDER_REPOSITORY@@'
+          ref: '@@PROVIDER_REVISION@@'
+          path: provider
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - id: provision
+        name: Provision independently trusted applying tools
+        run: |
+          @@SIGNAL_GUARD@@
+          [[ "$(git -C "$GITHUB_WORKSPACE/provider" rev-parse HEAD)" == '@@PROVIDER_REVISION@@' ]]
+          provider_path="$GITHUB_WORKSPACE/provider"
+          IFS=/ read -ra provider_parts <<< '@@PROVIDER_SCRIPT@@'
+          for part in "${provider_parts[@]}"; do
+            provider_path="$provider_path/$part"
+            [[ ! -L "$provider_path" ]] || { echo 'Provider path must not contain symlinks.' >&2; exit 1; }
+          done
+          [[ -f "$provider_path" ]]
+          tools_root=$(mktemp -d "$RUNNER_TEMP/barbican-tools.XXXXXX")
+          # This exact reviewed provider runs before any candidate is checked out.
+          # It must use an already trusted host compiler if it builds Barbican.
+          bash "$GITHUB_WORKSPACE/provider/@@PROVIDER_SCRIPT@@" "$tools_root"
+          for tool in cargo-barbican rustup cargo rustc rustdoc cargo-deny cargo-audit; do
+            [[ -x "$tools_root/bin/$tool" ]] || { echo "Missing trusted prerequisite: $tool" >&2; exit 1; }
+          done
+          private_root=$(mktemp -d "$RUNNER_TEMP/barbican-state.XXXXXX")
+          mkdir -m 700 "$private_root/data" "$private_root/cache" "$private_root/rustup" "$private_root/cargo"
+          {
+            printf 'BARBICAN_TOOLS=%s\n' "$tools_root"
+            printf 'BARBICAN_DATA=%s/data\nBARBICAN_CACHE=%s/cache\n' "$private_root" "$private_root"
+            printf 'RUSTUP_HOME=%s/rustup\nCARGO_HOME=%s/cargo\n' "$private_root" "$private_root"
+            printf 'RUSTUP_AUTO_INSTALL=0\nRUSTUP_NO_UPDATE_CHECK=1\n'
+          } >> "$GITHUB_ENV"
+          printf '%s/bin\n' "$tools_root" >> "$GITHUB_PATH"
+      - id: approved_checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: '@@APPROVED_REPOSITORY@@'
+          ref: '@@APPROVED_REVISION@@'
+          path: approved
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - id: candidate_checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - id: accept
+        name: Compare protected inputs and establish fresh candidate-local acceptance
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
+          [[ "$(git -C "$GITHUB_WORKSPACE/approved" rev-parse HEAD)" == '@@APPROVED_REVISION@@' ]]
+          [[ -z "$(ls -A "$BARBICAN_DATA")" && -z "$(ls -A "$RUSTUP_HOME")" ]]
+          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" toolchain accept "$REVIEW_ID" --approved-repo "$GITHUB_WORKSPACE/approved" --record "$GITHUB_WORKSPACE/approved/docs/dependency-reviews/toolchains/$REVIEW_ID/review.md"
+      - id: install
+        name: Install only the accepted target through the qualified evaluator
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          (umask 022; "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" toolchain install "$REVIEW_ID" --rustup-home "$RUSTUP_HOME" --rustup-executable "$BARBICAN_TOOLS/bin/rustup" --allow-initial-default)
+      - id: installed
+        name: Verify installed correspondence
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" toolchain installation-check "$REVIEW_ID" --rustup-home "$RUSTUP_HOME"
+      - id: admission
+        name: Verify current candidate admission
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" toolchain admission-check "$REVIEW_ID" --rustup-home "$RUSTUP_HOME"
+      - id: conformance
+        name: Check toolchain before Cargo execution
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" toolchain check
+      - id: fetch
+        name: Fetch locked dependencies for all targets
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          cargo fetch --locked
+      - id: pre_release
+        name: Pre-release supply-chain gate
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" gatehouse pre-release
+      - id: evidence_toolchain
+        name: Recheck eligibility before comparative evidence
+        if: ${{ !cancelled() && steps.fetch.outcome == 'success' && steps.fetch.outputs.cancelled != 'true' && steps.pre_release.outputs.cancelled != 'true' }}
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" toolchain check
+      - id: base
+        name: Check explicit comparison base
+        if: ${{ !cancelled() && steps.fetch.outcome == 'success' && steps.fetch.outputs.cancelled != 'true' && steps.pre_release.outputs.cancelled != 'true' && steps.evidence_toolchain.outputs.cancelled != 'true' }}
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          git cat-file -e "$BASE_SHA^{commit}"
+      - id: age_lock
+        name: Compare dependency release age
+        if: ${{ !cancelled() && steps.fetch.outcome == 'success' && steps.evidence_toolchain.outcome == 'success' && steps.base.outcome == 'success' && steps.pre_release.outputs.cancelled != 'true' && steps.evidence_toolchain.outputs.cancelled != 'true' && steps.base.outputs.cancelled != 'true' }}
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" age-lock --base-ref "$BASE_SHA"
+      - id: assess
+        name: Assess dependency changes
+        if: ${{ !cancelled() && steps.fetch.outcome == 'success' && steps.evidence_toolchain.outcome == 'success' && steps.base.outcome == 'success' && steps.pre_release.outputs.cancelled != 'true' && steps.evidence_toolchain.outputs.cancelled != 'true' && steps.base.outputs.cancelled != 'true' && steps.age_lock.outputs.cancelled != 'true' }}
+        working-directory: candidate
+        run: |
+          @@SIGNAL_GUARD@@
+          unset RUSTUP_TOOLCHAIN
+          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" assess --base-ref "$BASE_SHA"
+      - id: summary
+        name: Summarise the maintainer-dispatched admission run
+        if: ${{ !cancelled() }}
+        env:
+          CONTROLLER_SHA: ${{ github.workflow_sha }}
+          ACCEPT: ${{ steps.accept.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          INSTALLED: ${{ steps.installed.outcome }}
+          ADMISSION: ${{ steps.admission.outcome }}
+          CONFORMANCE: ${{ steps.conformance.outcome }}
+          FETCH: ${{ steps.fetch.outcome }}
+          GATE: ${{ steps.pre_release.outcome }}
+          ELIGIBILITY: ${{ steps.evidence_toolchain.outcome }}
+          BASE: ${{ steps.base.outcome }}
+          AGE: ${{ steps.age_lock.outcome }}
+          ASSESS: ${{ steps.assess.outcome }}
+          SIGNAL_CANCELLATIONS: ${{ steps.controller.outputs.cancelled }} ${{ steps.provision.outputs.cancelled }} ${{ steps.accept.outputs.cancelled }} ${{ steps.install.outputs.cancelled }} ${{ steps.installed.outputs.cancelled }} ${{ steps.admission.outputs.cancelled }} ${{ steps.conformance.outputs.cancelled }} ${{ steps.fetch.outputs.cancelled }} ${{ steps.pre_release.outputs.cancelled }} ${{ steps.evidence_toolchain.outputs.cancelled }} ${{ steps.base.outputs.cancelled }} ${{ steps.age_lock.outputs.cancelled }} ${{ steps.assess.outputs.cancelled }}
+        run: |
+          @@SIGNAL_GUARD@@
+          identity() { if [[ "$1" =~ ^[0-9a-f]{40}$ ]]; then printf '%s' "$1"; else printf unavailable; fi; }
+          outcome() { case "$1" in success|failure|cancelled) printf '%s' "$1";; *) printf 'unavailable (prerequisite did not pass)';; esac; }
+          {
+            printf '%s\n' '## Maintainer-dispatched admission' ''
+            printf 'Controller: %s\n\nCandidate: %s\n\nComparison base: %s\n\n' "$(identity "$CONTROLLER_SHA")" "$(identity "$CANDIDATE_SHA")" "$(identity "$BASE_SHA")"
+            printf '%s\n' 'Provider: @@PROVIDER_REPOSITORY@@ @ @@PROVIDER_REVISION@@' '' 'Approved inputs: @@APPROVED_REPOSITORY@@ @ @@APPROVED_REVISION@@' '' 'Review: @@REVIEW_ID@@' '' '| Check | Native outcome |' '| --- | --- |'
+            for row in "Acceptance:$ACCEPT" "Install:$INSTALL" "Installed correspondence:$INSTALLED" "Admission:$ADMISSION" "Conformance:$CONFORMANCE" "Fetch:$FETCH" "Gate:$GATE" "Evidence eligibility:$ELIGIBILITY" "Base:$BASE" "age-lock:$AGE" "assess:$ASSESS"; do
+              printf '| %s | %s |\n' "${row%%:*}" "$(outcome "${row#*:}")"
+            done
+            printf '\n%s\n' 'Unavailable evidence is not a pass. Failures retain their native logs and keep this run red. This is not a candidate-SHA required check and does not govern other workflows.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$SIGNAL_CANCELLATIONS" == *true* ]]; then
+            echo 'A stage observed cancellation; later execution/evidence is unavailable.' >&2
+            exit 130
+          fi

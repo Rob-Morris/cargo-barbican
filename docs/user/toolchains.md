@@ -60,7 +60,10 @@ silently discard requested components or accept extra installed files.
 Each selected archive has a component evidence row: authenticated archive identity,
 source revision and package relationship, represented advisory corpus, and explicit
 coverage limits. Rustc/rustdoc, Cargo, std, docs, Clippy and rustfmt do not acquire
-coverage merely by sharing a Rust release. Docs include a static inventory of
+coverage merely by sharing a Rust release. Target-independent `rust-src` uses
+the StandardLibrary source relationship and attributes applicable std findings
+to both source and binary selections. Its represented lockfile does not cover
+every libunwind/vendor/path source; those omissions remain explicit. Docs include a static inventory of
 files and embedded JavaScript/CSS; these assets are not executed, and their full
 dependency graph and browser behaviour remain for explicit assessment. Missing
 required provenance blocks acceptance; a stated residual uncertainty can be
@@ -95,6 +98,28 @@ internally probe `rustc`, so acceptance and exact input checks happen before
 Rustup is invoked. Verification after installation does not retrospectively
 authorise a first execution.
 
+To add supported components to an existing exact-release slot, expand the
+repository selection (or the standalone review options), review and accept the
+**complete final selection**, then run:
+
+```sh
+cargo-barbican toolchain install <final-review-id> --add-components \
+  --rustup-executable <absolute-trusted-rustup-path>
+```
+
+This mode verifies the whole existing base against the final authenticated
+inputs before adding only the missing components. It needs no separate baseline
+review ID and grants no historical execution approval. It refuses an absent
+slot, removals, unknown extras or changed contents; `--allow-initial-default`
+cannot be combined with it. An already complete matching slot is a static
+verified no-op, without probing Rustup or requiring fresh creation modes.
+The earlier narrower review no longer describes the expanded installed tree;
+other repositories must deliberately admit the complete selection themselves.
+Failure or cancellation can retain partial additions for inspection, without
+a rollback promise. A binding requires complete final verification; cancellation
+observed after publication reports and retains the completed binding. Retry only after reconciling
+the retained state with the accepted final inputs.
+
 After install or adoption, diagnose installed correspondence or continuing
 repository admission with the same review ID:
 
@@ -102,6 +127,9 @@ repository admission with the same review ID:
 cargo-barbican toolchain installation-check <review-id>
 cargo-barbican toolchain admission-check <review-id>
 ```
+
+`installation-check` is static inspection and takes no cached-admission mode;
+omit `--cached-admission` and `--cache-reason` on that command.
 
 `admission-check` requires a matching installation; it is not a pre-install
 eligibility check. Acceptance and installation apply that earlier decision.
@@ -237,15 +265,25 @@ Reviewing metadata for a host does not qualify its installer. See the
 subcommand diagnostics for the required evaluator; do not work around a
 refusal by running the candidate to identify it.
 
-The current qualified evaluator is native macOS ARM64 Rustup 1.29.0, exact
-executable SHA256
-`16c7599bf448e4e7512779154f6b05042bf2ff715e5e09d9cf5d465a3b750496`
-(the reviewed Homebrew 1.29.0_1 libexec build). The current CLI review route
-selects XZ inputs; it does not offer a Gzip selection or fallback.
-Barbican does not install that evaluator automatically. A version banner alone
-does not qualify a different binary. Qualified native selections cover minimal
-and default profiles, including explicit host docs, Clippy and rustfmt additions.
-Other hosts, cross targets and components outside that set remain unavailable.
+The qualified native host is macOS ARM64. Evaluators are a closed set of exact
+protected regular executable files (symlinks and multiple hardlinks refuse):
+
+| Rustup build | Executable SHA256 |
+| --- | --- |
+| Official prebuilt 1.29.3 ARM64 | `63752a1919a3a4793173ec70f8f212621a7ce38ba6a246095984482f4de20f9f` |
+| Existing reviewed Homebrew 1.29.0_1 libexec | `16c7599bf448e4e7512779154f6b05042bf2ff715e5e09d9cf5d465a3b750496` |
+
+Use an already trusted exact build; Barbican does not download, install or
+update it. The official build's [provenance and qualification record](../dependency-reviews/2026-11-12-official-rustup-evaluator.md)
+retains supplier-build uncertainty. A version banner alone cannot qualify a
+different binary. Identity is checked before isolated help or effects, and the
+multicall executable is deliberately invoked as `rustup`.
+
+The CLI review route selects XZ inputs; it offers no Gzip selection or fallback.
+Supported selections cover minimal/default profiles, host docs/Clippy/rustfmt
+and target-independent `rust-src`, through fresh install, static adoption and
+explicit reviewed component additions. Other hosts, cross targets and components
+outside that set remain unavailable.
 The [authentic default/docs qualification](../dependency-reviews/2026-11-10-native-default-docs-qualification.md)
 exercises already-trusted Rust 1.95.0 through the production mapping and public
 admission workflow. It qualifies the machinery; each selected release still
@@ -255,15 +293,37 @@ render it, execute its scripts or establish repository compatibility.
 
 ## CI Bootstrap
 
-Provision an already trusted Barbican binary and qualified Rustup before
-installing or launching the target compiler. Establish explicit local
-acceptance from the reviewed portable inputs, install or adopt under current
-repository policy, verify local correspondence, then run the existing gate.
-Start with empty per-user approval state when testing this sequence. A
-cached approval directory is not a substitute for local acceptance.
+With admission enabled, use the already trusted direct Barbican executable
+to generate the [maintainer-dispatched admission workflow](ci.md#maintainer-dispatched-admission):
 
-The existing generated CI template installs Rust before its normal gate; it
-does not by itself provide pre-execution admission. Opting into admission
-requires the explicit bootstrap above before that install or any Cargo
-launcher. See [CI](ci.md) and [hardening](hardening.md) for the existing gate
-boundaries.
+```sh
+cargo-barbican policy init --ci github --ci-bootstrap ci-bootstrap.json
+```
+
+The linked guide defines the strict bootstrap JSON, provider layout and
+protected controller setup. A trusted maintainer dispatches from the reviewed
+immutable protected tag, with exact candidate and comparison-base commits.
+Optional actor/event execution policies add defence in depth; they are not a
+product availability prerequisite. The resulting run is not an automatic
+required check on the candidate SHA and does not govern other workflows.
+
+The immutable reviewed provider supplies trusted Barbican, the qualified
+Rustup evaluator and reviewed scanner delegates before candidate checkout.
+Its `cargo`, `rustc` and `rustdoc` must be trusted Rustup proxies selecting the
+newly admitted private toolchain, not fixed binaries from the provider's
+bootstrap compiler. Candidate stages unset `RUSTUP_TOOLCHAIN` and use fresh
+private Cargo/Rustup and data/cache roots.
+
+Before installing or probing the target, `toolchain accept --approved-repo`
+compares candidate governance and the complete selected review bundle against
+the independently trusted immutable approved checkout, then establishes fresh
+local acceptance in the candidate's actual root. The applying controller
+authenticates approval origin; the comparison option only checks inputs.
+Normal fresh-evidence requirements remain active. Installation, installed
+correspondence, admission and conformance checks precede Cargo fetch and the
+existing gate. Cached approval directories are not reused.
+
+The separate generated admission workflow preserves existing files. Review
+and disable or migrate legacy install-first workflows when adopting this
+boundary. See [CI](ci.md) and [hardening](hardening.md) for its scope and the
+existing gate boundaries.

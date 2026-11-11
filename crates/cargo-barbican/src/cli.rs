@@ -208,7 +208,7 @@ pub(crate) enum Command {
             cargo-barbican with. Its one subcommand, init, creates any missing barbican.toml, \
             deny.toml, reviewed-targets.toml, and docs/dependency-reviews/ files — and, with an \
             explicit --toolchain pin, rust-toolchain.toml — and, with \
-            --ci, a ready-to-run CI enforcement workflow — while preserving whatever is already \
+            --ci, a CI workflow appropriate to the configured admission mode — while preserving whatever is already \
             present. It scaffolds structure only: it does not review, certify, or enforce any \
             dependency. Run it once when first adopting cargo-barbican in a repo."
     )]
@@ -328,6 +328,12 @@ pub(crate) enum ToolchainCommand {
         review_id: String,
         #[arg(long)]
         record: PathBuf,
+        #[arg(
+            long,
+            value_name = "ROOT",
+            help = "Require exact toolchain inputs to match an independently approved repository checkout before local acceptance; the caller authenticates its origin"
+        )]
+        approved_repo: Option<PathBuf>,
         #[command(flatten)]
         options: ToolchainOperationArgs,
     },
@@ -348,6 +354,12 @@ pub(crate) enum ToolchainCommand {
         rustup_executable: PathBuf,
         #[arg(long)]
         allow_initial_default: bool,
+        #[arg(
+            long,
+            conflicts_with = "allow_initial_default",
+            help = "Add missing accepted components to an existing verified slot; a complete slot is a verified no-op"
+        )]
+        add_components: bool,
         #[command(flatten)]
         options: ToolchainOperationArgs,
     },
@@ -458,9 +470,11 @@ pub(crate) enum PolicyCommand {
             existing barbican.toml and rust-toolchain.toml policy. An absent toolchain file is \
             created only from an explicit exact --toolchain value. Does not review or certify \
             existing dependencies. With \
-            --ci, also emits a ready-to-run CI enforcement workflow, failing closed rather than \
+            --ci, also emits a CI workflow, failing closed rather than \
             overwriting an existing workflow file. With --pre-commit-hook, copies a disabled \
             advisory hook to .barbican/hooks/pre-commit; review and explicitly activate it. \
+            Admission-enabled repositories require --ci-bootstrap with independently trusted \
+            provider and approved-review revisions for a maintainer-dispatched workflow. \
             See the version-matched adoption and manual hook guides printed by init."
     )]
     Init {
@@ -476,6 +490,13 @@ pub(crate) enum PolicyCommand {
             help = "Also emit a CI enforcement workflow that runs the gate (fails closed if the workflow file already exists)"
         )]
         ci: Option<CiSystem>,
+        #[arg(
+            long,
+            value_name = "CONFIG",
+            requires = "ci",
+            help = "Generate a maintainer-dispatched admission workflow from explicit trusted bootstrap inputs"
+        )]
+        ci_bootstrap: Option<PathBuf>,
         #[arg(
             long,
             help = "Copy an optional non-executable hook to .barbican/hooks/pre-commit (requires explicit activation)"
@@ -626,4 +647,24 @@ pub(crate) enum ToolchainTrustCommand {
     Approve {
         proposal_id: String,
     },
+}
+
+#[cfg(test)]
+mod additive_install_tests {
+    use super::*;
+
+    #[test]
+    fn addition_is_explicit_and_conflicts_with_initial_default_intent() {
+        let args = [
+            "cargo-barbican",
+            "toolchain",
+            "install",
+            "review",
+            "--rustup-executable",
+            "/trusted/rustup",
+            "--add-components",
+        ];
+        assert!(Cli::try_parse_from(args).is_ok());
+        assert!(Cli::try_parse_from(args.into_iter().chain(["--allow-initial-default"])).is_err());
+    }
 }

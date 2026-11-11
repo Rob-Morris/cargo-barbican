@@ -1,12 +1,15 @@
+use super::super::operation::ComponentAddition;
 use super::*;
 use barbican::rust_distribution::{
     ArchiveIdentity, Encoding, Manifest, check_rustup_default_assignment,
-    check_rustup_default_restoration, replace_channel, rustup_default,
+    check_rustup_default_restoration, replace_channel, rustup_configured_components,
+    rustup_default,
 };
 use barbican::toolchain_admission::digest_bytes;
 use std::fs::{DirBuilder, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
@@ -30,6 +33,12 @@ impl SelectedInputs<'_> {
             cancelled,
         )
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum InstallMode {
+    Install { allow_initial_default: bool },
+    AddComponents,
 }
 
 pub(crate) struct InstallOutcome {
@@ -123,6 +132,7 @@ fn file_url(path: &Path) -> Result<String> {
 fn native_command(executable: &Path, home: &Path, scratch: &Scratch) -> Result<Command> {
     let mut command = Command::new(executable);
     command
+        .arg0("rustup")
         .env_clear()
         .current_dir(&scratch.path)
         .env("PATH", "/usr/bin:/bin")
@@ -144,7 +154,7 @@ fn native_command(executable: &Path, home: &Path, scratch: &Scratch) -> Result<C
     Ok(command)
 }
 
-fn evaluator(executable: &Path) -> Result<()> {
+fn evaluator(executable: &Path) -> Result<&'static str> {
     compiled_host()?;
     files::ancestors(executable.parent().ok_or("Rustup path has no parent")?)?;
     let metadata = fs::symlink_metadata(executable).map_err(error)?;
@@ -162,12 +172,9 @@ fn evaluator(executable: &Path) -> Result<()> {
         return Err("Rustup evaluator changed".into());
     }
     let (sha, _) = digest_reader(file, 100 * 1024 * 1024).map_err(error)?;
-    if sha.as_str() != QUALIFIED_RUSTUP_SHA256 {
-        return Err(format!(
-            "unqualified native Rustup build; required aarch64-apple-darwin Rustup 1.29.0 SHA256 {QUALIFIED_RUSTUP_SHA256}; no automatic evaluator fetch or diagnostic fallback"
-        ));
-    }
-    Ok(())
+    qualified_rustup_version(sha.as_str()).ok_or_else(|| format!(
+        "unqualified native Rustup build; required aarch64-apple-darwin reviewed SHA256 {QUALIFIED_RUSTUP_SHA256} (1.29.0) or {OFFICIAL_RUSTUP_SHA256} (1.29.3); no automatic evaluator fetch or diagnostic fallback"
+    ))
 }
 
 fn prepare_mirror(
@@ -290,14 +297,21 @@ pub(crate) fn install_selected(
     archives: &[(ArchiveIdentity, PathBuf)],
     rustup_home: &Path,
     executable: &Path,
-    allow_initial_default: bool,
+    mode: InstallMode,
     cancelled: &AtomicBool,
-    mut recheck: impl FnMut() -> Result<()>,
+    mut recheck: impl FnMut(Option<&ComponentAddition>) -> Result<()>,
 ) -> Result<InstallOutcome> {
+    let adding = matches!(mode, InstallMode::AddComponents);
+    let allow_initial_default = matches!(
+        mode,
+        InstallMode::Install {
+            allow_initial_default: true
+        }
+    );
     if cancelled.load(Ordering::SeqCst) {
         return Err("cancelled before installation".into());
     }
-    recheck()?;
+    recheck(None)?;
     let expected =
         ExpectedInstallation::derive(inputs.selection, inputs.manifest, inputs.inventories)?;
     let uid = super::super::store::effective_owner()?;
@@ -320,6 +334,9 @@ pub(crate) fn install_selected(
         if e.kind() != std::io::ErrorKind::NotFound {
             return Err(error(e));
         }
+        if adding {
+            return Err("add-components requires an existing occupied toolchain slot".into());
+        }
         if !allow_initial_default {
             return Err("Rustup home/default absent; explicit initial-default intent is required before installation".into());
         }
@@ -335,10 +352,11 @@ pub(crate) fn install_selected(
         inputs.selection.release, inputs.selection.host
     ));
     match fs::symlink_metadata(&slot) {
+        Ok(_) if adding => (),
         Ok(_) => {
             let correspondence = (|| {
                 let correspondence = inputs.verify(rustup_home, cancelled)?;
-                recheck()?;
+                recheck(None)?;
                 check_cancelled(cancelled, "before existing installation success")?;
                 Ok(correspondence)
             })().map_err(|reason: String| format!("{reason}; existing installed data retained at {}; default and repository pin unchanged", slot.display()))?;
@@ -348,13 +366,83 @@ pub(crate) fn install_selected(
                 initial_default_assigned: false,
             });
         }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && adding => {
+            return Err("add-components requires an existing occupied toolchain slot".into());
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
         Err(e) => return Err(error(e)),
     }
+    let base = if adding {
+        let config = CapturedFile::capture(
+            &slot.join("lib/rustlib/multirust-config.toml"),
+            uid,
+            8 * 1024 * 1024,
+        )?;
+        let claims = rustup_configured_components(
+            inputs.manifest,
+            &inputs.selection.host,
+            config
+                .bytes
+                .as_deref()
+                .ok_or("add-components requires an existing occupied toolchain slot")?,
+        )
+        .map_err(|e| e.to_string())?;
+        let mut selection = inputs.selection.clone();
+        selection
+            .archives
+            .retain(|a| claims.contains_key(&(a.package.clone(), a.target.clone())));
+        if selection.archives.len() != claims.len() {
+            return Err(
+                "add-components requires an installed subset of the final accepted selection"
+                    .into(),
+            );
+        }
+        if selection.archives.len() == inputs.selection.archives.len() {
+            let correspondence = inputs.verify(rustup_home, cancelled)?;
+            recheck(Some(&ComponentAddition {
+                installed_components: claims.keys().cloned().collect(),
+                added_components: vec![],
+            }))?;
+            check_cancelled(cancelled, "before complete additive installation success")?;
+            return Ok(InstallOutcome {
+                correspondence,
+                already_present: true,
+                initial_default_assigned: false,
+            });
+        }
+        let inventories: Vec<_> = inputs
+            .inventories
+            .iter()
+            .filter(|i| selection.archives.contains(&i.identity))
+            .cloned()
+            .collect();
+        let base = ExpectedInstallation::derive(&selection, inputs.manifest, &inventories)?;
+        base.verify(&slot, uid, cancelled)?;
+        let identities = base.preserved_identities(&slot)?;
+        config.recheck()?;
+        recheck(Some(&ComponentAddition {
+            installed_components: selection
+                .archives
+                .iter()
+                .map(|a| (a.package.clone(), a.target.clone()))
+                .collect(),
+            added_components: inputs
+                .selection
+                .archives
+                .iter()
+                .filter(|a| !selection.archives.contains(a))
+                .map(|a| (a.package.clone(), a.target.clone()))
+                .collect(),
+        }))?;
+        Some((selection, inventories, identities, claims))
+    } else {
+        None
+    };
     let settings = CapturedFile::capture(&rustup_home.join("settings.toml"), uid, 2 * 1024 * 1024)?;
-    let no_default = rustup_default(settings.bytes.as_deref())
-        .map_err(|e| e.to_string())?
-        .is_none();
+    let no_default = !adding
+        && rustup_default(settings.bytes.as_deref())
+            .map_err(|e| e.to_string())?
+            .is_none();
     if no_default && !allow_initial_default {
         return Err("Rustup has no effective default; installation would assign this toolchain after its probe; explicit initial-default intent is required".into());
     }
@@ -380,7 +468,7 @@ pub(crate) fn install_selected(
     )?;
     let scratch = Scratch::new()?;
     scratch.require_native_creation_modes()?;
-    evaluator(executable)?;
+    let evaluator_version = evaluator(executable)?;
     scratch.directory("cargo")?;
     scratch.directory("identity-home")?;
     scratch.write("fallback.toml", b"version = '12'\n")?;
@@ -393,12 +481,18 @@ pub(crate) fn install_selected(
         cancelled,
         Duration::from_secs(10),
     )?;
-    if !output.status.success() || !output.stdout.starts_with(b"rustup 1.29.0 ") {
+    if !output.status.success()
+        || !output
+            .stdout
+            .starts_with(format!("rustup {evaluator_version} ").as_bytes())
+    {
         return Err("qualified Rustup isolated help identity failed".into());
     }
     recheck_mirror(inputs, &scratch)?;
-    evaluator(executable)?;
-    recheck()?;
+    if evaluator(executable)? != evaluator_version {
+        return Err("qualified Rustup build changed during operation".into());
+    }
+    recheck(None)?;
     home.recheck()?;
     settings.recheck()?;
     update_hash.recheck()?;
@@ -420,24 +514,48 @@ pub(crate) fn install_selected(
             }
         }
     }
-    match fs::symlink_metadata(&slot) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-        _ => return Err("target slot appeared or became unreadable before native handoff".into()),
+    if let Some((selection, inventories, identities, _)) = &base {
+        let base = ExpectedInstallation::derive(selection, inputs.manifest, inventories)?;
+        base.verify(&slot, uid, cancelled)?;
+        base.recheck_preserved_identities(&slot, identities)?;
+    } else {
+        match fs::symlink_metadata(&slot) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            _ => {
+                return Err(
+                    "target slot appeared or became unreadable before native handoff".into(),
+                );
+            }
+        }
     }
     let mut command = native_command(executable, rustup_home, &scratch)?;
-    command.args([
-        "toolchain",
-        "install",
-        &format!("{}-{}", inputs.selection.release, inputs.selection.host),
-        "--profile",
-        &inputs.subject.record().profile,
-        "--no-self-update",
-    ]);
-    for component in &inputs.subject.record().requested_components {
-        command.args(["--component", component]);
-    }
-    for target in &inputs.subject.record().requested_targets {
-        command.args(["--target", target]);
+    if let Some((selection, _, _, _)) = &base {
+        command.args([
+            "component",
+            "add",
+            "--toolchain",
+            &format!("{}-{}", inputs.selection.release, inputs.selection.host),
+        ]);
+        for archive in &inputs.selection.archives {
+            if !selection.archives.contains(archive) {
+                command.arg(&archive.package);
+            }
+        }
+    } else {
+        command.args([
+            "toolchain",
+            "install",
+            &format!("{}-{}", inputs.selection.release, inputs.selection.host),
+            "--profile",
+            &inputs.subject.record().profile,
+            "--no-self-update",
+        ]);
+        for component in &inputs.subject.record().requested_components {
+            command.args(["--component", component]);
+        }
+        for target in &inputs.subject.record().requested_targets {
+            command.args(["--target", target]);
+        }
     }
     let execution = process::run(
         &mut command,
@@ -480,8 +598,33 @@ pub(crate) fn install_selected(
         if !no_default {
             settings.recheck()?;
         }
-        recheck()?;
+        recheck(None)?;
         let checked_files = expected.verify(&slot, uid, cancelled)?;
+        if let Some((selection, inventories, identities, claims)) = &base {
+            ExpectedInstallation::derive(selection, inputs.manifest, inventories)?
+                .recheck_preserved_identities(&slot, identities)?;
+            update_hash.recheck()?;
+            let config = CapturedFile::capture(
+                &slot.join("lib/rustlib/multirust-config.toml"),
+                uid,
+                8 * 1024 * 1024,
+            )?;
+            let final_claims = rustup_configured_components(
+                inputs.manifest,
+                &inputs.selection.host,
+                config
+                    .bytes
+                    .as_deref()
+                    .ok_or("installed config disappeared")?,
+            )
+            .map_err(|e| e.to_string())?;
+            if claims
+                .iter()
+                .any(|(component, extension)| final_claims.get(component) != Some(extension))
+            {
+                return Err("component addition changed existing component metadata".into());
+            }
+        }
         check_cancelled(cancelled, "before installed verification success")?;
         correspondence(inputs.subject, slot.clone(), checked_files)
     })();
@@ -501,7 +644,9 @@ pub(crate) fn install_selected(
                 })?;
                 match (|| -> Result<()> {
                     captured.recheck()?;
-                    evaluator(executable)?;
+                    if evaluator(executable)? != evaluator_version {
+                        return Err("qualified Rustup build changed before recovery".into());
+                    }
                     let mut unset = native_command(executable, rustup_home, &scratch)?;
                     unset.args(["default", "none"]);
                     let recovery = AtomicBool::new(false);

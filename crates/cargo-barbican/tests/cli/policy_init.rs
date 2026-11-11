@@ -1,5 +1,218 @@
 use super::common::*;
 
+fn admission_bootstrap_config() -> String {
+    serde_json::json!({"schema_version":1,"controller_tag":"barbican-ci-v1","provider_repository":"owner/provider","provider_revision":"a".repeat(40),"provider_script":"ci/provision.sh","approved_repository":"owner/consumer","approved_revision":"b".repeat(40),"review_id":"c".repeat(64)}).to_string()
+}
+
+#[test]
+fn policy_init_admission_requires_explicit_bootstrap_and_never_emits_install_first_ci() {
+    for config in [None, Some("{}"), Some("valid")] {
+        let temp = fresh_temp_dir();
+        write_root_manifest(&temp);
+        write_toolchain_pin(&temp);
+        fs::write(
+            temp.join("barbican.toml"),
+            "[toolchain]\nrequire_admission=true\nadmission_scope='consumer'\n",
+        )
+        .unwrap();
+        let mut args = vec!["cargo-barbican", "policy", "init", "--ci", "github"];
+        if let Some(config) = config {
+            fs::write(
+                temp.join("ci.json"),
+                if config == "valid" {
+                    admission_bootstrap_config()
+                } else {
+                    config.into()
+                },
+            )
+            .unwrap();
+            args.extend(["--ci-bootstrap", "ci.json"]);
+        }
+        let runner = FakeCommandRunner::default();
+        let mut output = Vec::new();
+        let result = run_cli_with_runner(
+            Cli::parse_from(args),
+            &temp,
+            &FakeCratesIoClient::default(),
+            &runner,
+            &mut output,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert!(!temp.join(".github/workflows/barbican.yml").exists());
+        assert!(runner.cargo_locate_project_calls.borrow().is_empty());
+        if config == Some("valid") {
+            assert_eq!(result, ExitCode::SUCCESS);
+            let workflow =
+                fs::read_to_string(temp.join(".github/workflows/barbican-admission.yml")).unwrap();
+            assert!(workflow.contains("workflow_dispatch:"));
+            assert!(workflow.contains("--approved-repo"));
+            assert!(!workflow.contains("cargo install"));
+            assert!(
+                String::from_utf8(output)
+                    .unwrap()
+                    .contains("not an automatic candidate-SHA required check")
+            );
+        } else {
+            assert_eq!(result, ExitCode::from(1));
+            assert!(
+                !temp
+                    .join(".github/workflows/barbican-admission.yml")
+                    .exists()
+            );
+            assert!(
+                String::from_utf8(output)
+                    .unwrap()
+                    .contains("docs/user/ci.md#maintainer-dispatched-admission")
+            );
+        }
+    }
+}
+
+#[test]
+fn policy_init_preserves_both_existing_workflows_and_prints_admission_replacement() {
+    let temp = fresh_temp_dir();
+    write_root_manifest(&temp);
+    write_toolchain_pin(&temp);
+    fs::write(
+        temp.join("barbican.toml"),
+        "[toolchain]\nrequire_admission=true\nadmission_scope='consumer'\n",
+    )
+    .unwrap();
+    fs::write(temp.join("ci.json"), admission_bootstrap_config()).unwrap();
+    fs::create_dir_all(temp.join(".github/workflows")).unwrap();
+    fs::write(
+        temp.join(".github/workflows/barbican.yml"),
+        "existing legacy workflow",
+    )
+    .unwrap();
+    fs::write(
+        temp.join(".github/workflows/barbican-admission.yml"),
+        "existing admission workflow",
+    )
+    .unwrap();
+    let cli = Cli::parse_from([
+        "cargo-barbican",
+        "policy",
+        "init",
+        "--ci",
+        "github",
+        "--ci-bootstrap",
+        "ci.json",
+    ]);
+    let mut output = Vec::new();
+    let result = run_cli_with_runner(
+        cli,
+        &temp,
+        &FakeCratesIoClient::default(),
+        &FakeCommandRunner::default(),
+        &mut output,
+        &mut Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(result, ExitCode::from(1));
+    assert_eq!(
+        fs::read_to_string(temp.join(".github/workflows/barbican.yml")).unwrap(),
+        "existing legacy workflow"
+    );
+    assert_eq!(
+        fs::read_to_string(temp.join(".github/workflows/barbican-admission.yml")).unwrap(),
+        "existing admission workflow"
+    );
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("Its intended contents are:"));
+    assert!(output.contains("workflow_dispatch:"));
+}
+
+#[test]
+fn policy_init_bootstrap_cannot_silently_enable_admission_or_ignore_invalid_governance() {
+    for governance in ["", "[toolchain]\nrequire_admission='invalid'\n"] {
+        let temp = fresh_temp_dir();
+        write_root_manifest(&temp);
+        write_toolchain_pin(&temp);
+        fs::write(temp.join("barbican.toml"), governance).unwrap();
+        fs::write(temp.join("ci.json"), admission_bootstrap_config()).unwrap();
+        let cli = Cli::parse_from([
+            "cargo-barbican",
+            "policy",
+            "init",
+            "--ci",
+            "github",
+            "--ci-bootstrap",
+            "ci.json",
+        ]);
+        let result = run_cli_with_runner(
+            cli,
+            &temp,
+            &FakeCratesIoClient::default(),
+            &FakeCommandRunner::default(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(result, ExitCode::from(1));
+        assert!(
+            !temp
+                .join(".github/workflows/barbican-admission.yml")
+                .exists()
+        );
+        assert!(!temp.join(".github/workflows/barbican.yml").exists());
+        assert_eq!(
+            fs::read_to_string(temp.join("barbican.toml")).unwrap(),
+            governance
+        );
+    }
+}
+
+#[test]
+fn admission_ci_refuses_legacy_only_channels_before_generation() {
+    let root = fresh_temp_dir();
+    write_root_manifest(&root);
+    fs::write(
+        root.join("barbican.toml"),
+        "[toolchain]\nrequire_admission=true\nadmission_scope='consumer'\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("rust-toolchain.toml"),
+        "[toolchain]\nchannel='nightly-2026-01-01'\n",
+    )
+    .unwrap();
+    fs::write(root.join("ci.json"), admission_bootstrap_config()).unwrap();
+    let cli = Cli::parse_from([
+        "cargo-barbican",
+        "policy",
+        "init",
+        "--ci",
+        "github",
+        "--ci-bootstrap",
+        "ci.json",
+    ]);
+    let runner = FakeCommandRunner::default();
+    let mut output = Vec::new();
+    let result = run_cli_with_runner(
+        cli,
+        &root,
+        &FakeCratesIoClient::default(),
+        &runner,
+        &mut output,
+        &mut Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(result, ExitCode::from(1));
+    assert!(runner.cargo_locate_project_calls.borrow().is_empty());
+    assert!(
+        !root
+            .join(".github/workflows/barbican-admission.yml")
+            .exists()
+    );
+    assert!(
+        String::from_utf8(output)
+            .unwrap()
+            .contains("supported exact-stable selection")
+    );
+}
+
 #[test]
 fn policy_init_requires_an_explicit_toolchain_decision() {
     let cli = Cli::parse_from(["cargo-barbican", "policy", "init", "--ci", "github"]);
@@ -133,7 +346,7 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
     assert!(rendered.contains("- docs/dependency-reviews: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews/README.md: created\n"));
     assert!(rendered.contains(
-        "Adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/v0.40.0/docs/user/adoption.md"
+        "Adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/v0.41.0/docs/user/adoption.md"
     ));
     assert!(rendered.contains("Review current dependencies"));
     assert!(stderr.is_empty());
@@ -156,7 +369,7 @@ fn policy_init_without_ci_does_not_emit_workflow() {
     assert!(!temp_dir.join(".github/workflows/barbican.yml").exists());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("policy init --ci github"));
-    assert!(rendered.contains("blob/v0.40.0/docs/user/ci.md#pre-commit-hook"));
+    assert!(rendered.contains("blob/v0.41.0/docs/user/ci.md#pre-commit-hook"));
     assert!(stderr.is_empty());
 }
 
@@ -211,7 +424,7 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     );
     assert!(!workflow.contains("cargo barbican inventory --enforce"));
     assert!(workflow.contains("cargo install --locked"));
-    assert!(workflow.contains("--tag v0.40.0"));
+    assert!(workflow.contains("--tag v0.41.0"));
     assert!(workflow.contains("cargo-deny@0.19.6"));
     assert!(workflow.contains("cargo-audit@0.22.1"));
     assert!(

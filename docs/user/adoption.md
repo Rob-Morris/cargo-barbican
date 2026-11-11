@@ -102,10 +102,15 @@ relying on scaffold path-containment guarantees.
 Review `barbican.toml` before enforcing the policy. It is explicit repo policy,
 not hidden runtime default state.
 
-`cargo barbican policy init --toolchain 1.95.0 --ci github` additionally emits a ready-to-run
+Without toolchain admission enabled,
+`cargo barbican policy init --toolchain 1.95.0 --ci github` additionally emits a
 `.github/workflows/barbican.yml` enforcement workflow (it fails closed rather
-than overwriting an existing one). See [ci.md](ci.md) for the CI gate and the
-client-side pre-commit hook.
+than overwriting an existing one). With admission enabled, use the already
+trusted direct `cargo-barbican` executable and add `--ci-bootstrap CONFIG.json`
+for the separate [maintainer-dispatched admission workflow](ci.md#maintainer-dispatched-admission).
+That route compares protected review inputs and establishes local acceptance
+before target installation. See [ci.md](ci.md) for setup and the client-side
+pre-commit hook.
 
 ## Starting a new project
 
@@ -318,8 +323,11 @@ for earlier feedback.
 
 ## 5. Activate CI and optional local feedback
 
-After adoption, review generated CI and configure required status checks,
-branch protection and policy/workflow review. Keep scheduled audit to detect
+After adoption, review generated CI and configure applicable required status
+checks, branch protection and policy/workflow review. The maintainer-dispatched
+admission workflow is not an automatic required check on the candidate SHA;
+follow its protected-tag setup in [CI](ci.md#maintainer-dispatched-admission).
+Keep scheduled audit to detect
 advisories published after merge. Workflow presence alone does not prevent
 bypass. See [CI](ci.md).
 

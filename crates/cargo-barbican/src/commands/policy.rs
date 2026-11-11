@@ -3,6 +3,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+mod admission_ci;
+
 use barbican::{BarbicanConfig, ExactRustToolchainChannel, parse_reviewed_targets_toml};
 
 use crate::cli::{CiSystem, PolicyCommand, REVIEWED_TARGETS_CONFIG_FILE};
@@ -49,7 +51,7 @@ const GITHUB_WORKFLOW_PATH: &str = ".github/workflows/barbican.yml";
 /// so the workflow's own `${{ ... }}` expressions pass through verbatim rather
 /// than colliding with Rust's format braces. Third-party actions are pinned by
 /// full commit SHA to match the repo's own dogfooded `ci.yml`.
-const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.40.0
+const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.41.0
 #
 # cargo-barbican CI enforcement gate.
 #
@@ -98,7 +100,7 @@ jobs:
       - id: tools
         name: Install cargo-barbican, cargo-deny, and cargo-audit
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.40.0 cargo-barbican
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.0 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
       - id: fetch
@@ -235,14 +237,23 @@ pub(super) fn run_policy(
         PolicyCommand::Init {
             toolchain,
             ci,
+            ci_bootstrap,
             pre_commit_hook,
-        } => run_policy_init(toolchain.as_ref(), ci, pre_commit_hook, current_dir, stdout),
+        } => run_policy_init(
+            toolchain.as_ref(),
+            ci,
+            ci_bootstrap.as_deref(),
+            pre_commit_hook,
+            current_dir,
+            stdout,
+        ),
     }
 }
 
 fn run_policy_init(
     requested_toolchain: Option<&ExactRustToolchainChannel>,
     ci: Option<CiSystem>,
+    ci_bootstrap: Option<&Path>,
     pre_commit_hook: bool,
     current_dir: &Path,
     stdout: &mut dyn Write,
@@ -292,30 +303,60 @@ fn run_policy_init(
         )?;
     }
 
-    // The CI workflow is a self-contained artefact that does not depend on
-    // barbican.toml parsing, so it is emitted independently of `config_ok`.
-    let workflow_blocked_by_existing = match ci {
-        Some(CiSystem::Github) if toolchain_ok => {
-            ensure_ci_workflow(current_dir, Path::new(GITHUB_WORKFLOW_PATH), &mut report)?
-        }
-        Some(CiSystem::Github) => {
-            report.blocked(
-                Path::new(GITHUB_WORKFLOW_PATH),
-                format!("requires a valid exact {RUST_TOOLCHAIN_TOML} pin"),
-            );
-            false
-        }
-        None => false,
+    let config = if config_ok {
+        let text = fs::read_to_string(current_dir.join(config_path)).map_err(CommandError::Io)?;
+        Some(BarbicanConfig::from_toml_str(&text).map_err(CommandError::Config)?)
+    } else {
+        None
     };
+    let admission_enabled = config
+        .as_ref()
+        .is_some_and(|config| config.toolchain.require_admission);
+    let mut existing_workflow = None;
+    if ci.is_some() {
+        let path = Path::new(if admission_enabled || ci_bootstrap.is_some() {
+            admission_ci::WORKFLOW_PATH
+        } else {
+            GITHUB_WORKFLOW_PATH
+        });
+        let workflow = if !toolchain_ok {
+            Err(format!("requires a valid exact {RUST_TOOLCHAIN_TOML} pin"))
+        } else if !config_ok {
+            Err("requires valid barbican.toml before selecting legacy or admission CI".into())
+        } else if admission_enabled
+            && config
+                .as_ref()
+                .is_none_or(|config| config.toolchain.admission_scope.is_none())
+        {
+            Err("admission CI requires explicit [toolchain].admission_scope governance".into())
+        } else if admission_enabled {
+            let pin = fs::read_to_string(current_dir.join(RUST_TOOLCHAIN_TOML))
+                .map_err(CommandError::Io)?;
+            barbican::rust_distribution::parse_repository_selection(&pin, "aarch64-apple-darwin", barbican::rust_distribution::Encoding::Xz)
+                .map_err(|error| format!("admission CI requires a supported exact-stable selection: {error}"))
+                .and_then(|_| match ci_bootstrap {
+                    Some(config) => admission_ci::render(&current_dir.join(config)),
+                    None => Err("admission is enabled; supply --ci-bootstrap <config.json> with independently trusted provider and approved review revisions; see docs/user/ci.md#maintainer-dispatched-admission".into()),
+                })
+        } else if ci_bootstrap.is_some() {
+            Err("--ci-bootstrap requires explicit [toolchain].require_admission = true and an admission scope".into())
+        } else {
+            Ok(GITHUB_CI_WORKFLOW.to_owned())
+        };
+        match workflow {
+            Ok(workflow) => {
+                if ensure_ci_workflow(current_dir, path, &workflow, &mut report)? {
+                    existing_workflow = Some((path, workflow));
+                }
+            }
+            Err(reason) => report.blocked(path, reason),
+        }
+    }
 
-    report.render(ci, pre_commit_hook, stdout)?;
+    report.render(ci, pre_commit_hook, admission_enabled, stdout)?;
 
-    if workflow_blocked_by_existing {
-        writeln!(
-            stdout,
-            "\nThe {GITHUB_WORKFLOW_PATH} workflow was not written because a file already exists there. Its intended contents are:\n\n{GITHUB_CI_WORKFLOW}"
-        )
-        .map_err(CommandError::Io)?;
+    if let Some((path, workflow)) = existing_workflow {
+        writeln!(stdout, "\nThe {} workflow was not written because a file already exists there. Its intended contents are:\n\n{workflow}", path.display()).map_err(CommandError::Io)?;
     }
 
     Ok(exit_code_from_policy_failures(report.has_blocked()))
@@ -376,11 +417,12 @@ fn ensure_toolchain_pin(
 fn ensure_ci_workflow(
     current_dir: &Path,
     relative_path: &Path,
+    contents: &str,
     report: &mut InitReport,
 ) -> Result<bool, CommandError> {
     match confined_scaffold_state(current_dir, relative_path)? {
         ScaffoldState::Missing => {
-            write_new_file(current_dir, relative_path, GITHUB_CI_WORKFLOW)?;
+            create_scaffold_file(current_dir, relative_path, contents)?;
             report.created(relative_path);
             Ok(false)
         }
@@ -595,6 +637,7 @@ impl InitReport {
         &self,
         ci: Option<CiSystem>,
         pre_commit_hook: bool,
+        admission_enabled: bool,
         stdout: &mut dyn Write,
     ) -> Result<(), CommandError> {
         writeln!(stdout, "Policy init:").map_err(CommandError::Io)?;
@@ -624,6 +667,9 @@ impl InitReport {
                 "\nResolve the blocked scaffold item(s), then rerun `cargo barbican policy init`."
             )
             .map_err(CommandError::Io)?;
+        } else if admission_enabled {
+            writeln!(stdout, "\nNext steps:\n- Use an already trusted direct cargo-barbican executable for review and explicit local acceptance before installing or probing the target compiler.\n- Review the generated admission workflow and its immutable provider/approved-input revisions, then configure protected controller tags and maintainer execution policy before dispatch.\n- A maintainer-dispatched run is not an automatic candidate-SHA required check. Existing workflows remain consumer-owned.")
+                .map_err(CommandError::Io)?;
         } else {
             let ci_step = match ci {
                 Some(CiSystem::Github) => format!(
@@ -641,6 +687,14 @@ impl InitReport {
         }
 
         let version = env!("CARGO_PKG_VERSION");
+        if ci.is_some() {
+            writeln!(
+                stdout,
+                "\nCI setup and admission bootstrap: {}",
+                versioned_guide(version, "docs/user/ci.md#maintainer-dispatched-admission")
+            )
+            .map_err(CommandError::Io)?;
+        }
         writeln!(
             stdout,
             "\nAdoption guide: {}",
@@ -728,7 +782,7 @@ mod tests {
         );
         assert!(!GITHUB_CI_WORKFLOW.contains("cargo barbican inventory --enforce"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo install --locked"));
-        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.40.0"));
+        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.41.0"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-deny@0.19.6"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-audit@0.22.1"));
         // Third-party actions must stay pinned by full commit SHA with a

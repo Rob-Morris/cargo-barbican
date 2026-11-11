@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use barbican::{
     BarbicanConfig, ExactCrateSpec, ReviewRecordFact, ReviewRecordStatus,
@@ -36,7 +36,58 @@ pub(crate) fn read_optional_text_no_symlink(
     root_dir: &Path,
     relative_path: &Path,
 ) -> io::Result<Option<String>> {
-    read_optional_text_path_no_symlink(&root_dir.join(relative_path))
+    read_optional_text_path_no_symlink(&confined_read_path(root_dir, relative_path)?)
+}
+
+/// Resolve existing parents inside the authority root, retaining leaf no-follow checks.
+pub(super) fn confined_read_path(root: &Path, relative: &Path) -> io::Result<PathBuf> {
+    if relative
+        .components()
+        .any(|part| !matches!(part, Component::Normal(_) | Component::CurDir))
+    {
+        return Err(io::Error::other(
+            "policy input path must stay inside its root",
+        ));
+    }
+    let root = root.canonicalize()?;
+    let mut parent = root.clone();
+    if let Some(relative_parent) = relative.parent() {
+        for part in relative_parent.components() {
+            parent.push(part);
+            match fs::symlink_metadata(&parent) {
+                Ok(_) => {
+                    parent = parent.canonicalize()?;
+                    if !parent.starts_with(&root) || !parent.is_dir() {
+                        return Err(io::Error::other(
+                            "policy input parent resolves outside its root or is not a directory",
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    Ok(relative
+        .file_name()
+        .map_or(parent.clone(), |leaf| parent.join(leaf)))
+}
+
+pub(super) fn confined_directory(root: &Path, relative: &Path) -> io::Result<Option<PathBuf>> {
+    let path = confined_read_path(root, relative)?;
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+        Ok(_) => {
+            let resolved = path.canonicalize()?;
+            if !resolved.starts_with(root.canonicalize()?) || !resolved.is_dir() {
+                return Err(io::Error::other(
+                    "search directory resolves outside its root or is not a directory",
+                ));
+            }
+            Ok(Some(resolved))
+        }
+    }
 }
 
 pub(crate) fn read_optional_text_path_no_symlink(path: &Path) -> io::Result<Option<String>> {
@@ -121,7 +172,12 @@ pub(crate) fn load_effective_cargo_configs(
         let text_result = if is_operator_owned_cargo_home {
             read_external_cargo_home_config_text(current_dir, &path)
         } else {
-            read_optional_text_path_no_symlink(&path).and_then(|text| {
+            let text = if let Ok(relative) = path.strip_prefix(current_dir) {
+                read_optional_text_no_symlink(current_dir, relative)
+            } else {
+                read_optional_text_path_no_symlink(&path)
+            };
+            text.and_then(|text| {
                 text.ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::NotFound,
@@ -379,12 +435,14 @@ pub(crate) fn load_manifest_texts_from_root(
 
     for manifest_path in manifest_paths {
         let relative_display = manifest_path.display().to_string();
-        let text = fs::read_to_string(root_dir.join(&manifest_path)).map_err(|source| {
-            CommandError::ManifestRead {
+        let text = read_optional_text_no_symlink(root_dir, &manifest_path)
+            .and_then(|text| {
+                text.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "manifest missing"))
+            })
+            .map_err(|source| CommandError::ManifestRead {
                 path: relative_display.clone(),
                 source,
-            }
-        })?;
+            })?;
         manifests.push((relative_display, text));
     }
 
@@ -764,6 +822,38 @@ mod tests {
         load_effective_cargo_configs, release_age_override_note, review_record_status,
         source_replacement_finding, validate_crates_io_base_url,
     };
+
+    #[cfg(unix)]
+    #[test]
+    fn review_authority_confines_intermediate_links_and_preserves_in_root_links() {
+        use std::os::unix::fs::symlink;
+        use std::path::Path;
+        let scratch = ScratchDir::create("barbican-confined-read", false).unwrap();
+        let root = scratch.path().join("root");
+        let outside = scratch.path().join("outside");
+        fs::create_dir_all(root.join("records")).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(root.join("records/review.md"), "completed review").unwrap();
+        fs::write(outside.join("review.md"), "outside authority").unwrap();
+        symlink("records", root.join("inside")).unwrap();
+        symlink(&outside, root.join("escape")).unwrap();
+        symlink("missing", root.join("dangling")).unwrap();
+        assert!(review_record_status(&root, "inside/review.md").is_satisfied());
+        for path in [
+            "escape/review.md",
+            "dangling/review.md",
+            "../outside/review.md",
+        ] {
+            assert!(!review_record_status(&root, path).is_satisfied());
+            assert!(super::read_optional_text_no_symlink(&root, Path::new(path)).is_err());
+        }
+        assert_eq!(
+            super::read_optional_text_no_symlink(&root, Path::new("absent/review.md")).unwrap(),
+            None
+        );
+        symlink("records/review.md", root.join("leaf.md")).unwrap();
+        assert!(super::read_optional_text_no_symlink(&root, Path::new("leaf.md")).is_err());
+    }
 
     #[test]
     fn effective_cargo_config_evidence_is_an_invocation_snapshot() {

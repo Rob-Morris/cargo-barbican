@@ -26,7 +26,7 @@ requires Unix APIs and does not support Windows.
 
 Rust distribution metadata and native installer qualification are separate.
 The checked toolchain handoff/static installed mapping currently admits only
-the exact qualified macOS ARM64 Rustup build; unqualified hosts, evaluators
+the closed set of exact qualified macOS ARM64 Rustup builds; unqualified hosts, evaluators
 and preferred encodings refuse. Broader metadata support is not a claim of
 native installation support. See [toolchain operation](../user/toolchains.md).
 
@@ -54,14 +54,20 @@ The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
 
 The `toolchain` namespace also provides exact-stable distribution review,
 explicit personal acceptance, repository admission, checked Rustup handoff,
-static adoption/installation checks and separate pin activation. The pure
+static adoption/installation checks and separate pin activation. Explicit
+`install --add-components` extends an occupied slot using a complete final
+accepted selection; it never removes components or repairs unknown contents.
+The prior installed set is reconstructed and fully verified against the final
+authenticated inputs before any native addition, and final correspondence
+precedes a new continuing-use binding. The pure
 `rust_distribution` and `toolchain_admission` modules own identities, mapping,
 bounded parsing and eligibility; binary `toolchain_intake` owns HTTP, public
 verification, private storage, repository publication and native effects.
 Neither library module imports process/filesystem concerns.
 
 Component evidence is owned by the existing admission records and source collector.
-Schema-2 evidence binds every selected archive to its source relationship and
+Schema-2 evidence binds every selected archive, including target-independent
+`rust-src`, to its source relationship and
 represented inventory, while source inclusion and binary reachability remain
 distinct. Missing required provenance is blocking; explicit residual coverage is
 assessed by the existing human-assessment owner. Docs asset hashes/counts are
@@ -214,19 +220,19 @@ verification, such as descriptor-relative operations and no-follow resolution
 primitives where available (`openat2(RESOLVE_NO_SYMLINKS)` / `O_NOFOLLOW` on
 Unix-like systems), plus an equivalent Windows strategy.
 
-### Cross-Command Symlink Containment (Non-Sequenced)
+### Confined Repository Reads
 
-Workspace-member and review-record discovery currently use lexical path guards,
-but some filesystem reads still follow symlinks. A symlinked search root,
-symlinked member directory, or intermediate symlink inside a `review_record`
-path can read or probe files outside the repo when cargo-barbican is run on an
-untrusted checkout.
+Shared policy/review-record loaders canonicalise the authority root and every
+existing parent before reading. Workspace manifest discovery applies the same
+boundary to search roots, walked directories and manifest reads. In-root
+directory links remain supported; escaping, dangling and cyclic paths refuse.
+Leaf policy files retain their no-symlink rule. Conservative recursive discovery
+can reject an unsafe directory under a searched root even when it is not a
+Cargo member. Cargo still owns parseable workspace membership and exclusions.
 
-This is pre-existing and repo-wide: `review`, `pin check`, `assess`, and
-`inventory` all depend on the same discovery model. The intended hardening is
-to canonicalise the repo root once and assert every walked or read path remains
-within it before using the path. That closes the workspace-member discovery and
-intermediate-review-record symlink cases together.
+These are static, one-writer checks. They do not establish race-free traversal,
+a universal filesystem sandbox or confinement for every unrelated I/O owner.
+Descriptor-relative/no-follow operations remain the separate deferred work above.
 
 ## Reviewed source identity
 

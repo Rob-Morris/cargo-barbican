@@ -186,6 +186,7 @@ pub fn parse_manifest_patched_crate_names(
     text: &str,
 ) -> Result<BTreeSet<String>, CargoManifestError> {
     let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    reject_manifest_replacement(manifest_path, &root)?;
     let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
     let mut patched = BTreeSet::new();
 
@@ -237,6 +238,7 @@ pub fn parse_manifest_dependencies(
     text: &str,
 ) -> Result<BTreeSet<CargoManifestDependency>, CargoManifestError> {
     let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    reject_manifest_replacement(manifest_path, &root)?;
     let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
     let mut dependencies = BTreeSet::new();
 
@@ -252,6 +254,7 @@ pub fn parse_manifest_direct_requirements(
     text: &str,
 ) -> Result<BTreeSet<CargoManifestDirectRequirement>, CargoManifestError> {
     let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    reject_manifest_replacement(manifest_path, &root)?;
     let root_table = root.as_table().ok_or(CargoManifestError::ExpectedTable)?;
     let mut dependencies = BTreeSet::new();
 
@@ -582,6 +585,7 @@ pub fn parse_workspace_dependency_requirements(
     text: &str,
 ) -> Result<BTreeSet<CargoManifestDirectRequirement>, CargoManifestError> {
     let root: Value = toml::from_str(text).map_err(CargoManifestError::Parse)?;
+    reject_manifest_replacement(manifest_path, &root)?;
     let Some(workspace_table) = workspace_table(manifest_path, &root)? else {
         return Ok(BTreeSet::new());
     };
@@ -671,6 +675,18 @@ pub fn parse_manifest_package_identity(
         name: name.to_owned(),
         version: version.to_owned(),
     }))
+}
+
+fn reject_manifest_replacement(
+    manifest_path: &str,
+    root: &Value,
+) -> Result<(), CargoManifestError> {
+    if root.get("replace").is_some() {
+        return Err(CargoManifestError::UnsupportedReplacement {
+            manifest_path: manifest_path.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn contains_glob_metacharacter(path: &str) -> bool {
@@ -870,6 +886,10 @@ fn workspace_dependency_value(
 
 #[derive(Debug, Error)]
 pub enum CargoManifestError {
+    #[error(
+        "{manifest_path}: [replace] source redirection is unsupported; remove it before dependency-policy evaluation"
+    )]
+    UnsupportedReplacement { manifest_path: String },
     #[error("unable to parse Cargo.toml: invalid syntax or schema (source text omitted)")]
     Parse(#[source] toml::de::Error),
     #[error("dependency {key:?} has an invalid package identity")]
@@ -935,6 +955,33 @@ mod tests {
         parse_workspace_member_manifest_paths, parse_workspace_package_version,
         parse_workspace_root_directive,
     };
+
+    #[test]
+    fn replacement_tables_refuse_across_dependency_policy_parsers() {
+        for replacement in [
+            "[replace]\n'cfg-if:1.0.4' = { path = 'local' }\n",
+            "[replace]\n'https://example.invalid/registry#cfg-if:1.0.4' = { git = 'https://example.invalid/source' }\n",
+            "replace = 'invalid'\n",
+            "[replace]\n",
+        ] {
+            assert!(matches!(
+                parse_manifest_dependencies("Cargo.toml", replacement),
+                Err(CargoManifestError::UnsupportedReplacement { .. })
+            ));
+            assert!(matches!(
+                parse_manifest_direct_requirements("Cargo.toml", replacement),
+                Err(CargoManifestError::UnsupportedReplacement { .. })
+            ));
+            assert!(matches!(
+                parse_manifest_patched_crate_names("Cargo.toml", replacement),
+                Err(CargoManifestError::UnsupportedReplacement { .. })
+            ));
+            assert!(matches!(
+                parse_workspace_dependency_requirements("Cargo.toml", replacement),
+                Err(CargoManifestError::UnsupportedReplacement { .. })
+            ));
+        }
+    }
 
     #[test]
     fn classifies_workspace_root_directives() {
