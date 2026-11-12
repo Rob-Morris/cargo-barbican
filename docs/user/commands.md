@@ -23,7 +23,7 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican resolve` | Base action | Generate `Cargo.lock` for current manifests under release-age policy. |
 | `cargo barbican update` | Base action | Update existing locked dependencies to exact versions. |
 | `cargo barbican assess` | Base assessment | Classify a dependency diff. |
-| `cargo barbican policy init` | Policy management | Create the explicit policy scaffold for adoption; `--toolchain` creates an absent exact native pin and `--ci github` also emits the CI workflow. |
+| `cargo barbican policy init` | Policy management | Create the explicit policy scaffold; `--toolchain` creates an absent exact pin. CI has separate legacy and [admission-bootstrap](ci.md#maintainer-dispatched-admission) routes. |
 | `cargo barbican inventory` | Base audit / gate | Report dependency inventory and reviewed-policy coverage; `--enforce` gates direct-dependency coverage. |
 | `cargo barbican pin list` / `pin show` | Diagnostics | Discover exact families, shared evidence scope and available parity. |
 | `cargo barbican pin add` | Policy management | Create one reviewed family or explicitly extend an existing family with --family. |
@@ -36,7 +36,7 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican audit` | Base delegated gate | Run delegated advisory and source-policy checks. |
 | `cargo barbican verify` | Base execution gate | Run the final local execution gate. |
 | `cargo barbican gatehouse` | Workflow namespace | Run supported gatehouse workflows over the base commands. |
-| `cargo-barbican toolchain` | Toolchain admission | Review, explicitly accept, install/adopt, check and separately activate exact stable Rust distributions. Use the direct trusted executable before candidate acceptance. |
+| `cargo-barbican toolchain` | Toolchain admission | [Review and maintain Rust toolchains](toolchains.md), including explicit reviewed component additions. Use the direct trusted executable before candidate acceptance. |
 
 ## Glossary
 
@@ -774,7 +774,8 @@ It is not a permanent policy exception.
 Creates the explicit policy scaffold for adopting cargo-barbican.
 
 ```bash
-cargo barbican policy init [--toolchain <exact-channel>] [--ci <system>] [--pre-commit-hook]
+cargo-barbican [--repo ROOT] policy init [--toolchain <exact-channel>]
+  [--ci github] [--ci-bootstrap CONFIG.json] [--pre-commit-hook]
 ```
 
 The command creates missing files:
@@ -808,23 +809,47 @@ On success it points to the manual adoption guide. Init is intentionally not a
 review command: it does not add reviewed families, write review records, or
 certify existing dependencies.
 
-`--ci <system>` additionally writes a ready-to-run CI enforcement workflow. The
-only supported value is `github`:
+`--ci github` generates one of two workflows. Use an already trusted compiler
+for Cargo-based scaffolding; the direct trusted `cargo-barbican` executable
+avoids selecting an unaccepted repository compiler.
+
+For repositories without toolchain admission enabled, the legacy route is:
 
 ```bash
 cargo barbican policy init --toolchain 1.95.0 --ci github
 ```
 
-This writes `.github/workflows/barbican.yml`: a single fail-closed gate job (on
-pull requests and pushes to `main`) that installs the tooling with `--locked`,
-pins its third-party actions by commit SHA, and runs `gatehouse pre-release`
-plus `age-lock` and `assess` against the pull-request base. Gatehouse owns
-toolchain conformance and the blocking inventory coverage floor. The flag is
-independent of `barbican.toml` validity but requires a valid exact toolchain
-pin. Unlike the idempotent base scaffold, an existing
-`.github/workflows/barbican.yml` is never overwritten: the command fails closed
-(exit `1`), reports the path as blocked, and re-prints the intended workflow so
-the difference can be reconciled by hand.
+This writes `.github/workflows/barbican.yml`: a fail-closed gate job on pull
+requests and pushes to `main` that installs tooling with `--locked`, pins
+third-party actions by commit SHA, and runs `gatehouse pre-release` plus
+`age-lock` and `assess` against the pull-request base. It installs Rust before
+the gate and therefore does not establish pre-execution toolchain admission.
+
+With `[toolchain].require_admission = true`, generation requires an admission
+scope and explicit trusted-input bootstrap configuration:
+
+```sh
+cargo-barbican policy init --ci github --ci-bootstrap ci-bootstrap.json
+```
+
+This writes the separate `.github/workflows/barbican-admission.yml` and resolves
+governance statically before Cargo discovery. Run at the governance root or
+supply `--repo ROOT`. The route requires a supported exact stable pin and
+never enables admission silently or falls back to the legacy workflow.
+Malformed governance blocks admission CI generation; the scaffold's independent
+item reporting is described in the [CLI contract](../functional/cli.md).
+
+Review the [CI bootstrap configuration, trusted provider and protected-controller
+setup](ci.md#maintainer-dispatched-admission) before use. Generation does not
+approve inputs or configure GitHub protections. A maintainer dispatches from
+the reviewed immutable protected controller tag; the run is not an automatic
+required check on the candidate SHA. Review and migrate any existing
+install-first workflows separately.
+
+Existing workflow files are never overwritten: the command fails closed
+(exit `1`), reports the conflicting path and reprints the intended workflow
+for manual reconciliation. Both routes require a valid exact pin; admission
+mode has the narrower stable/native support boundary documented above.
 
 `--pre-commit-hook` optionally copies a non-executable helper to
 `.barbican/hooks/pre-commit` at the discovered Cargo root. Plain init creates no
@@ -1237,6 +1262,32 @@ schema, full-commit requirement, per-package review, source-bound allowances,
 manual intake and advisory/build-input limitations. Registry age/advisory
 exceptions never authorise Git targets; cargo-deny permission remains separate.
 
+
+## Review and maintain Rust toolchains
+
+Use the direct, already trusted `cargo-barbican` executable for new compiler
+review and acceptance. The [toolchain guide](toolchains.md) covers exact stable
+distribution review, local acceptance, repository admission, installation or
+static adoption, correspondence checks and separate activation.
+
+To add supported components such as `rust-src` to an occupied exact-release
+slot, review and accept the complete final selection, then use:
+
+```sh
+cargo-barbican toolchain install <final-review-id> --add-components \
+  --rustup-executable <absolute-trusted-rustup-path>
+```
+
+The existing slot must match a fully verified subset of the final authenticated
+inputs. This operation only adds missing components; it does not remove,
+repair, approve historical execution or widen another repository's admission.
+A complete matching slot is a verified no-op. See [installation boundaries and
+recovery](toolchains.md#installation-edges-and-recovery) for qualified hosts,
+exact evaluator builds and retained failure/cancellation outcomes.
+
+`installation-check` is static inspection: omit `--cached-admission` and
+`--cache-reason`. Existing runtime conformance remains the separate
+`toolchain check` command below.
 
 ## toolchain check
 
