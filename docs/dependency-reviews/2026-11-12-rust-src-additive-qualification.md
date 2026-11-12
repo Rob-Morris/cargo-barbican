@@ -341,3 +341,59 @@ verification, with no expansion of execution authority. The original failed
 v1/v2 programs, prose, receipts and logs remain separate evidence. Live
 private homes remain held until the coordinating agent confirms durable
 retention and authorises cleanup.
+
+
+## Optimised-build timing comparison — 12 November 2026
+
+A fresh private replay used an optimised build of the same reviewed production
+source at `edf135113fbb6461d9cfc116ea78e06003c729af`; later changes were confined
+to user documentation. No verification rule, default, source permission or
+cache freshness bound changed. The input copies contained only review data,
+snapshots, archives and knowledge; acceptance/bindings/trust were not copied.
+The same scoped prose was explicitly accepted into the fresh private context.
+
+The eleven outcomes match: ten successes and the expected incomplete-scope
+refusal. Both cases again verified 2,467 files/3,041 entries, including successful
+inspection, adoption and absent-evaluator no-ops. The phase-duration sum fell
+from 1,002.55 seconds (16m43s) in debug to 207.17 seconds (3m27s) optimised.
+The separate 83-second optimised build is excluded from both journey totals.
+
+| Case | Phase | Debug seconds | Optimised seconds |
+| --- | --- | ---: | ---: |
+| control | accept | 55.07 | 8.54 |
+| fresh | fresh-install | 128.72 | 29.36 |
+| fresh | final-inspection | 90.59 | 14.04 |
+| fresh | static-adopt | 90.37 | 15.39 |
+| fresh | complete-add-noop | 102.76 | 17.75 |
+| manual-base-add | seed-manual-minimal | 7.53 | 11.12 |
+| manual-base-add | incomplete-final-inspection | 65.80 | 12.09 |
+| manual-base-add | add-components | 179.81 | 46.36 |
+| manual-base-add | final-inspection | 89.72 | 19.05 |
+| manual-base-add | static-adopt | 89.75 | 18.05 |
+| manual-base-add | complete-add-noop | 102.44 | 15.41 |
+
+These are single sequential observations on one machine, with OS-cache and
+background-load differences, not statistical benchmarks or a latency promise.
+The raw minimal seed was slower in this replay; no per-phase universal speedup
+is inferred. This supplies a release-build baseline before considering future
+profiling; no caching, parallelism or reduced security check was introduced.
+
+Optimised binary SHA256:
+`e499ec264b8ba98e0e9c0c5586ddc60072188023616e1823171939c6e03f2e76`.
+Reviewed adaptation SHA256:
+`56e1ca10e9fb31d0731c28da5eb28d7621f1dbb3cc0c9a816eab6730f91a1ff8`.
+Raw receipt SHA256:
+`923c74fabae907eabd6fc5d7c3f6788cda98c2c516bdb42637f116fc2399b7e0`.
+Independent post-run verification SHA256:
+`9bd5a728f1b784003705fb2907fd3efe5ecc6a2862d2c52a03b71b116001f428`.
+The companion JSON retains exact phase output hashes/timings and verification.
+
+The explicit cached-admission reason replays the exact assessed source facts
+within their 24-hour bound; this is not an online security refresh. All 60 RustSec
+rows, seven Cargo advisory facts and ten coverage unknowns remain. Only existing
+trusted 1.95 compiler version probes ran; Cargo and source scripts were not
+executed. The five monitored normal-state files matched before/after/live,
+with the same update-hash before-identity and cancellation limits as above.
+Complete replay evidence remains under
+`/private/tmp/barbican-doc-amendments.7bCxNp`; private homes/live authority and
+owned build targets are removed after retention and review.

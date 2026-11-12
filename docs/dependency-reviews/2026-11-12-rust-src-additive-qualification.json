@@ -391,7 +391,7 @@
             }
           }
         },
-        "scope_assessment": "Maintenance has ceased; this is an ongoing remediation/maintenance residual rather than evidence of a concrete exploit in this invocation. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Maintenance has ceased; this is an ongoing remediation/maintenance residual rather than evidence of a concrete exploit in this invocation. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -426,7 +426,7 @@
             }
           }
         },
-        "scope_assessment": "Maintenance has ceased; this is an ongoing remediation/maintenance residual rather than evidence of a concrete exploit in this invocation. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Maintenance has ceased; this is an ongoing remediation/maintenance residual rather than evidence of a concrete exploit in this invocation. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -472,7 +472,7 @@
             }
           }
         },
-        "scope_assessment": "Null git2 Buf dereference violates slice requirements; the proof does not call Git or construct such buffers. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Null git2 Buf dereference violates slice requirements; the proof does not call Git or construct such buffers. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -574,7 +574,7 @@
             }
           }
         },
-        "scope_assessment": "Old tar extraction can chmod a symlink target outside the extraction root. This is the compiler source inventory, not the separately qualified Rustup extractor graph; rustc --version does not extract archives. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Old tar extraction can chmod a symlink target outside the extraction root. This is the compiler source inventory, not the separately qualified Rustup extractor graph; rustc --version does not extract archives. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -617,7 +617,7 @@
             }
           }
         },
-        "scope_assessment": "Old tar parsing disagrees with PAX size overrides. This is the compiler source inventory, not the separately qualified Rustup extractor graph; rustc --version does not parse archives. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Old tar parsing disagrees with PAX size overrides. This is the compiler source inventory, not the separately qualified Rustup extractor graph; rustc --version does not parse archives. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -674,7 +674,7 @@
             }
           }
         },
-        "scope_assessment": "Rand custom logging can re-enter thread RNG during reseeding and create aliased mutable references. The proof supplies no custom logger/client program, builds no source, and runs no Cargo. This does not prove linked features or internal reachability absent. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Rand custom logging can re-enter thread RNG during reseeding and create aliased mutable references. The proof supplies no custom logger/client program, builds no source, and runs no Cargo. This does not prove linked features or internal reachability absent. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -902,7 +902,7 @@
             }
           }
         },
-        "scope_assessment": "Rand custom logging can re-enter thread RNG during reseeding and create aliased mutable references. The proof supplies no custom logger/client program, builds no source, and runs no Cargo. This does not prove linked features or internal reachability absent. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Rand custom logging can re-enter thread RNG during reseeding and create aliased mutable references. The proof supplies no custom logger/client program, builds no source, and runs no Cargo. This does not prove linked features or internal reachability absent. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -1041,7 +1041,7 @@
             }
           }
         },
-        "scope_assessment": "ThinVec panic during element destruction can cause repeated free/use-after-free. No user program or panic-on-drop elements are supplied; exact compiler internal reachability is not established. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "ThinVec panic during element destruction can cause repeated free/use-after-free. No user program or panic-on-drop elements are supplied; exact compiler internal reachability is not established. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -1129,7 +1129,7 @@
             }
           }
         },
-        "scope_assessment": "Git2 empty remote reference lists can construct null slices; no Git remote operations are invoked. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Git2 empty remote reference lists can construct null slices; no Git remote operations are invoked. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -1209,7 +1209,7 @@
             }
           }
         },
-        "scope_assessment": "Git2 buffer blame can expose null signatures; no Git blame operations are invoked. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Git2 buffer blame can expose null signatures; no Git blame operations are invoked. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -1319,7 +1319,7 @@
             }
           }
         },
-        "scope_assessment": "Memmap range advice/flush can compute invalid pointer offsets. No user-selected mappings/ranges are supplied; exact compiled inclusion remains unproved. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Memmap range advice/flush can compute invalid pointer offsets. No user-selected mappings/ranges are supplied; exact compiled inclusion remains unproved. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -1491,7 +1491,7 @@
             }
           }
         },
-        "scope_assessment": "Anyhow mutable downcast after added error context can violate borrow rules. No authored callback/error payload is supplied; internal failure-path reachability remains a residual, not a clean result. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Anyhow mutable downcast after added error context can violate borrow rules. No authored callback/error payload is supplied; internal failure-path reachability remains a residual, not a clean result. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -1542,7 +1542,7 @@
             }
           }
         },
-        "scope_assessment": "Cxx stack string initialisation can be unsound if conversion panics. No compiled user source or custom panic conversion is supplied; internal compiler inclusion remains unproved. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Cxx stack string initialisation can be unsound if conversion panics. No compiled user source or custom panic conversion is supplied; internal compiler inclusion remains unproved. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -1628,7 +1628,7 @@
             }
           }
         },
-        "scope_assessment": "Formatting an invalid Crossbeam pointer can dereference it. No pointer-bearing user program is compiled or run; internal formatting reachability remains unproved. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Formatting an invalid Crossbeam pointer can dereference it. No pointer-bearing user program is compiled or run; internal formatting reachability remains unproved. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -2002,7 +2002,7 @@
             }
           }
         },
-        "scope_assessment": "Ruzstd can allocate excessive memory for malicious compressed input/debug symbols. No debug object or zstd input is passed to the compiler version probe; this does not qualify compilation or debug-symbol processing. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Ruzstd can allocate excessive memory for malicious compressed input/debug symbols. No debug object or zstd input is passed to the compiler version probe; this does not qualify compilation or debug-symbol processing. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -2047,7 +2047,7 @@
             }
           }
         },
-        "scope_assessment": "Ruzstd can allocate excessive memory for malicious compressed input/debug symbols. No debug object or zstd input is passed to the compiler version probe; this does not qualify compilation or debug-symbol processing. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Ruzstd can allocate excessive memory for malicious compressed input/debug symbols. No debug object or zstd input is passed to the compiler version probe; this does not qualify compilation or debug-symbol processing. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -2220,7 +2220,7 @@
             }
           }
         },
-        "scope_assessment": "Maintenance has ceased; this is an ongoing remediation/maintenance residual rather than evidence of a concrete exploit in this invocation. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Maintenance has ceased; this is an ongoing remediation/maintenance residual rather than evidence of a concrete exploit in this invocation. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -2527,7 +2527,7 @@
             }
           }
         },
-        "scope_assessment": "Libz-sys build scripts can log the full environment when paired with cc>=1.6 on Unix. No source/build script or Cargo build runs in this prebuilt-only proof. Supplier build/cache exposure remains unknown; package match alone does not establish the cc conjunction. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Libz-sys build scripts can log the full environment when paired with cc>=1.6 on Unix. No source/build script or Cargo build runs in this prebuilt-only proof. Supplier build/cache exposure remains unknown; package match alone does not establish the cc conjunction. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -3328,7 +3328,7 @@
             }
           }
         },
-        "scope_assessment": "Rustix xattr zero-length size queries can mark unwritten bytes initialised. No authored xattr calls or user inputs are supplied to rustc --version; compiler binary inclusion/internal use is unproved. Cargo is not run. The only permitted compiler execution is Rustup’s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
+        "scope_assessment": "Rustix xattr zero-length size queries can mark unwritten bytes initialised. No authored xattr calls or user inputs are supplied to rustc --version; compiler binary inclusion/internal use is unproved. Cargo is not run. The only permitted compiler execution is Rustup\u2019s internal version probe of these same already-trusted1.95 bytes; no compilation, Rustdoc or user code runs.",
         "disposition": "retained source match; scoped private machinery proof suitable with stated residuals",
         "compiled_inclusion": "unproved",
         "general_execution_approval": false
@@ -5268,6 +5268,513 @@
       ],
       "clearance": "No remaining security blocker for the reviewed implementation scope, conditional on root retaining canonical verification results and unchanged reviewed production source. No authority expansion.",
       "cleanup_recommendation": "After durable retention of this report, complete raw receipts/snapshots/logs, exact scripts/prose and static review evidence, root may remove private installed payload homes/evaluator copies and private acceptance state. Preserve all failed attempts and clearly record removal; do not mutate normal installation or repository state as cleanup."
+    }
+  },
+  "release_timing_comparison": {
+    "source_commit": "edf135113fbb6461d9cfc116ea78e06003c729af",
+    "doc_head": "ecb68d6",
+    "build_profile": "release",
+    "binary_sha256": "e499ec264b8ba98e0e9c0c5586ddc60072188023616e1823171939c6e03f2e76",
+    "harness_sha256": "56e1ca10e9fb31d0731c28da5eb28d7621f1dbb3cc0c9a816eab6730f91a1ff8",
+    "receipt_sha256": "923c74fabae907eabd6fc5d7c3f6788cda98c2c516bdb42637f116fc2399b7e0",
+    "baseline_receipt_sha256": "00d4f19810a3c4171cbd8ad5e1defd75c2bc14489b33027f92cb32b6c41b4a05",
+    "debug_seconds": 1002.5542470838409,
+    "release_seconds": 207.16717079421505,
+    "commands": [
+      {
+        "case": "control",
+        "label": "accept",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "accept",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--record",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/completed-review-v2.md",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/control/rustup",
+          "--format",
+          "json",
+          "--cached-admission",
+          "--cache-reason",
+          "Optimised-build timing comparison against the exact previously assessed1.95 source snapshots within24h; private machinery only, no online refresh or new compiler approval"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/control/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/control/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/control/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/control/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/control",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 8.536665874999017,
+        "stdout_sha256": "0bb203a4f11b92d84b7ce60d8c5845b3f6ffa04d79ddfdfdbec95a908ad6c542",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fresh",
+        "label": "fresh-install",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "install",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--rustup-executable",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/evaluator/rustup-init",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/rustup",
+          "--format",
+          "json",
+          "--cached-admission",
+          "--cache-reason",
+          "Optimised-build timing comparison against the exact previously assessed1.95 source snapshots within24h; private machinery only, no online refresh or new compiler approval"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 29.35627095797099,
+        "stdout_sha256": "56765b0ca901a144681d4ab198fa2ce6cb335e98adfde043c4aef18a9fa7279b",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fresh",
+        "label": "final-inspection",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "installation-check",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/rustup",
+          "--format",
+          "json"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 14.043079084018245,
+        "stdout_sha256": "c50e589623e5fb0e63b65f770a50558fde1165da8792e78429894b0ba7ebdbb1",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fresh",
+        "label": "static-adopt",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "adopt",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/rustup",
+          "--format",
+          "json",
+          "--cached-admission",
+          "--cache-reason",
+          "Optimised-build timing comparison against the exact previously assessed1.95 source snapshots within24h; private machinery only, no online refresh or new compiler approval"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 15.39397383411415,
+        "stdout_sha256": "90b9d50971485ac010e84461bec58f9525f56cdc694413bbe418a0ae1cda88dd",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "fresh",
+        "label": "complete-add-noop",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "install",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--rustup-executable",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/absent-evaluator",
+          "--add-components",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/rustup",
+          "--format",
+          "json",
+          "--cached-admission",
+          "--cache-reason",
+          "Optimised-build timing comparison against the exact previously assessed1.95 source snapshots within24h; private machinery only, no online refresh or new compiler approval"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/fresh",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 17.751576459035277,
+        "stdout_sha256": "569445c745e9e1a9f414da1dca0ef4baf0845489290991bdd141ccb0c9e9f389",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "manual-base-add",
+        "label": "seed-manual-minimal",
+        "argv": [
+          "rustup",
+          "toolchain",
+          "install",
+          "1.95.0-aarch64-apple-darwin",
+          "--profile",
+          "minimal",
+          "--no-self-update"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0",
+          "RUSTUP_DIST_SERVER": "file:///private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/mirror",
+          "RUSTUP_UPDATE_ROOT": "file:///private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/no-update",
+          "RUSTUP_OVERRIDE_UNIX_FALLBACK_SETTINGS": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/fallback.toml"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/evaluator/rustup-init",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 11.120352959027514,
+        "stdout_sha256": "58d558c47e9cdd5182c5dc153e8cb4036cbcb981206fa103ff30a1274db86a1d",
+        "stderr_sha256": "aaaa55943e4f49cbf86561362a21ffedb0059e8c98df0479e275ad8964aaa5d5"
+      },
+      {
+        "case": "manual-base-add",
+        "label": "incomplete-final-inspection",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "installation-check",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "--format",
+          "json"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 1,
+        "owned_process_group_absent": true,
+        "seconds": 12.094066791934893,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c5a20a1fa27e7458d8c330d01e50dc5b8a7bf7625aa87a79982831da1af8b8ed"
+      },
+      {
+        "case": "manual-base-add",
+        "label": "add-components",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "install",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--rustup-executable",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/evaluator/rustup-init",
+          "--add-components",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "--format",
+          "json",
+          "--cached-admission",
+          "--cache-reason",
+          "Optimised-build timing comparison against the exact previously assessed1.95 source snapshots within24h; private machinery only, no online refresh or new compiler approval"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 46.35760674998164,
+        "stdout_sha256": "13a2731759a583e0d571d173565e2b1cb64914be5b651266c28a05a13c998c3d",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "manual-base-add",
+        "label": "final-inspection",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "installation-check",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "--format",
+          "json"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 19.051116625079885,
+        "stdout_sha256": "855587725cd24f70ab156eea5195d9a3dd66a6f29121bccbe64d78a8acbd82b1",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "manual-base-add",
+        "label": "static-adopt",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "adopt",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "--format",
+          "json",
+          "--cached-admission",
+          "--cache-reason",
+          "Optimised-build timing comparison against the exact previously assessed1.95 source snapshots within24h; private machinery only, no online refresh or new compiler approval"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 18.05287200002931,
+        "stdout_sha256": "2cbd138f5a329cdc2eafb7c343091ecd58b6c2bb0bef0b4d0cfd1674d03ade9b",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "case": "manual-base-add",
+        "label": "complete-add-noop",
+        "argv": [
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+          "--data-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/data",
+          "--cache-dir",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/cache",
+          "toolchain",
+          "install",
+          "a08b30fae034cb71a7363fe5511c0f006030ce0953c1240c0f92afb8ef7500b6",
+          "--rustup-executable",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/absent-evaluator",
+          "--add-components",
+          "--standalone",
+          "--rustup-home",
+          "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "--format",
+          "json",
+          "--cached-admission",
+          "--cache-reason",
+          "Optimised-build timing comparison against the exact previously assessed1.95 source snapshots within24h; private machinery only, no online refresh or new compiler approval"
+        ],
+        "env": {
+          "PATH": "/usr/bin:/bin",
+          "LC_ALL": "C",
+          "HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/home",
+          "CARGO_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/cargo",
+          "RUSTUP_HOME": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/rustup",
+          "TMPDIR": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add/tmp",
+          "RUSTUP_AUTO_INSTALL": "0",
+          "GIT_CONFIG_NOSYSTEM": "1",
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_TERMINAL_PROMPT": "0"
+        },
+        "cwd": "/private/tmp/barbican-doc-amendments.7bCxNp/release-journey/manual-base-add",
+        "executable": "/private/tmp/barbican-doc-amendments.7bCxNp/timing-inputs/bin/cargo-barbican",
+        "returncode": 0,
+        "owned_process_group_absent": true,
+        "seconds": 15.40958945802413,
+        "stdout_sha256": "354fc84998fdd909299f5043e7f9a251301820b54f6962f11689c2bbe4a768cc",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "case_outcomes": {
+      "fresh": {
+        "status": "pass",
+        "checked_files": 2467,
+        "tree_entries": 3041
+      },
+      "manual-base-add": {
+        "status": "pass",
+        "checked_files": 2467,
+        "tree_entries": 3041
+      }
+    },
+    "normal_five_files_unchanged": true,
+    "limits": [
+      "Single run each, same inputs/modes; wall clock and OS cache conditions not controlled statistical benchmarks.",
+      "Explicit bounded cached admission and no online refresh; all existing source/security findings remain.",
+      "No Cargo/source execution/new compiler approval; only inherited1.95 version probe.",
+      "No cancellation observed; update-hash beforeidentity is asserted by the reviewed harness, not independently serialised."
+    ],
+    "independent_verification": {
+      "sha256": "9bd5a728f1b784003705fb2907fd3efe5ecc6a2862d2c52a03b71b116001f428",
+      "result": {
+        "scope": "Independent read-only post-run receipt/log/live tree/config/base identity and five normal-file verification; no candidate execution; authenticated archive manifests/payload hashes independently reconstructed against verified live trees",
+        "verified_at": "2026-11-12T03:55:13.052442+00:00",
+        "receipt_sha256": "923c74fabae907eabd6fc5d7c3f6788cda98c2c516bdb42637f116fc2399b7e0",
+        "commands": 11,
+        "sum_command_seconds": 207.16717079421505,
+        "errors": [],
+        "status": "pass",
+        "limitations": [
+          "Base-before identities and process-group absence originate in the harness receipt; comparison to current files is independently reconstructed.",
+          "Update-hash before-baseline was not persisted; its preservation is harness-asserted only.",
+          "Five normal files only, not whole-home or universal sandbox proof.",
+          "Timing is one sequential warm-cache run; not a benchmark distribution."
+        ],
+        "cleanup_recommendation": "GO after root retains qualified evidence and this verification: remove only exact private generated homes/temporary authority; retain receipts/logs and assessment evidence. No general normal-home cleanup authorised.",
+        "archive_payload_files_per_case": 2459,
+        "archive_manifest_rows": {
+          "67b09138c8db96afc4bbfc69ea771ac9a091fd777698acb43f6dfd9fb7dea363": 2313,
+          "6c2ffed8e1ac9cf4dc9e80f282a869a6b237a153e7c55cca039d33de29d80aaf": 44,
+          "149e85a285b6eba58eb6c8bdf7deb1b93763890598e62cb635a712e3a8454f04": 43,
+          "9b30089b0f767cb91b2190ffec55a9beeb2a21a1405d8da0f664d7e09d08e6d8": 59
+        }
+      }
     }
   }
 }
