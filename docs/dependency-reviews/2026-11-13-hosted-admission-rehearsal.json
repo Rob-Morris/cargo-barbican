@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-13",
+  "repository": "https://github.com/Rob-Morris/barbican-admission-rehearsal",
+  "controller_tag": "barbican-ci-v2",
+  "identities": {
+    "provider": "8908d3906de7cfa737e195826dc82321e538effc",
+    "approved": "4fb6fb208439fa7877bce91b61466d4350b0039e",
+    "base": "4fb6fb208439fa7877bce91b61466d4350b0039e",
+    "controller": "a312bea2f815c61aaab7270c4f3c0a42d8a46a30",
+    "positive": "28f379575bc08e753f482b4671ce2f4fdd4fe08d",
+    "pin-refusal": "f8bb2f3013e5ecd202fb0f1e0e663adf47cb4762",
+    "gate-failure": "8318d4d02aec190909bef500dd78faa9231b0153"
+  },
+  "runs": [
+    {
+      "case": "wrong-controller",
+      "run": 43361814122,
+      "conclusion": "failure",
+      "expectation_met": true
+    },
+    {
+      "case": "positive",
+      "run": 43361831485,
+      "conclusion": "success",
+      "expectation_met": true
+    },
+    {
+      "case": "pin-refusal",
+      "run": 43361849769,
+      "conclusion": "failure",
+      "expectation_met": true
+    },
+    {
+      "case": "gate-failure",
+      "run": 43361865307,
+      "conclusion": "failure",
+      "expectation_met": true
+    }
+  ],
+  "protection": {
+    "ruleset_id": 27175632,
+    "target": "refs/tags/barbican-ci-v2",
+    "enforcement": "active",
+    "bypass_actors": [],
+    "rules": [
+      "creation",
+      "update",
+      "deletion"
+    ],
+    "workflow_permissions": "read",
+    "repository_secrets": 0,
+    "repository_variables": 0
+  },
+  "applying_tool": {
+    "version": "0.41.1",
+    "source_commit": "fe7614796ad3f17c310017396f176e0dfcbbb6a7",
+    "sha256": "54b6742984ec6c5a16a84baf4d8951475b3ddb7b147923483d88e799942975c1"
+  },
+  "generated_controller_version": "0.41.2",
+  "review": {
+    "id": "49ffd3d5c027bbc5669f58b174dd74c4b9fbe9f269417d35044cbaf7c5e1d68e",
+    "subject_id": "19c04d7b6ca65a2906bafe1bc15bf8d8297c924958187588d322098ee35403a5",
+    "evidence_id": "792cc7b62d3a9a12305ff6816d40243062f224281755d460e2b98d338209a993",
+    "completed_review_sha256": "244c2d4f3b86b95714e4de33dd46c2baed5446aa6c82d9106973a0d67bb07288",
+    "portable_evidence_sha256": "1d56800905b1e8862d35babaa73c6ca7d2395a18dea98fea9f057696e64a9820",
+    "rustsec_revision": "af7b3ec33460b8e2de8d422e16d628518891a519",
+    "rustsec_archive_sha256": "9063bca1f9337bb085c3e9fcd0c3978f5422de9fa57e70e922510232913f6141",
+    "source_findings": 59,
+    "unknown_scopes": 8,
+    "live_provisional_rows": 0
+  },
+  "raw_evidence_sha256": {
+    "run-v2-gate-failure.log": "283a672abcba0fed495255b077607d7b1fec13f0af70d544fbfaada8b6d2500d",
+    "run-v2-pin-refusal.log": "edaf8e0329e017c373123d5c15dca650995cd6fe41810fa30bbf17c2ce78482b",
+    "run-v2-wrong-controller.log": "2016890a8f6d82b9f956969ee1f77fb5939c177417e0b6701cde165272a4a3c3",
+    "run-v2-positive.log": "735545a88162f843825750322273f5322e331b1fdee16160eea6ddc85af56147",
+    "jobs-v2-pin-refusal.json": "4ef5eaa68233d2e904a389baa803ec4a845d2dded0bdf75c29a48f685e71e340",
+    "jobs-v2-wrong-controller.json": "461cba502aaee87755cacafe95c8ab8df7ac059dcfbad7c1fa04c2cacdbbb698",
+    "jobs-v2-positive.json": "30b636ef63f673d48289a540c1f88f0f2b67bc37f8920e6deb23dbc3e99107d3",
+    "jobs-v2-gate-failure.json": "b4059f367e71ab089d748274ca2690bd3f5898a795e0777e72b38d9afda2fd35",
+    "platform-v2-variables.json": "8fb236d9855d43b214ea37db3296df40b54f11ee84dd9c96394813c4fbdf6423",
+    "platform-v2-tag.json": "e3db443292f553318ec934fc73f538f81f90d717d681369ecb99ceb924420b33",
+    "platform-v2-repo.json": "00d1d0d74321cbeb8f8c4e732c41644ba8def0fcc959182621e319c99125783b",
+    "platform-v2-secrets.json": "28c5423a249b6b471b90805492666338fab88266ac6a72b4f2b711fa65c03a68",
+    "platform-v2-verification.json": "bea7b473559064f5c99d4cc79a2992f6841093b19576c6b14b3f73568625962d",
+    "platform-v2-rules.json": "dcec3531cdbdbab2031e9dd5cae37e519228d56a1048f6d20a022eed73cf8ad3",
+    "platform-v2-permissions.json": "f6e178fc1e56cf43900da383f85398b61de9ae61c6b8433116c1856605745924",
+    "hosted-v2-run-identities.json": "ea5e99fd73b463488994a79639d285bf035a4a5a64a10ce180473911a0e23610"
+  },
+  "limits": [
+    "One bounded macOS ARM64 public cfg-if consumer rehearsal; not new compiler clearance, universal sandbox proof or automatic candidate-SHA check.",
+    "Actual GitHub cancellation was not exercised by these four cases; existing separate shell/process controls retain their own limits.",
+    "Provider fixtures remain reviewed 0.41.1 bytes; controller generated from reviewed 0.41.2 template; no provider relabelling or replacement."
+  ]
+}

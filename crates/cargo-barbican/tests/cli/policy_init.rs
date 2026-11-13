@@ -346,7 +346,7 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
     assert!(rendered.contains("- docs/dependency-reviews: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews/README.md: created\n"));
     assert!(rendered.contains(
-        "Adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/v0.41.1/docs/user/adoption.md"
+        "Adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/v0.41.2/docs/user/adoption.md"
     ));
     assert!(rendered.contains("Review current dependencies"));
     assert!(stderr.is_empty());
@@ -369,7 +369,7 @@ fn policy_init_without_ci_does_not_emit_workflow() {
     assert!(!temp_dir.join(".github/workflows/barbican.yml").exists());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("policy init --ci github"));
-    assert!(rendered.contains("blob/v0.41.1/docs/user/ci.md#pre-commit-hook"));
+    assert!(rendered.contains("blob/v0.41.2/docs/user/ci.md#pre-commit-hook"));
     assert!(stderr.is_empty());
 }
 
@@ -424,7 +424,7 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     );
     assert!(!workflow.contains("cargo barbican inventory --enforce"));
     assert!(workflow.contains("cargo install --locked"));
-    assert!(workflow.contains("--tag v0.41.1"));
+    assert!(workflow.contains("--tag v0.41.2"));
     assert!(workflow.contains("cargo-deny@0.19.6"));
     assert!(workflow.contains("cargo-audit@0.22.1"));
     assert!(
@@ -946,5 +946,166 @@ fn missing_template_is_added_alongside_custom_process_and_records() {
                 .unwrap()
                 .contains("ci.md#pre-commit-hook")
         );
+    }
+}
+
+#[test]
+fn admission_comparative_scripts_dispatch_dependency_commands_from_candidate() {
+    let temp = fresh_temp_dir();
+    let candidate = temp.join("candidate with spaces");
+    fs::create_dir(&candidate).unwrap();
+    write_root_manifest(&candidate);
+    write_toolchain_pin(&candidate);
+    fs::write(
+        candidate.join("barbican.toml"),
+        "[toolchain]\nrequire_admission=true\nadmission_scope='consumer'\n",
+    )
+    .unwrap();
+    fs::write(candidate.join("ci.json"), admission_bootstrap_config()).unwrap();
+    let init = Cli::parse_from([
+        "cargo-barbican",
+        "policy",
+        "init",
+        "--ci",
+        "github",
+        "--ci-bootstrap",
+        "ci.json",
+    ]);
+    assert_eq!(
+        run_cli_with_runner(
+            init,
+            &candidate,
+            &FakeCratesIoClient::default(),
+            &FakeCommandRunner::default(),
+            &mut Vec::new(),
+            &mut Vec::new()
+        )
+        .unwrap(),
+        ExitCode::SUCCESS
+    );
+    let workflow =
+        fs::read_to_string(candidate.join(".github/workflows/barbican-admission.yml")).unwrap();
+    let step = |id: &str| {
+        workflow
+            .split(&format!("- id: {id}\n"))
+            .nth(1)
+            .unwrap()
+            .split("      - id:")
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    let eligibility = step("evidence_toolchain");
+    assert!(eligibility.contains("--repo \"$PWD\" --data-dir \"$BARBICAN_DATA\" --cache-dir \"$BARBICAN_CACHE\" toolchain check"));
+    let tools = temp.join("trusted tools");
+    fs::create_dir_all(tools.join("bin")).unwrap();
+    let capture = tools.join("bin/cargo-barbican");
+    fs::write(&capture, "#!/bin/sh\n[ -z \"${RUSTUP_TOOLCHAIN+x}\" ] || exit 91\nprintf '%s\\0' \"$PWD\" \"$@\" > \"$CAPTURE\"\n").unwrap();
+    fs::set_permissions(&capture, fs::Permissions::from_mode(0o700)).unwrap();
+    let base = "d".repeat(40);
+    let lock = lockfile_with_packages(&[("serde", "1.0.227", true)]);
+    fs::write(candidate.join("Cargo.lock"), &lock).unwrap();
+    let manifest = fs::read_to_string(candidate.join("Cargo.toml")).unwrap();
+    for (id, command, expected) in [
+        (
+            "age_lock",
+            "age-lock",
+            "no newly selected crates.io packages",
+        ),
+        ("assess", "assess", "Suggested classification: routine-safe"),
+    ] {
+        let section = step(id);
+        assert!(section.contains("working-directory: candidate"));
+        for prerequisite in ["evidence_toolchain", "base"] {
+            assert!(section.contains(&format!("steps.{prerequisite}.outcome == 'success'")));
+        }
+        let script = section
+            .split("        run: |\n")
+            .nth(1)
+            .unwrap()
+            .lines()
+            .map(|line| line.strip_prefix("          ").unwrap_or(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let captured = temp.join(format!("{id}.args"));
+        let output = std::process::Command::new("/bin/bash")
+            .args(["-e", "-o", "pipefail", "-c", &script])
+            .current_dir(&candidate)
+            .env("BARBICAN_TOOLS", &tools)
+            .env("BARBICAN_DATA", temp.join("private authority"))
+            .env("BARBICAN_CACHE", temp.join("private cache"))
+            .env("RUSTUP_TOOLCHAIN", "bootstrap-must-be-unset")
+            .env("BASE_SHA", &base)
+            .env("GITHUB_OUTPUT", temp.join("outputs"))
+            .env("CAPTURE", &captured)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let bytes = fs::read(&captured).unwrap();
+        let argv: Vec<_> = bytes
+            .split(|b| *b == 0)
+            .filter(|b| !b.is_empty())
+            .map(|b| std::str::from_utf8(b).unwrap())
+            .collect();
+        assert_eq!(
+            fs::canonicalize(argv[0]).unwrap(),
+            fs::canonicalize(&candidate).unwrap()
+        );
+        let cli =
+            Cli::parse_from(std::iter::once("cargo-barbican").chain(argv[1..].iter().copied()));
+        let runner = FakeCommandRunner::default()
+            .with_git_show(&format!("{base}:Cargo.lock"), &lock)
+            .with_git_show(&format!("{base}:Cargo.toml"), &manifest);
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        assert_eq!(
+            run_cli_with_runner(
+                cli,
+                Path::new(argv[0]),
+                &FakeCratesIoClient::default(),
+                &runner,
+                &mut stdout,
+                &mut stderr
+            )
+            .unwrap(),
+            ExitCode::SUCCESS,
+            "{}",
+            String::from_utf8_lossy(&stderr)
+        );
+        assert!(String::from_utf8(stdout).unwrap().contains(expected));
+        for flag in ["--repo", "--data-dir", "--cache-dir"] {
+            let cli = Cli::parse_from([
+                "cargo-barbican",
+                flag,
+                temp.to_str().unwrap(),
+                command,
+                "--base-ref",
+                &base,
+            ]);
+            let runner = FakeCommandRunner::default();
+            let mut stderr = Vec::new();
+            assert_eq!(
+                run_cli_with_runner(
+                    cli,
+                    &candidate,
+                    &FakeCratesIoClient::default(),
+                    &runner,
+                    &mut Vec::new(),
+                    &mut stderr
+                )
+                .unwrap(),
+                ExitCode::from(1)
+            );
+            assert!(
+                String::from_utf8(stderr)
+                    .unwrap()
+                    .contains("toolchain storage/context flags apply only")
+            );
+            assert!(runner.cargo_locate_project_calls.borrow().is_empty());
+        }
     }
 }

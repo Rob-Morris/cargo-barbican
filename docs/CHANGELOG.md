@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.41.2](changelog/v0.41.2.md) | 2026-11-13 | Fix comparative evidence in admission CI |
 | [v0.41.1](changelog/v0.41.1.md) | 2026-11-13 | Keep distinct provisional RustSec findings before admission |
 | [v0.41.0](changelog/v0.41.0.md) | 2026-11-12 | Complete ARM64 toolchain maintenance and CI admission |
 | [v0.40.0](changelog/v0.40.0.md) | 2026-11-10 | Qualify default Rust profiles and component evidence |

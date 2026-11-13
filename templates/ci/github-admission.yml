@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.41.1
+# Synced from cargo-barbican v0.41.2
 # Review the version-matched docs/user/ci.md#maintainer-dispatched-admission.
 # A trusted maintainer must dispatch from the reviewed immutable protected
 # controller tag. Optional actor/event policies add defence in depth.
@@ -177,7 +177,7 @@ jobs:
         run: |
           @@SIGNAL_GUARD@@
           unset RUSTUP_TOOLCHAIN
-          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" age-lock --base-ref "$BASE_SHA"
+          "$BARBICAN_TOOLS/bin/cargo-barbican" age-lock --base-ref "$BASE_SHA"
       - id: assess
         name: Assess dependency changes
         if: ${{ !cancelled() && steps.fetch.outcome == 'success' && steps.evidence_toolchain.outcome == 'success' && steps.base.outcome == 'success' && steps.pre_release.outputs.cancelled != 'true' && steps.evidence_toolchain.outputs.cancelled != 'true' && steps.base.outputs.cancelled != 'true' && steps.age_lock.outputs.cancelled != 'true' }}
@@ -185,7 +185,7 @@ jobs:
         run: |
           @@SIGNAL_GUARD@@
           unset RUSTUP_TOOLCHAIN
-          "$BARBICAN_TOOLS/bin/cargo-barbican" --repo "$PWD" --data-dir "$BARBICAN_DATA" --cache-dir "$BARBICAN_CACHE" assess --base-ref "$BASE_SHA"
+          "$BARBICAN_TOOLS/bin/cargo-barbican" assess --base-ref "$BASE_SHA"
       - id: summary
         name: Summarise the maintainer-dispatched admission run
         if: ${{ !cancelled() }}

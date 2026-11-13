@@ -37,7 +37,7 @@ Pin every tool the workflow shells out to, the same way you pin
 cargo-barbican itself:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.1
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.2
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -205,7 +205,12 @@ checks conformance, fetches dependencies, and runs the existing gate. It never
 activates or edits the candidate pin. After an ordinary gate failure,
 independent release-age and assessment evidence still run when fresh
 eligibility and the explicit base are available. Failures keep the run red;
-recognised workflow cancellation stops subsequent evidence.
+recognised workflow cancellation stops subsequent evidence. The comparative
+`age-lock` and `assess` commands run from the candidate directory with the
+explicit base. Toolchain authority/cache flags remain on the preceding
+eligibility check and other commands that consume those stores; they are not
+arguments to the dependency comparison commands. Existing generated workflows
+need this invocation correction applied manually.
 Shell-observed SIGINT/SIGTERM and conventional 130/143 exits also mark the
 stage cancelled, block later independent evidence and keep the summary red.
 This does not infer a signal sent only to a child which reports an ordinary
@@ -223,7 +228,10 @@ and ruleset requirements.
 
 Local tests exercise input comparison, fresh-state admission, refusal and
 generated ordering. Hosted assurance also requires verifying the actual
-GitHub protections and trusted provider in the consumer repository.
+GitHub protections and trusted provider in the consumer repository. The
+[bounded hosted rehearsal](../dependency-reviews/2026-11-13-hosted-admission-rehearsal.md)
+records a real positive run, controller/pin refusals and independent evidence
+after a test-gate failure; consumers still need their own deployment review.
 
 ## Worked example
 
@@ -265,7 +273,7 @@ jobs:
       - id: tools
         name: Install cargo-barbican, cargo-deny, and cargo-audit
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.1 cargo-barbican
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.2 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
       - id: fetch
@@ -403,7 +411,7 @@ jobs:
 
       - name: Install cargo-barbican (pinned)
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.1
+          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.2
 
       - name: Install cargo-deny and cargo-audit (pinned)
         run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
@@ -490,7 +498,7 @@ copy only to an absent destination:
 
 ```sh
 barbican_source=$(mktemp -d) &&
-git clone --depth 1 --branch v0.41.1 \
+git clone --depth 1 --branch v0.41.2 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream" &&
 cat "$barbican_source/upstream/templates/hooks/pre-commit"
 ```

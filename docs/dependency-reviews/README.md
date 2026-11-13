@@ -89,6 +89,9 @@ admission, installation or activation commands.
 - [Target-independent rust-src and reviewed component additions](2026-11-12-rust-src-additive-qualification.md)
   and [assessment/native evidence summary](2026-11-12-rust-src-additive-qualification.json)
   — exact source/native scope, retained-state semantics and qualification results.
+- [Hosted protected-controller admission rehearsal](2026-11-13-hosted-admission-rehearsal.md)
+  and [exact inputs, runs and evidence hashes](2026-11-13-hosted-admission-rehearsal.json)
+  — real ARM64 positive/refusal/post-gate evidence, with bounded assurance.
 - [Exact official Rustup 1.29.3 evaluator](2026-11-12-official-rustup-evaluator.md)
   and [static assessment/native result](2026-11-12-official-rustup-evaluator.json)
   — scoped ARM64 qualification with supplier-build uncertainty retained.
