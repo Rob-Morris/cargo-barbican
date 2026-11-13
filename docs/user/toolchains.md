@@ -69,6 +69,24 @@ dependency graph and browser behaviour remain for explicit assessment. Missing
 required provenance blocks acceptance; a stated residual uncertainty can be
 assessed but cannot replace missing evidence.
 
+RustSec records awaiting an assigned advisory number appear as
+`rustsec-provisional:<digest>/…` findings. Each digest binds the exact crates
+corpus path and original record bytes, so separate issues remain separate even
+when they share `RUSTSEC-0000-0000`, a package or aliases. The generated review
+shows the original placeholder, source path, exact source commit and affected
+status beside each required `Assessed-Finding` line. Read and assess every
+issue individually. Provisional status gives no exemption: known applicable
+adverse findings still block admission, while unknown reachability uses the
+ordinary explicit assessment rules.
+
+A fresh collection after assignment, a path change or a body change requires
+new exact-evidence review and acceptance; aliases do not transfer approval.
+Retained historical evidence, including an old bare-placeholder finding, keeps
+its original identity when loaded. Continuing use checks the existing exact
+consumer/admission/installation binding and retained source knowledge and
+expiry; it does not poll upstream for assignment. Fresh operations still require
+online collection or the existing explicitly bounded cached-admission route.
+
 Read the collected sources and findings and complete the generated review
 record. Its exact identity lines and assessed findings/unknowns bind your
 decision to this investigation and policy. Removing `PENDING` markers alone

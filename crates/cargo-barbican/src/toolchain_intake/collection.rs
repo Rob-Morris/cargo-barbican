@@ -415,15 +415,32 @@ fn collect_advisories(
     let url = format!("https://codeload.github.com/RustSec/advisory-db/tar.gz/{revision}");
     let bytes = collector.sources.fetch(&url)?;
     let corpus = read_advisory_archive(&bytes, &revision).map_err(|e| e.to_string())?;
+    let findings =
+        findings_from_corpus(&corpus, &revision, collector.subject, locks, collector.now)?;
+    for archive in &collector.subject.record().archives.clone() {
+        let scope = format!("{}/{}", archive.package, archive.target);
+        collector.observe(SourceKind::Advisories,&scope,&url,&revision,bytes.clone(),Coverage::ResidualUnknown,"Complete bounded exact-commit RustSec crates/Rust corpus inspected against separate represented source locks; source matches retained as findings. Optional/dev/host/build inclusion, native LLVM coverage and binary reachability remain unknown; official security announcements are separate evidence.");
+    }
+    Ok(findings)
+}
+
+pub(super) fn findings_from_corpus(
+    corpus: &BTreeMap<String, String>,
+    revision: &str,
+    subject: &Subject,
+    locks: &[Vec<SourcePackage>],
+    now: i64,
+) -> Result<Vec<Finding>> {
     let advisories: Vec<_> = corpus
         .iter()
         .map(|(path, body)| {
             parse_source_advisory(path, body)
-                .map_err(|e| format!("RustSec advisory source {path}: {e}"))
+                .map(|advisory| (path, advisory))
+                .map_err(|e| e.to_string())
         })
         .collect::<std::result::Result<_, _>>()?;
     let mut findings = Vec::new();
-    let selected_archives = collector.subject.record().archives.clone();
+    let selected_archives = subject.record().archives.clone();
     for archive in &selected_archives {
         let scope = format!("{}/{}", archive.package, archive.target);
         let lock =
@@ -432,7 +449,7 @@ fn collect_advisories(
                 ComponentCorpus::StandardLibrary => &locks[1],
                 ComponentCorpus::RustRoot => &locks[0],
             };
-        for advisory in &advisories {
+        for (path, advisory) in &advisories {
             let versions: Vec<&str> = match advisory.corpus {
                 AdvisoryCorpus::Crates => lock
                     .iter()
@@ -441,9 +458,9 @@ fn collect_advisories(
                     .collect(),
                 AdvisoryCorpus::Rust => {
                     if !matches!(advisory.package.as_str(), "std" | "rustdoc" | "cargo") {
-                        return Err(
-                            "unsupported RustSec Rust-corpus package/version semantics".into()
-                        );
+                        return Err(format!(
+                            "RustSec advisory source {path}: unsupported Rust-corpus package/version semantics"
+                        ));
                     }
                     if (advisory.package == "std"
                         && !matches!(archive.package.as_str(), "rust-std" | "rust-src"))
@@ -452,29 +469,84 @@ fn collect_advisories(
                     {
                         continue;
                     }
-                    vec![collector.subject.record().release.as_str()]
+                    vec![subject.record().release.as_str()]
                 }
             };
             for version in versions {
-                if advisory
-                    .version_status(version, collector.now)
-                    .map_err(|e| {
-                        format!(
-                            "advisory {} package {} exact source version {version}: {e}",
-                            advisory.id, advisory.package
-                        )
-                    })?
-                    != SourceVersionStatus::Affected
+                if advisory.version_status(version, now).map_err(|e| {
+                    format!(
+                        "advisory source {path}: {} package {} exact source version {version}: {e}",
+                        advisory.id, advisory.package
+                    )
+                })? != SourceVersionStatus::Affected
                 {
                     continue;
                 }
                 let maintenance = advisory.informational.as_deref().unwrap_or("vulnerability");
-                findings.push(Finding{id:format!("{}/{maintenance}/{}@{version}/{scope}",advisory.id,advisory.package),source:SourceId{kind:SourceKind::Advisories,scope:scope.clone()},change:FindingChange::Unknown,exposure:Exposure::Unknown,rationale:format!("{maintenance}: source corpus contains {}@{version} in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture {:?}, OS {:?}, function constraints {:?}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",advisory.package,advisory.affected_arch,advisory.affected_os,advisory.affected_functions)});
+                let (identity, context) = match &advisory.identity {
+                    SourceAdvisoryIdentity::Assigned => (advisory.id.clone(), String::new()),
+                    SourceAdvisoryIdentity::Provisional { source_record } => (
+                        format!("rustsec-provisional:{source_record}"),
+                        format!(
+                            "Provisional RustSec record {} at {path}, commit {revision}; source status: affected. ",
+                            advisory.id
+                        ),
+                    ),
+                };
+                findings.push(Finding{id:format!("{}/{maintenance}/{}@{version}/{scope}",identity,advisory.package),source:SourceId{kind:SourceKind::Advisories,scope:scope.clone()},change:FindingChange::Unknown,exposure:Exposure::Unknown,rationale:format!("{context}{maintenance}: source corpus contains {}@{version} in the affected stable-version range. Initial admission has no accepted baseline. RustSec architecture {:?}, OS {:?}, function constraints {:?}; selected-host compiled inclusion and reachability are unproved and require explicit assessment. RustSec rust/std, rust/rustdoc and rust/cargo use distribution Rust release versions; GitHub Cargo package advisories use Cargo package 0.x versions, distinct from displayed Cargo 1.x versions.",advisory.package,advisory.affected_arch,advisory.affected_os,advisory.affected_functions)});
             }
         }
-        collector.observe(SourceKind::Advisories,&scope,&url,&revision,bytes.clone(),Coverage::ResidualUnknown,"Complete bounded exact-commit RustSec crates/Rust corpus inspected against separate represented source locks; source matches retained as findings. Optional/dev/host/build inclusion, native LLVM coverage and binary reachability remain unknown; official security announcements are separate evidence.");
     }
+    consolidate_findings(findings)
+}
+
+fn consolidate_findings(mut findings: Vec<Finding>) -> Result<Vec<Finding>> {
     findings.sort_by(|a, b| a.id.cmp(&b.id));
-    findings.dedup_by(|a, b| a.id == b.id);
+    for pair in findings.windows(2) {
+        if pair[0].id == pair[1].id && pair[0] != pair[1] {
+            return Err(format!(
+                "conflicting advisory finding identity {}",
+                pair[0].id
+            ));
+        }
+    }
+    findings.dedup();
     Ok(findings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn repeated_rows_consolidate_but_identity_collisions_refuse() {
+        let row = Finding {
+            id: "rustsec-provisional:fixture/vulnerability/example@1.0.0/cargo/host".into(),
+            source: SourceId {
+                kind: SourceKind::Advisories,
+                scope: "cargo/host".into(),
+            },
+            change: FindingChange::Unknown,
+            exposure: Exposure::Unknown,
+            rationale: "one exact source finding".into(),
+        };
+        assert_eq!(
+            consolidate_findings(vec![row.clone(), row.clone()]).unwrap(),
+            vec![row.clone()]
+        );
+        for field in ["source", "rationale", "change", "exposure"] {
+            let mut other = row.clone();
+            match field {
+                "source" => other.source.scope = "rustc/host".into(),
+                "rationale" => other.rationale = "different source finding".into(),
+                "change" => other.change = FindingChange::Resolved,
+                _ => other.exposure = Exposure::Known,
+            }
+            assert!(
+                consolidate_findings(vec![row.clone(), other])
+                    .unwrap_err()
+                    .contains("conflicting advisory finding identity"),
+                "{field}"
+            );
+        }
+    }
 }

@@ -263,18 +263,40 @@ pub(super) fn create(
     seed: &Material,
     now: i64,
 ) -> Result<(Sha256Digest, ReconstructedReview)> {
+    create_with_sources(
+        release,
+        request,
+        policy,
+        data,
+        cache,
+        seed,
+        now,
+        &Sources::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn create_with_sources(
+    release: &str,
+    request: &SelectionRequest,
+    policy: EffectivePolicy,
+    data: &PrivateStore,
+    cache: &PrivateStore,
+    seed: &Material,
+    now: i64,
+    sources: &Sources,
+) -> Result<(Sha256Digest, ReconstructedReview)> {
     policy.id().map_err(|e| e.to_string())?;
-    let sources = Sources::new();
     let trust = Trust::load(data, seed, now)?;
     let (subject, selection, inventories, snapshot_root, signed_at) =
-        collect_inputs(release, request, data, cache, &trust, &sources, now)?;
+        collect_inputs(release, request, data, cache, &trust, sources, now)?;
     let manifest_bytes = data.read(
         Path::new(&format!("{snapshot_root}/manifest.toml")),
         8 * 1024 * 1024,
     )?;
     let manifest = Manifest::parse(manifest_bytes.bytes(), release).map_err(|e| e.to_string())?;
     let collected =
-        super::collection::collect(&sources, &subject, &manifest, &inventories, signed_at, now)?;
+        super::collection::collect(sources, &subject, &manifest, &inventories, signed_at, now)?;
     super::collection::persist(data, &snapshot_root, &collected)?;
     let record = ReviewRecord {
         schema_version: 1,
@@ -328,8 +350,17 @@ pub(super) fn refresh(
     seed: &Material,
     now: i64,
 ) -> Result<ReconstructedReview> {
+    refresh_with_sources(data, id, seed, now, &Sources::new())
+}
+
+pub(super) fn refresh_with_sources(
+    data: &PrivateStore,
+    id: &Sha256Digest,
+    seed: &Material,
+    now: i64,
+    sources: &Sources,
+) -> Result<ReconstructedReview> {
     let mut review = load(data, id, seed, now)?;
-    let sources = Sources::new();
     let url = format!(
         "https://static.rust-lang.org/dist/channel-rust-{}.toml",
         review.subject.record().release
@@ -349,7 +380,7 @@ pub(super) fn refresh(
     let parsed =
         Manifest::parse(&manifest, &review.subject.record().release).map_err(|e| e.to_string())?;
     let collected = super::collection::collect(
-        &sources,
+        sources,
         &review.subject,
         &parsed,
         &review.inventories,
@@ -400,6 +431,29 @@ pub(super) fn import_portable(
     cached: bool,
     now: i64,
 ) -> Result<()> {
+    import_portable_with_sources(
+        data,
+        cache,
+        repo,
+        id,
+        cached,
+        now,
+        &Sources::new(),
+        &super::trust::bundled_seed()?,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn import_portable_with_sources(
+    data: &PrivateStore,
+    cache: &PrivateStore,
+    repo: &RepoContext,
+    id: &Sha256Digest,
+    cached: bool,
+    now: i64,
+    sources: &Sources,
+    seed: &Material,
+) -> Result<()> {
     let policy_bytes = super::repo::read_optional(&repo.root, Path::new("reviewed-targets.toml"))?
         .ok_or("portable admission policy is missing")?;
     let targets = barbican::parse_reviewed_targets_toml(
@@ -447,14 +501,15 @@ pub(super) fn import_portable(
         },
     };
     if !cached {
-        let (actual, _) = create(
+        let (actual, _) = create_with_sources(
             &portable.subject.release,
             &request,
             portable.policy,
             data,
             cache,
-            &super::trust::bundled_seed()?,
+            seed,
             now,
+            sources,
         )?;
         if actual != *id {
             return Err(format!(
@@ -476,8 +531,7 @@ pub(super) fn import_portable(
         data.publish(&Path::new(&snapshot_root).join(name), &bytes)?;
         inputs.insert(name, bytes);
     }
-    let seed = super::trust::bundled_seed()?;
-    let trust = Trust::load(data, &seed, now)?;
+    let trust = Trust::load(data, seed, now)?;
     let signer = trust.verify(
         &inputs["certificate.pgp"],
         &inputs["manifest.asc"],

@@ -38,7 +38,10 @@ pub(super) fn template(review: &ReconstructedReview, id: &Sha256Digest) -> Resul
         text.push_str(&format!("Assessed-Unknown: {}\n", source_key(&unknown)?));
     }
     for finding in &review.record.evidence.findings {
-        text.push_str(&format!("Assessed-Finding: {}\n", finding.id));
+        text.push_str(&format!(
+            "Assessed-Finding: {}\nFinding context: {}\n",
+            finding.id, finding.rationale
+        ));
     }
     text.push_str("\nRationale: PENDING — review every source snapshot and finding, explain accepted residual uncertainty and relevant applicability. Set Decision: ACCEPT and remove all PENDING markers only after human review.\n");
     Ok(text)

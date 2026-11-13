@@ -105,7 +105,7 @@ fn read_advisory_tar(
         )?;
         require(
             paths.insert(name.to_owned()),
-            "duplicate advisory archive path",
+            &format!("duplicate advisory archive path {name}"),
         )?;
         let mut body = Vec::new();
         if kind.as_byte() == b'g' {
@@ -146,7 +146,9 @@ fn read_advisory_tar(
                     .read_to_end(&mut body)
                     .map_err(io_error)?;
                 require(body.len() as u64 == size, "truncated advisory body")?;
-                let text = String::from_utf8(body).map_err(|e| AdmissionError(e.to_string()))?;
+                let text = String::from_utf8(body).map_err(|e| {
+                    AdmissionError(format!("RustSec advisory source {relative}: {e}"))
+                })?;
                 parse_source_advisory(relative, &text)?;
                 result.insert(relative.to_owned(), text);
             } else {
@@ -205,8 +207,14 @@ pub enum SourceVersionStatus {
     Unaffected,
     Withdrawn,
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceAdvisoryIdentity {
+    Assigned,
+    Provisional { source_record: Sha256Digest },
+}
 #[derive(Debug, Clone)]
 pub struct SourceAdvisory {
+    pub identity: SourceAdvisoryIdentity,
     pub corpus: AdvisoryCorpus,
     pub id: String,
     pub package: String,
@@ -383,10 +391,35 @@ fn rustsec_source_range(range: &semver::VersionReq) -> Result<SourceRange> {
 }
 
 pub fn parse_source_advisory(path: &str, markdown: &str) -> Result<SourceAdvisory> {
+    parse_source_advisory_inner(path, markdown)
+        .map_err(|e| AdmissionError(format!("RustSec advisory source {path}: {e}")))
+}
+
+// Field order and domain are the provisional source identity v1 protocol.
+#[derive(Serialize)]
+struct ProvisionalSourceRecord<'a> {
+    corpus: &'static str,
+    path: &'a str,
+    body_sha256: Sha256Digest,
+}
+fn provisional_source_identity(path: &str, markdown: &str) -> Result<SourceAdvisoryIdentity> {
+    Ok(SourceAdvisoryIdentity::Provisional {
+        source_record: record_id(
+            "rustsec-provisional-source-v1",
+            &ProvisionalSourceRecord {
+                corpus: "https://github.com/RustSec/advisory-db/crates",
+                path,
+                body_sha256: digest_bytes(markdown.as_bytes()),
+            },
+        )?,
+    })
+}
+
+fn parse_source_advisory_inner(path: &str, markdown: &str) -> Result<SourceAdvisory> {
     require(markdown.len() <= MAX_BODY as usize, "advisory text limit")?;
     let pieces: Vec<_> = path.split('/').collect();
     require(
-        pieces.len() == 3 && pieces[2].ends_with(".md"),
+        path.len() <= 4096 && pieces.len() == 3 && pieces[2].ends_with(".md"),
         "advisory corpus path",
     )?;
     let corpus = match pieces[0] {
@@ -403,7 +436,7 @@ pub fn parse_source_advisory(path: &str, markdown: &str) -> Result<SourceAdvisor
     require(!body.trim().is_empty(), "missing advisory explanation")?;
     let raw: RawAdvisory = toml::from_str(front).map_err(|e| AdmissionError(e.to_string()))?;
     require(
-        raw.advisory.package == pieces[1] && format!("{}.md", raw.advisory.id) == pieces[2],
+        raw.advisory.package == pieces[1],
         "advisory path identity mismatch",
     )?;
     text(&raw.advisory.id)?;
@@ -435,6 +468,29 @@ pub fn parse_source_advisory(path: &str, markdown: &str) -> Result<SourceAdvisor
             )?;
         }
     }
+    let identity = if corpus == AdvisoryCorpus::Crates && raw.advisory.id == "RUSTSEC-0000-0000" {
+        let filename = pieces[2];
+        let valid = filename == "RUSTSEC-0000-0000.md"
+            || filename
+                .strip_prefix("RUSTSEC-0000-0000.")
+                .and_then(|name| name.strip_suffix(".md"))
+                .is_some_and(|slug| {
+                    slug.split('-').all(|segment| {
+                        !segment.is_empty()
+                            && segment
+                                .bytes()
+                                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+                    })
+                });
+        require(valid, "unsupported provisional advisory filename")?;
+        provisional_source_identity(path, markdown)?
+    } else {
+        require(
+            format!("{}.md", raw.advisory.id) == pieces[2],
+            "advisory path identity mismatch",
+        )?;
+        SourceAdvisoryIdentity::Assigned
+    };
     for values in [
         &raw.advisory.aliases,
         &raw.advisory.categories,
@@ -495,6 +551,7 @@ pub fn parse_source_advisory(path: &str, markdown: &str) -> Result<SourceAdvisor
         }
     }
     Ok(SourceAdvisory {
+        identity,
         corpus,
         id: raw.advisory.id,
         package: raw.advisory.package,
@@ -568,6 +625,128 @@ mod tests {
             "```toml\n[advisory]\nid='RUSTSEC-2026-0001'\npackage='example'\ndate='2026-01-01'\n{extra}\n[versions]\npatched={patched}\nunaffected={unaffected}\n```\n\n# Source evidence, exposure unknown\n"
         )
     }
+    #[test]
+    fn provisional_identity_grammar_and_exact_bytes_are_bound() {
+        let body = advisory("[]", "[]", "").replace("RUSTSEC-2026-0001", "RUSTSEC-0000-0000");
+        let path = "crates/example/RUSTSEC-0000-0000.first-issue.md";
+        let parsed = parse_source_advisory(path, &body).unwrap();
+        let SourceAdvisoryIdentity::Provisional { source_record } = &parsed.identity else {
+            panic!("provisional identity required")
+        };
+        assert_eq!(
+            source_record.as_str(),
+            "5364074e25036c3560d82c57d5cfe4516453d60986728bca5a0231a2639d5856"
+        );
+        for (other_path, other_body) in [
+            ("crates/example/RUSTSEC-0000-0000.md", body.clone()),
+            (
+                "crates/example/RUSTSEC-0000-0000.second-issue.md",
+                body.clone(),
+            ),
+            (path, format!("{body}\n")),
+        ] {
+            let other = parse_source_advisory(other_path, &other_body).unwrap();
+            assert_ne!(parsed.identity, other.identity);
+        }
+        for filename in [
+            "RUSTSEC-0000-0000..md",
+            "RUSTSEC-0000-0000.A.md",
+            "RUSTSEC-0000-0000.-a.md",
+            "RUSTSEC-0000-0000.a-.md",
+            "RUSTSEC-0000-0000.a--b.md",
+            "RUSTSEC-0000-0000.a_b.md",
+            "RUSTSEC-0000-0000.é.md",
+            "RUSTSEC-0000-0000.a.b.md",
+            "RUSTSEC-2026-0001.first-issue.md",
+        ] {
+            let path = format!("crates/example/{filename}");
+            let error = parse_source_advisory(&path, &body).unwrap_err().to_string();
+            assert!(error.contains(&path), "{error}");
+        }
+        assert!(parse_source_advisory("rust/example/RUSTSEC-0000-0000.md", &body).is_err());
+        assert!(
+            parse_source_advisory(path, &body.replace("package='example'", "package='other'"))
+                .is_err()
+        );
+        let assigned = advisory("[]", "[]", "");
+        assert!(
+            parse_source_advisory("crates/example/RUSTSEC-2026-0001.first-issue.md", &assigned)
+                .is_err()
+        );
+        assert_eq!(
+            parse_source_advisory("crates/example/RUSTSEC-2026-0001.md", &assigned)
+                .unwrap()
+                .identity,
+            SourceAdvisoryIdentity::Assigned
+        );
+    }
+
+    #[test]
+    fn retained_upstream_provisional_records_have_distinct_identities() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/rustsec-provisional");
+        let mut ids = BTreeSet::new();
+        for package in ["hickory-net", "hickory-proto"] {
+            for entry in std::fs::read_dir(root.join("crates").join(package)).unwrap() {
+                let entry = entry.unwrap();
+                let path = format!("crates/{package}/{}", entry.file_name().to_str().unwrap());
+                let body = std::fs::read_to_string(entry.path()).unwrap();
+                let parsed = parse_source_advisory(&path, &body).unwrap();
+                assert_eq!(parsed.id, "RUSTSEC-0000-0000");
+                assert_eq!(
+                    parsed
+                        .version_status(
+                            if package == "hickory-net" {
+                                "0.26.0"
+                            } else {
+                                "0.25.0"
+                            },
+                            1793750400
+                        )
+                        .unwrap(),
+                    SourceVersionStatus::Affected
+                );
+                let SourceAdvisoryIdentity::Provisional { source_record } = parsed.identity else {
+                    panic!("provisional")
+                };
+                assert!(ids.insert(source_record.to_string()));
+            }
+        }
+        assert_eq!(ids.len(), 6);
+    }
+
+    #[test]
+    fn archive_parse_errors_name_the_member_and_duplicate_paths_refuse() {
+        let mut bytes = archive();
+        edit(&mut bytes[1024..], |h| {
+            h.set_path(format!(
+                "advisory-db-{REV}/crates/example/RUSTSEC-2026-0002.md"
+            ))
+            .unwrap()
+        });
+        let error = read_advisory_tar(bytes.as_slice(), REV)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("crates/example/RUSTSEC-2026-0002.md"),
+            "{error}"
+        );
+        let bytes = archive();
+        let size = tar::Header::from_byte_slice(&bytes[1024..1536])
+            .size()
+            .unwrap() as usize;
+        let end = 1536 + size.div_ceil(512) * 512;
+        let mut duplicate = bytes[..end].to_vec();
+        duplicate.extend_from_slice(&bytes[1024..end]);
+        duplicate.extend_from_slice(&[0; 1024]);
+        assert!(
+            read_advisory_tar(duplicate.as_slice(), REV)
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate advisory archive path")
+        );
+    }
+
     fn archive() -> Vec<u8> {
         let mut tar = tar::Builder::new(Vec::new());
         let comment = format!("52 comment={REV}\n");

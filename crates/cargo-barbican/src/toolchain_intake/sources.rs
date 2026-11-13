@@ -8,6 +8,8 @@ const USER_AGENT: &str = concat!("cargo-barbican/", env!("CARGO_PKG_VERSION"));
 
 pub(super) struct Sources {
     agent: Agent,
+    #[cfg(test)]
+    fixture: Option<std::collections::BTreeMap<String, Vec<u8>>>,
 }
 impl Sources {
     pub fn new() -> Self {
@@ -18,11 +20,27 @@ impl Sources {
             .build();
         Self {
             agent: config.into(),
+            #[cfg(test)]
+            fixture: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn fixture(responses: std::collections::BTreeMap<String, Vec<u8>>) -> Self {
+        let mut sources = Self::new();
+        sources.fixture = Some(responses);
+        sources
     }
 
     pub fn fetch(&self, url: &str) -> Result<Vec<u8>, String> {
         official_url(url)?;
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture
+                .get(url)
+                .cloned()
+                .ok_or_else(|| format!("missing fixture source {url}"));
+        }
         let mut response = self
             .agent
             .get(url)
@@ -44,6 +62,13 @@ impl Sources {
     }
 
     pub fn cargo_advisories(&self) -> Result<Vec<u8>, String> {
+        #[cfg(test)]
+        if let Some(fixture) = &self.fixture {
+            return fixture
+                .get("https://api.github.com/repos/rust-lang/cargo/security-advisories")
+                .cloned()
+                .ok_or_else(|| "missing fixture Cargo advisories".into());
+        }
         let mut advisories = Vec::new();
         for page in 1..=10 {
             let url = format!(
@@ -115,6 +140,14 @@ impl Sources {
             return Err("archive is outside the official distribution source".into());
         }
         official_url(url)?;
+        #[cfg(test)]
+        if self.fixture.is_some() {
+            return store.publish_stream(
+                relative,
+                std::io::Cursor::new(self.fetch(url)?),
+                barbican::rust_distribution::MAX_COMPRESSED_BYTES,
+            );
+        }
         let mut response = self
             .agent
             .get(url)

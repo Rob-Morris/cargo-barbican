@@ -138,6 +138,34 @@ independently verified archive cache bytes. It preserves the repository author's
 assessment and repository bytes while recording the new local acceptance time.
 A changed source identity produces a new review requiring assessment.
 
+Toolchain RustSec crates-corpus intake accepts the exact declared placeholder
+`RUSTSEC-0000-0000` only at `RUSTSEC-0000-0000.md` or
+`RUSTSEC-0000-0000.<slug>.md`, where the non-empty slug consists of lowercase
+ASCII letters/digits in segments separated by single hyphens. Assigned
+RustSec records retain exact filename/ID parity; the Rust corpus retains its
+assigned CVE rule. Unsupported input refuses with its source path, including
+when first parsed inside the bounded archive.
+
+Provisional findings use `rustsec-provisional:<source-record-digest>` followed
+by the existing category/package@version/component scope. The domain-separated
+source identity binds the authoritative crates namespace, full corpus-relative
+path and SHA256 of the exact UTF-8 record bytes. Assigned finding IDs remain
+unchanged. Only semantically identical repeated rows consolidate; conflicting
+values for one finding identity refuse. No schema migration or assigned-ID
+exception grant follows from a provisional reference.
+
+Generated templates retain the exact `Assessed-Finding: <id>` grammar and one
+overall `Rationale:` field, with a separate `Finding context:` line carrying
+bounded rationale. Provisional context includes the declared placeholder,
+source path, exact commit and affected status. Every individual finding remains
+required in completed prose. Provisional status neither weakens the known
+applicable adverse-finding refusal nor adds a wait-for-assignment gate.
+Assignment or material path/body changes on fresh collection cannot reuse a
+prior assessment. Exact retained historical evidence remains unchanged for
+otherwise permitted cached/continuing operations; newer retained facts,
+conflicts, source expiry and exact consumer bindings still apply. There is no
+background upstream polling or automatic assignment discovery.
+
 `accept --approved-repo APPROVED-ROOT` additionally requires an independent
 governance checkout whose origin the caller has already authenticated. Before
 opening local data/cache stores, it compares the candidate's admission-enabled
