@@ -318,6 +318,30 @@ struct TarballInspection {
     inspection_failures: Vec<String>,
 }
 
+/// Inspect exact original archive bytes without inventing mutable release/API facts.
+pub fn inspect_crate_archive_ioc(
+    spec: &ExactCrateSpec,
+    tarball_bytes: &[u8],
+    expected_checksum: &crate::Sha256Digest,
+    control: crate::ioc::ScanControl<'_>,
+) -> Result<crate::ioc::Inspection, String> {
+    let inspection =
+        inspect_verified_tarball(spec, tarball_bytes, expected_checksum.clone(), control);
+    let mut ioc = inspection.ioc_inspection.ok_or_else(|| {
+        if inspection.inspection_failures.is_empty() {
+            "registry IOC original-source evidence unavailable".into()
+        } else {
+            inspection.inspection_failures.join("; ")
+        }
+    })?;
+    if !inspection.inspection_failures.is_empty() {
+        ioc.coverage = crate::ioc::Coverage::Incomplete {
+            reason: inspection.inspection_failures.join("; "),
+        };
+    }
+    Ok(ioc)
+}
+
 fn has_execution_surface(
     has_build_script: bool,
     proc_macro: bool,

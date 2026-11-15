@@ -49,7 +49,7 @@ controller/provider rollout before use.
 Each template file shipped to a consumer should include a header comment:
 
 ```
-# Synced from cargo-barbican v0.42.1
+# Synced from cargo-barbican v0.42.2
 ```
 
 Template-specific follow-up comments may differ. Some copied templates, such

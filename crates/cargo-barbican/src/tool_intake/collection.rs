@@ -223,7 +223,12 @@ pub(crate) fn policy_fixture(
     })
 }
 pub(crate) fn prepare_accepted(ctx: &Context, accepted: &StoredReview) -> Result<PreparedSource> {
-    prepare_inputs(ctx, &accepted.request, Some(accepted), SourceAccess::Fresh)
+    prepare_inputs(
+        ctx,
+        &accepted.request,
+        Some(&accepted.subject),
+        SourceAccess::Fresh,
+    )
 }
 enum SourceAccess {
     Fresh,
@@ -250,7 +255,7 @@ pub(crate) fn authored_fixture(
 fn prepare_inputs(
     ctx: &Context,
     request: &ReviewRequest,
-    accepted: Option<&StoredReview>,
+    accepted: Option<&Subject>,
     source_access: SourceAccess,
 ) -> Result<PreparedSource> {
     let stored_sources = matches!(source_access, SourceAccess::Stored);
@@ -281,7 +286,6 @@ fn prepare_inputs(
         let (identity, archive) = if stored_sources {
             let identity = accepted
                 .ok_or("stored source requires accepted review")?
-                .subject
                 .root
                 .package();
             let PackageSource::CratesIo { archive_sha256 } = &identity.source else {
@@ -309,9 +313,7 @@ fn prepare_inputs(
         let rev = request.rev.as_deref().ok_or("full Git commit missing")?;
         match &source_access {
             SourceAccess::Stored => {
-                let subject = &accepted
-                    .ok_or("stored source requires accepted review")?
-                    .subject;
+                let subject = accepted.ok_or("stored source requires accepted review")?;
                 restore_source_snapshot(ctx, subject, "root", &root)?;
                 restore_original_git_lock(ctx, subject, &root)?;
             }
@@ -399,11 +401,11 @@ fn prepare_inputs(
         let locked = ctx.stores.data.read(
             Path::new(&format!(
                 "cargo-tools/v1/locks/{}.lock",
-                accepted.subject.effective_lock.sha256()
+                accepted.effective_lock.sha256()
             )),
             8 * 1024 * 1024,
         )?;
-        if sha256(locked.bytes()) != *accepted.subject.effective_lock.sha256() {
+        if sha256(locked.bytes()) != *accepted.effective_lock.sha256() {
             return Err("accepted effective lock snapshot changed".into());
         }
         fs::write(source_workspace.join("Cargo.lock"), locked.bytes()).map_err(err)?;
@@ -416,9 +418,7 @@ fn prepare_inputs(
             .is_some_and(|text| barbican::parse_lockfile(text).is_ok())
     });
     let git_sources = if stored_sources {
-        let subject = &accepted
-            .ok_or("stored source requires accepted review")?
-            .subject;
+        let subject = accepted.ok_or("stored source requires accepted review")?;
         super::git_dependency::GitSources::collect_with_materialiser(
             &manifests,
             valid_lock,
@@ -565,19 +565,19 @@ fn prepare_inputs(
     };
     if let Some(accepted) = accepted {
         let original_digest = original_lock.as_ref().map(|bytes| sha256(bytes));
-        let expected_original = match &accepted.subject.original_lock {
+        let expected_original = match &accepted.original_lock {
             OriginalLock::Absent => None,
             OriginalLock::Usable { sha256 } | OriginalLock::Unusable { sha256, .. } => {
                 Some(sha256.clone())
             }
         };
         if original_digest != expected_original
-            || sha256(&effective_lock) != *accepted.subject.effective_lock.sha256()
+            || sha256(&effective_lock) != *accepted.effective_lock.sha256()
         {
             return Err("original or effective accepted lock changed".into());
         }
-        original = accepted.subject.original_lock.clone();
-        effective = accepted.subject.effective_lock.clone();
+        original = accepted.original_lock.clone();
+        effective = accepted.effective_lock.clone();
     }
     let lock_path = PathBuf::from(format!(
         "cargo-tools/v1/locks/{}.lock",
@@ -775,11 +775,13 @@ fn prepare_inputs(
     let mut scan_budget = ctx.ioc_budget.borrow_mut();
     for package in subject.graph.packages() {
         let inspection = match &package.source {
-            PackageSource::CratesIo { .. } => inspected
-                .get(&package)
-                .and_then(|report| report.ioc_inspection())
-                .cloned()
-                .ok_or("registry IOC original-source evidence unavailable")?,
+            PackageSource::CratesIo { .. } => registry_ioc_inspection(
+                ctx,
+                &package,
+                &inspected,
+                stored_sources,
+                &mut scan_budget,
+            )?,
             PackageSource::Git {
                 url,
                 rev,
@@ -944,14 +946,96 @@ pub(crate) fn refresh_for_install(
 ) -> Result<(StoredReview, PreparedSource)> {
     if let Some(reason) = cached_reason {
         let current = refresh(ctx, stored, Some(reason))?;
-        let prepared = prepare_inputs(ctx, &current.request, Some(&current), SourceAccess::Stored)?;
+        let prepared = prepare_inputs(
+            ctx,
+            &current.request,
+            Some(&current.subject),
+            SourceAccess::Stored,
+        )?;
         if prepared.subject != current.subject {
             return Err("stored source/build inputs differ from accepted review".into());
         }
+        reconcile_cached_ioc(
+            &prepared.ioc_inspections,
+            &current.evidence.content.findings,
+            &ctx.budget,
+        )?;
         return Ok((current, prepared));
     }
     validate_context(ctx, stored)?;
     refresh_online(ctx, stored)
+}
+
+fn registry_ioc_inspection(
+    ctx: &Context,
+    package: &PackageIdentity,
+    inspected: &BTreeMap<PackageIdentity, RustInspectReport>,
+    stored_sources: bool,
+    scans: &mut barbican::ioc::ScanBudget,
+) -> Result<barbican::ioc::Inspection> {
+    if !stored_sources {
+        return inspected
+            .get(package)
+            .and_then(|report| report.ioc_inspection())
+            .cloned()
+            .ok_or_else(|| "registry IOC original-source evidence unavailable".into());
+    }
+    let PackageSource::CratesIo { archive_sha256 } = &package.source else {
+        return Err("cached registry inspection requires an exact registry identity".into());
+    };
+    let archive = cached_registry_archive(ctx, archive_sha256)?;
+    let spec = ExactCrateSpec::from_parts(&package.name, &package.version).map_err(err)?;
+    let marker = crate::ioc_intake::ioc_marker(&barbican::ioc::Source::from(package))?;
+    ctx.stores.begin_source(&marker)?;
+    let inspection = barbican::inspect::inspect_crate_archive_ioc(
+        &spec,
+        &archive,
+        archive_sha256,
+        barbican::ioc::ScanControl {
+            budget: scans,
+            check: &mut || ctx.budget.check(),
+        },
+    )?;
+    crate::ioc_intake::remember_inspection(&ctx.stores, &inspection)?;
+    if !matches!(inspection.coverage, barbican::ioc::Coverage::Complete) {
+        return Err("cached registry IOC original-source coverage is incomplete".into());
+    }
+    ctx.stores.finish_source(&marker)?;
+    Ok(inspection)
+}
+
+fn reconcile_cached_ioc(
+    inspections: &BTreeMap<PackageIdentity, barbican::ioc::Inspection>,
+    accepted_findings: &BTreeSet<Finding>,
+    budget: &process::Budget,
+) -> Result<()> {
+    let mut actual = BTreeSet::new();
+    for (package, inspection) in inspections {
+        budget.check()?;
+        inspection.validate()?;
+        if inspection.source != barbican::ioc::Source::from(package)
+            || !matches!(inspection.coverage, barbican::ioc::Coverage::Complete)
+        {
+            return Err(
+                "cached IOC source binding or coverage differs from accepted review".into(),
+            );
+        }
+        for finding in &inspection.findings {
+            budget.check()?;
+            actual.insert((package.clone(), finding.id()?));
+        }
+    }
+    let mut expected = BTreeSet::new();
+    for finding in accepted_findings {
+        budget.check()?;
+        if finding.kind == FindingKind::Ioc {
+            expected.insert((finding.package.clone(), finding.detail_sha256.clone()));
+        }
+    }
+    if actual != expected {
+        return Err("cached original-source IOC findings differ from accepted review".into());
+    }
+    Ok(())
 }
 
 fn refresh_online(ctx: &Context, stored: &StoredReview) -> Result<(StoredReview, PreparedSource)> {
@@ -1265,6 +1349,514 @@ fn materialise_registry_lock(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn offline_context(stage: &Stage) -> Context {
+        let native = stage.root.join("native");
+        fs::create_dir(&native).unwrap();
+        Context {
+            current: stage.root.clone(),
+            repo: None,
+            stores: super::super::store::Stores::open(
+                &stage.root,
+                None,
+                Some(&stage.root.join("data")),
+                Some(&stage.root.join("cache")),
+            )
+            .unwrap(),
+            evaluator: None,
+            original_cargo_home: native.clone(),
+            native_root: native.clone(),
+            native: super::super::context::NativeContext {
+                cargo_home: native.clone(),
+                install_root: native,
+                configurations: Vec::new(),
+            },
+            now: barbican::OffsetDateTime::now_utc().unix_timestamp(),
+            budget: process::Budget::new(false).unwrap(),
+            ioc_budget: Default::default(),
+            source_client: crate::crates_io_http::UreqCratesIoClient::new(
+                "http://127.0.0.1:9".into(),
+            ),
+        }
+    }
+
+    fn original_archive(name: &str, files: &[(&str, &str)]) -> Vec<u8> {
+        let mut builder = tar::Builder::new(Vec::new());
+        for (path, contents) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(contents.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(
+                    &mut header,
+                    format!("{name}-1.0.0/{path}"),
+                    contents.as_bytes(),
+                )
+                .unwrap();
+        }
+        let tar = builder.into_inner().unwrap();
+        let mut crc = 0xffff_ffff_u32;
+        for byte in &tar {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xedb8_8320_u32.wrapping_mul(crc & 1));
+            }
+        }
+        let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+        gzip.extend(miniz_oxide::deflate::compress_to_vec(&tar, 6));
+        gzip.extend((!crc).to_le_bytes());
+        gzip.extend((tar.len() as u32).to_le_bytes());
+        gzip
+    }
+
+    fn source_evaluator(ctx: &Context) -> process::Evaluator {
+        let host = process::native_host().unwrap();
+        let bin = std::env::var_os("RUSTUP_HOME")
+            .map(PathBuf::from)
+            .unwrap_or(process::absolute_home().unwrap().join(".rustup"))
+            .join("toolchains")
+            .join(format!("1.95.0-{host}"))
+            .join("bin");
+        let cargo = process::Executable::capture(&bin.join("cargo"), &ctx.budget).unwrap();
+        let rustc = process::Executable::capture(&bin.join("rustc"), &ctx.budget).unwrap();
+        let environment =
+            process::base_environment(&ctx.current, &ctx.original_cargo_home, &rustc.path);
+        let version = |executable: &process::Executable, name: &str, commit: &str| {
+            super::super::output_files::require_native_executable(&executable.path).unwrap();
+            let output = process::run(
+                executable,
+                &["-vV"],
+                &ctx.current,
+                &environment,
+                &ctx.budget,
+            )
+            .unwrap();
+            assert!(output.status.success());
+            let text = String::from_utf8(output.stdout).unwrap();
+            assert!(text.starts_with(&format!("{name} 1.95.0 ")));
+            assert!(
+                text.lines()
+                    .any(|line| line == format!("commit-hash: {commit}"))
+            );
+            assert!(text.lines().any(|line| line == format!("host: {host}")));
+            text
+        };
+        let cargo_version = version(&cargo, "cargo", "f2d3ce0bd7f24a49f8f72d9000448f8838c4e850");
+        let rustc_version = version(&rustc, "rustc", "59807616e1fa2540724bfbac14d7976d7e4a3860");
+        process::Evaluator {
+            // These bounded identity fixtures are never invoked by source preparation.
+            inspector: process::Executable::capture(Path::new("/bin/sh"), &ctx.budget).unwrap(),
+            deny: cargo.clone(),
+            audit: None,
+            cargo,
+            rustc,
+            host,
+            cargo_version,
+            rustc_version,
+        }
+    }
+
+    fn assert_knowledge_not_refreshed(ctx: &Context, previous: &SourceKnowledge) {
+        let current = ctx.knowledge().unwrap();
+        assert_eq!(current.entries, previous.entries);
+        assert_eq!(current.conflicts, previous.conflicts);
+        assert!(current.last_clock_utc >= previous.last_clock_utc);
+    }
+
+    #[test]
+    fn cached_registry_partial_scan_retains_adverse_facts_and_unfinished_observation() {
+        let stage = Stage::new().unwrap();
+        let ctx = offline_context(&stage);
+        let bytes = original_archive(
+            "owned-partial",
+            &[
+                (
+                    "Cargo.toml",
+                    "[package]\nname='owned-partial'\nversion='1.0.0'\nbuild='build.rs'\n",
+                ),
+                (
+                    "build.rs",
+                    "fn main() { let _ = std::process::Command::new(\"never-executed\"); }",
+                ),
+                (
+                    "src/lib.rs",
+                    "pub fn inert() { let _ = std::process::Command::new(\"never-executed\"); }",
+                ),
+            ],
+        );
+        let checksum = sha256(&bytes);
+        let package = PackageIdentity {
+            name: "owned-partial".into(),
+            version: "1.0.0".into(),
+            source: PackageSource::CratesIo {
+                archive_sha256: checksum.clone(),
+            },
+        };
+        ctx.stores
+            .cache
+            .publish(
+                Path::new(&format!("cargo-tools/v1/archives/{checksum}.crate")),
+                &bytes,
+            )
+            .unwrap();
+        let marker = crate::ioc_intake::ioc_marker(&barbican::ioc::Source::from(&package)).unwrap();
+        let mut scans = barbican::ioc::ScanBudget::default();
+        scans
+            .charge_report(barbican::ioc::MAX_REPORT_BYTES - 64 * 1024 - 2000)
+            .unwrap();
+        assert!(
+            registry_ioc_inspection(&ctx, &package, &BTreeMap::new(), true, &mut scans)
+                .unwrap_err()
+                .contains("incomplete")
+        );
+        assert!(ctx.stores.ensure_source_complete(&marker).is_err());
+        let known = ctx.knowledge().unwrap();
+        assert!(!known.entries.is_empty());
+        assert!(known.entries.iter().all(|entry| matches!(&entry.fact.key, KnowledgeKey::Ioc {package: observed, ..} if observed == &package) && entry.fact.status == SecurityStatus::Adverse));
+        registry_ioc_inspection(
+            &ctx,
+            &package,
+            &BTreeMap::new(),
+            true,
+            &mut barbican::ioc::ScanBudget::default(),
+        )
+        .unwrap();
+        ctx.stores.ensure_source_complete(&marker).unwrap();
+        let current = ctx.knowledge().unwrap();
+        assert!(
+            known
+                .entries
+                .iter()
+                .all(|entry| current.entries.contains(entry))
+        );
+        assert!(current.entries.len() > known.entries.len());
+    }
+
+    #[test]
+    fn cached_prepare_inputs_roundtrips_registry_root_and_dependency_without_network_or_build() {
+        use std::io::{Read, Write};
+        let stage = Stage::new().unwrap();
+        let mut ctx = offline_context(&stage);
+        ctx.evaluator = Some(source_evaluator(&ctx));
+        let dependency = original_archive(
+            "owned-dependency",
+            &[
+                (
+                    "Cargo.toml",
+                    "[package]\nname='owned-dependency'\nversion='1.0.0'\nedition='2021'\nbuild='build.rs'\n",
+                ),
+                ("src/lib.rs", "pub fn inert() {}"),
+                (
+                    "build.rs",
+                    "fn main() { panic!(\"unaccepted fixture must not build\"); let _ = std::process::Command::new(\"never-executed\"); }",
+                ),
+            ],
+        );
+        let dependency_sha = sha256(&dependency);
+        let lock = format!(
+            "version = 4\n[[package]]\nname='owned-root'\nversion='1.0.0'\ndependencies=['owned-dependency']\n[[package]]\nname='owned-dependency'\nversion='1.0.0'\nsource='registry+https://github.com/rust-lang/crates.io-index'\nchecksum='{dependency_sha}'\n"
+        );
+        let root = original_archive(
+            "owned-root",
+            &[
+                (
+                    "Cargo.toml",
+                    "[package]\nname='owned-root'\nversion='1.0.0'\nedition='2021'\n[dependencies]\nowned-dependency='=1.0.0'\n",
+                ),
+                (
+                    "src/main.rs",
+                    "fn main() { panic!(\"fixture must not execute\"); }",
+                ),
+                ("Cargo.lock", &lock),
+            ],
+        );
+        let archives = BTreeMap::from([("owned-root", root), ("owned-dependency", dependency)]);
+        for archive in archives.values() {
+            ctx.stores
+                .cache
+                .publish(
+                    Path::new(&format!(
+                        "cargo-tools/v1/archives/{}.crate",
+                        sha256(archive)
+                    )),
+                    archive,
+                )
+                .unwrap();
+        }
+        // Only initial authored provenance uses loopback. The listener is gone for cached preparation.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        ctx.source_client =
+            crate::crates_io_http::UreqCratesIoClient::new(format!("http://{address}"));
+        let server = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            let mut seen = BTreeSet::new();
+            while seen.len() < 2 {
+                let (mut socket, _) = match listener.accept() {
+                    Ok(socket) => socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "authored registry request timed out"
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("{error}"),
+                };
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = [0; 8192];
+                let count = socket.read(&mut request).unwrap();
+                let request = std::str::from_utf8(&request[..count]).unwrap();
+                let path = request
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap();
+                let name = path
+                    .strip_prefix("/api/v1/crates/")
+                    .unwrap()
+                    .strip_suffix("/1.0.0")
+                    .unwrap();
+                assert!(seen.insert(name.to_owned()));
+                let body = json!({"version":{"crate":name,"num":"1.0.0","checksum":sha256(&archives[name]),"created_at":"2020-09-13T12:26:40Z","updated_at":"2020-09-13T12:26:40Z","yanked":false}}).to_string();
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let evaluator = ctx.evaluator().unwrap();
+        let request = ReviewRequest {
+            spec: Some("owned-root@1.0.0".into()),
+            git: None,
+            rev: None,
+            package: None,
+            bins: vec!["owned-root".into()],
+            features: vec![],
+            no_default_features: false,
+            all_features: false,
+            profile: "dev".into(),
+            target: None,
+            from: None,
+            cargo: evaluator.cargo.path.clone(),
+            rustc: evaluator.rustc.path.clone(),
+        };
+        let prepared = prepare(&ctx, &request).unwrap();
+        server.join().unwrap();
+        ctx.source_client =
+            crate::crates_io_http::UreqCratesIoClient::new("http://127.0.0.1:9".into());
+        let subject = prepared.subject.clone();
+        let expected = prepared.ioc_inspections.clone();
+        assert_eq!(expected.len(), 2);
+        assert!(
+            expected
+                .values()
+                .any(|inspection| !inspection.findings.is_empty())
+        );
+        let before = ctx.knowledge().unwrap();
+        drop(prepared);
+        let cached = prepare_inputs(&ctx, &request, Some(&subject), SourceAccess::Stored).unwrap();
+        assert_eq!(cached.subject, subject);
+        assert_eq!(cached.ioc_inspections, expected);
+        assert_knowledge_not_refreshed(&ctx, &before);
+        assert!(cached.inspected.is_empty() && cached.source_facts.is_empty());
+        drop(cached);
+        let dependency_path = ctx
+            .stores
+            .cache
+            .root()
+            .join(format!("cargo-tools/v1/archives/{dependency_sha}.crate"));
+        fs::remove_file(&dependency_path).unwrap();
+        assert!(prepare_inputs(&ctx, &request, Some(&subject), SourceAccess::Stored).is_err());
+        fs::write(&dependency_path, b"corrupt original").unwrap();
+        assert!(prepare_inputs(&ctx, &request, Some(&subject), SourceAccess::Stored).is_err());
+        assert_knowledge_not_refreshed(&ctx, &before);
+    }
+
+    #[test]
+    fn cached_registry_closure_reinspects_original_archives_without_refreshing_authority() {
+        use barbican::ioc;
+        let stage = Stage::new().unwrap();
+        let ctx = offline_context(&stage);
+        let mut reports = BTreeMap::new();
+        let mut expected = BTreeMap::new();
+        let mut lock = "version = 4\n".to_owned();
+        for name in ["owned-root", "owned-dependency"] {
+            let manifest = if name == "owned-root" {
+                "[package]\nname='owned-root'\nversion='1.0.0'\nedition='2021'\n[dependencies]\nowned-dependency='=1.0.0'\n"
+            } else {
+                "[package]\nname='owned-dependency'\nversion='1.0.0'\nedition='2021'\nbuild='build.rs'\n"
+            };
+            let mut files = vec![
+                ("Cargo.toml", manifest),
+                ("src/lib.rs", "pub fn inert() {}"),
+            ];
+            if name == "owned-dependency" {
+                files.push((
+                    "build.rs",
+                    "fn main() { let _ = std::process::Command::new(\"never-executed\"); }",
+                ));
+            }
+            let archive = original_archive(name, &files);
+            let checksum = sha256(&archive);
+            let package = PackageIdentity {
+                name: name.into(),
+                version: "1.0.0".into(),
+                source: PackageSource::CratesIo {
+                    archive_sha256: checksum.clone(),
+                },
+            };
+            let spec = ExactCrateSpec::from_parts(name, "1.0.0").unwrap();
+            let report = barbican::inspect::inspect_published_crate_at(
+                spec,
+                barbican::CrateRelease {
+                    checksum_sha256_hex: checksum.clone(),
+                    published_at_raw: "2020-09-13T12:26:40Z".into(),
+                    published_at: barbican::OffsetDateTime::from_unix_timestamp(1_600_000_000)
+                        .unwrap(),
+                    yanked: false,
+                },
+                &archive,
+                barbican::OffsetDateTime::from_unix_timestamp(ctx.now).unwrap(),
+                30,
+                None,
+            );
+            let inspection = report.ioc_inspection().unwrap().clone();
+            assert!(matches!(inspection.coverage, ioc::Coverage::Complete));
+            crate::ioc_intake::remember_inspection(&ctx.stores, &inspection).unwrap();
+            expected.insert(package.clone(), inspection);
+            reports.insert(package.clone(), report);
+            ctx.stores
+                .cache
+                .publish(
+                    Path::new(&format!("cargo-tools/v1/archives/{checksum}.crate")),
+                    &archive,
+                )
+                .unwrap();
+            lock.push_str(&format!("\n[[package]]\nname={name:?}\nversion=\"1.0.0\"\nsource=\"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum=\"{checksum}\"\n"));
+            if name == "owned-root" {
+                lock.push_str("dependencies=[\"owned-dependency\"]\n");
+            }
+        }
+        let before = ctx.knowledge().unwrap();
+        let mut materialised = BTreeMap::new();
+        let mut fresh_reports = BTreeMap::new();
+        let mut fresh_facts = BTreeMap::new();
+        materialise_registry_lock(
+            &ctx,
+            lock.as_bytes(),
+            &stage.root.join("vendor"),
+            true,
+            &mut materialised,
+            &mut fresh_reports,
+            &mut fresh_facts,
+        )
+        .unwrap();
+        assert_eq!(materialised.len(), 2);
+        assert!(fresh_reports.is_empty() && fresh_facts.is_empty());
+        let mut actual = BTreeMap::new();
+        for (package, inspection) in &expected {
+            let directory =
+                &materialised[&format!("{}@{}", package.name, package.version)].directory;
+            if package.name == "owned-dependency" {
+                fs::write(directory.join("build.rs"), "fn main() {}").unwrap();
+            }
+            let cached = registry_ioc_inspection(
+                &ctx,
+                package,
+                &fresh_reports,
+                true,
+                &mut ioc::ScanBudget::default(),
+            )
+            .unwrap();
+            assert_eq!(&cached, inspection);
+            assert_eq!(
+                registry_ioc_inspection(
+                    &ctx,
+                    package,
+                    &reports,
+                    false,
+                    &mut ioc::ScanBudget::default(),
+                )
+                .unwrap(),
+                cached
+            );
+            actual.insert(package.clone(), cached);
+        }
+        assert_knowledge_not_refreshed(&ctx, &before);
+        let dependency = actual
+            .iter()
+            .find(|(p, _)| p.name == "owned-dependency")
+            .unwrap();
+        assert!(!dependency.1.findings.is_empty());
+        let blocked = before
+            .ioc_decision(
+                std::slice::from_ref(&dependency.1.source),
+                &[],
+                before.last_clock_utc.max(ctx.now) + 1,
+            )
+            .unwrap();
+        assert!(!blocked.is_success());
+        let findings: BTreeSet<_> = actual
+            .iter()
+            .flat_map(|(package, inspection)| {
+                inspection.findings.iter().map(|raw| Finding {
+                    identity: raw.id().unwrap().to_string(),
+                    package: package.clone(),
+                    kind: FindingKind::Ioc,
+                    blocking: false,
+                    detail_sha256: raw.id().unwrap(),
+                })
+            })
+            .collect();
+        reconcile_cached_ioc(&actual, &findings, &ctx.budget).unwrap();
+        assert!(reconcile_cached_ioc(&actual, &BTreeSet::new(), &ctx.budget).is_err());
+        let mut omitted = actual.clone();
+        omitted.remove(dependency.0);
+        assert!(reconcile_cached_ioc(&omitted, &findings, &ctx.budget).is_err());
+        let mut incomplete = actual.clone();
+        incomplete.get_mut(dependency.0).unwrap().coverage = ioc::Coverage::Incomplete {
+            reason: "interrupted inspection".into(),
+        };
+        assert!(reconcile_cached_ioc(&incomplete, &findings, &ctx.budget).is_err());
+        let PackageSource::CratesIo { archive_sha256 } = &dependency.0.source else {
+            unreachable!()
+        };
+        let path = ctx
+            .stores
+            .cache
+            .root()
+            .join(format!("cargo-tools/v1/archives/{archive_sha256}.crate"));
+        fs::remove_file(&path).unwrap();
+        assert!(
+            registry_ioc_inspection(
+                &ctx,
+                dependency.0,
+                &reports,
+                true,
+                &mut ioc::ScanBudget::default()
+            )
+            .is_err()
+        );
+        fs::write(&path, b"corrupt original archive").unwrap();
+        assert!(
+            registry_ioc_inspection(
+                &ctx,
+                dependency.0,
+                &reports,
+                true,
+                &mut ioc::ScanBudget::default()
+            )
+            .is_err()
+        );
+        assert_knowledge_not_refreshed(&ctx, &before);
+    }
+
     #[test]
     fn registry_snapshot_keeps_complete_selected_packages_and_excludes_resolution_only_sources() {
         let stage = Stage::new().unwrap();
