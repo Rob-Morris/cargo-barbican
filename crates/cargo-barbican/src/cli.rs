@@ -25,19 +25,19 @@ pub struct Cli {
     #[arg(
         long,
         global = true,
-        help = "Explicit filesystem-only governance root for toolchain admission and opted-in gates"
+        help = "Explicit filesystem-only governance root for IOC policy, tool/toolchain admission and opted-in gates"
     )]
     pub(crate) repo: Option<PathBuf>,
     #[arg(
         long,
         global = true,
-        help = "Explicit private per-user toolchain authority directory; never a repository/cache approval"
+        help = "Explicit private per-user authority directory; never a repository/cache approval"
     )]
     pub(crate) data_dir: Option<PathBuf>,
     #[arg(
         long,
         global = true,
-        help = "Explicit disposable toolchain download cache directory"
+        help = "Explicit disposable verified-source and tool/toolchain download cache directory"
     )]
     pub(crate) cache_dir: Option<PathBuf>,
     #[command(subcommand)]
@@ -180,6 +180,13 @@ pub(crate) enum Command {
         specs: Vec<String>,
     },
     #[command(
+        about = "Inspect exact original sources for governed indicators without executing candidates"
+    )]
+    Ioc {
+        #[command(subcommand)]
+        command: IocCommand,
+    },
+    #[command(
         about = "Discover a policy-compliant exact crates.io version from a semver range",
         long_about = "Fetches the crates.io version list for one crate, applies Cargo-compatible \
             semver matching, drops yanked versions, pre-releases, semver-incompatible versions, \
@@ -215,6 +222,11 @@ pub(crate) enum Command {
     Policy {
         #[command(subcommand)]
         command: PolicyCommand,
+    },
+    #[command(about = "Review exact Cargo tool inputs, explicitly accept, install and check them")]
+    Tool {
+        #[command(subcommand)]
+        command: ToolCommand,
     },
     #[command(
         about = "Review, accept and govern Rust toolchains without executing unaccepted candidates"
@@ -297,6 +309,161 @@ pub(crate) enum Command {
             configure an active reviewed family. Ends with Verify: PASS on success."
     )]
     Verify,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ToolCommand {
+    #[command(
+        about = "Collect an exact tool source and install graph for review before candidate execution"
+    )]
+    Review(ToolReviewArgs),
+    #[command(
+        about = "Explicitly accept a completed local assessment; optionally grant separate repository admission"
+    )]
+    Accept(ToolAcceptArgs),
+    #[command(about = "Build an accepted exact review into an ordinary native Cargo install root")]
+    Install(ToolInstallArgs),
+    #[command(
+        about = "Statically check all recorded outputs and their scoped native installation owner"
+    )]
+    InstallationCheck {
+        installation_id: String,
+        #[arg(long, value_enum, default_value = "text")]
+        format: AuditOutputFormat,
+    },
+    #[command(about = "Check current evidence and the executable selected by an actual consumer")]
+    AdmissionCheck(ToolAdmissionArgs),
+    #[command(about = "Scaffold or attach an exact reviewed IOC disposition to this tool subject")]
+    Exception(ToolIocExceptionArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub(crate) struct ToolReviewArgs {
+    #[arg(
+        required_unless_present = "git",
+        conflicts_with = "git",
+        help = "Exact crates.io source, NAME@VERSION"
+    )]
+    pub spec: Option<String>,
+    #[arg(long, requires_all = ["rev", "package"])]
+    pub git: Option<String>,
+    #[arg(
+        long,
+        requires = "git",
+        help = "Full immutable 40-character Git commit"
+    )]
+    pub rev: Option<String>,
+    #[arg(long, requires = "git")]
+    pub package: Option<String>,
+    #[arg(
+        long = "bin",
+        help = "Select a binary; repeat to select several (default: all eligible binaries)"
+    )]
+    pub bins: Vec<String>,
+    #[arg(long, value_delimiter = ',', conflicts_with = "all_features")]
+    pub features: Vec<String>,
+    #[arg(long, conflicts_with = "all_features")]
+    pub no_default_features: bool,
+    #[arg(long)]
+    pub all_features: bool,
+    #[arg(long, default_value = "release", value_parser = ["release", "dev"])]
+    pub profile: String,
+    #[arg(
+        long,
+        help = "Native host target only; cross-compilation is not qualified"
+    )]
+    pub target: Option<String>,
+    #[arg(
+        long,
+        help = "Compare against a verified prior installation ID; unavailable baselines require full review"
+    )]
+    pub from: Option<String>,
+    #[arg(long, conflicts_with = "repo")]
+    pub standalone: bool,
+    #[arg(
+        long,
+        help = "Absolute path to an already trusted and installed qualified Cargo executable"
+    )]
+    pub cargo: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Absolute path to an already trusted and installed qualified rustc executable"
+    )]
+    pub rustc: Option<PathBuf>,
+    #[arg(long, value_enum, default_value = "text")]
+    pub format: AuditOutputFormat,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ToolFreshnessArgs {
+    #[arg(
+        long,
+        requires = "cache_reason",
+        help = "Explicitly request eligible cached evidence instead of the default fresh collection"
+    )]
+    pub cached_admission: bool,
+    #[arg(
+        long,
+        requires = "cached_admission",
+        help = "Record why eligible cached evidence is being used; does not bypass adverse facts or expiry"
+    )]
+    pub cache_reason: Option<String>,
+    #[arg(long, conflicts_with = "repo")]
+    pub standalone: bool,
+    #[arg(long, value_enum, default_value = "text")]
+    pub format: AuditOutputFormat,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ToolAcceptArgs {
+    pub review_id: String,
+    #[arg(long, help = "Completed assessment file bound to this exact review ID")]
+    pub record: PathBuf,
+    #[arg(long, requires = "repo_record", conflicts_with = "standalone")]
+    pub approve_repo: bool,
+    #[arg(long, requires = "approve_repo", conflicts_with = "standalone")]
+    pub repo_record: Option<PathBuf>,
+    #[command(flatten)]
+    pub options: ToolFreshnessArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ToolInstallArgs {
+    pub review_id: String,
+    #[arg(
+        long,
+        help = "Ordinary native Cargo install root; otherwise use original install-root configuration"
+    )]
+    pub root: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Explicitly authorize replacing every selected colliding binary"
+    )]
+    pub replace_existing: bool,
+    #[command(flatten)]
+    pub options: ToolFreshnessArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ToolAdmissionArgs {
+    pub installation_id: String,
+    #[arg(long)]
+    pub bin: String,
+    #[arg(long, required_unless_present_any = ["lookup_path", "cargo_subcommand"], conflicts_with_all = ["lookup_path", "cargo_subcommand"], help = "Explicit actual executable path; checked without executing it")]
+    pub executable: Option<PathBuf>,
+    #[arg(
+        long,
+        conflicts_with = "cargo_subcommand",
+        help = "Resolve the first matching binary on the current process PATH"
+    )]
+    pub lookup_path: bool,
+    #[arg(
+        long,
+        help = "Check the actual trusted Cargo and its external subcommand selection in this directory"
+    )]
+    pub cargo_subcommand: Option<String>,
+    #[command(flatten)]
+    pub options: ToolFreshnessArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -439,7 +606,13 @@ pub(crate) enum GatehouseCommand {
             remain the canonical policy primitives; this command composes them without adding \
             policy exceptions or changing their verdicts."
     )]
-    PreRelease,
+    PreRelease {
+        #[arg(
+            long,
+            help = "Also check every external locked source for governed IOC findings before execution"
+        )]
+        ioc: bool,
+    },
     #[command(
         about = "Check toolchain, dependency coverage, audit and reviewed pins without build/test",
         long_about = "Runs the fixed policy-only workflow over the current Rust workspace: \
@@ -449,7 +622,13 @@ pub(crate) enum GatehouseCommand {
             Advisory databases and caches may update. PASS covers these policy checks only; \
             gatehouse pre-release remains the full build/test gate."
     )]
-    PolicyCheck,
+    PolicyCheck {
+        #[arg(
+            long,
+            help = "Also check every external locked source for governed IOC findings"
+        )]
+        ioc: bool,
+    },
     #[command(
         about = "Build a pre-add intake dossier for one exact crates.io candidate",
         long_about = "Builds a human-readable pre-add intake dossier combining exact candidate \
@@ -554,14 +733,33 @@ pub(crate) enum PinCommand {
             family, the command prints the exact policy fragment to add and refuses to rewrite \
             the existing family block."
     )]
+    #[command(group = clap::ArgGroup::new("ioc_record_mode").args(["review_record", "record"]).multiple(false))]
     Exception {
-        #[arg(help = "Crate name, optionally with @version when multiple versions are resolved")]
-        spec: String,
         #[arg(
-            required = true,
+            required_unless_present = "ioc",
+            help = "Crate name, optionally with @version; optional for an unambiguous IOC report"
+        )]
+        spec: Option<String>,
+        #[arg(
+            required_unless_present = "ioc",
+            conflicts_with = "ioc",
             help = "RustSec advisory ids to accept, e.g. RUSTSEC-2026-0001"
         )]
         advisories: Vec<String>,
+        #[arg(long, requires_all = ["inspection", "ioc_record_mode"], help = "Use exact source IOC review mode; does not adopt or pin a dependency")]
+        ioc: bool,
+        #[arg(long, requires = "ioc")]
+        inspection: Option<PathBuf>,
+        #[arg(long, requires = "ioc", conflicts_with = "record")]
+        review_record: Option<PathBuf>,
+        #[arg(long, requires = "ioc", conflicts_with = "review_record")]
+        record: Option<PathBuf>,
+        #[arg(long, requires = "ioc")]
+        source_id: Option<String>,
+        #[arg(long = "path", requires = "ioc")]
+        paths: Vec<String>,
+        #[arg(long = "rule", requires = "ioc")]
+        rules: Vec<String>,
         #[arg(
             long,
             help = "Re-review deadline as YYYY-MM-DD; defaults to 30 days from today"
@@ -584,6 +782,114 @@ pub(crate) enum PinCommand {
         )]
         config: PathBuf,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum IocCommand {
+    #[command(
+        about = "Check exact registry, exact Git, or all external locked sources without Cargo discovery"
+    )]
+    Check(IocCheckArgs),
+    #[command(about = "Create a portable PENDING review; never publish policy authority")]
+    Review(IocReviewArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct IocCheckArgs {
+    #[arg(required_unless_present_any = ["git", "lockfile"], conflicts_with_all = ["git", "lockfile"], help = "Exact crates.io source specs, NAME@VERSION")]
+    pub specs: Vec<String>,
+    #[arg(long, requires_all = ["rev", "package"], conflicts_with = "lockfile")]
+    pub git: Option<String>,
+    #[arg(
+        long,
+        requires = "git",
+        help = "Full immutable 40-character Git revision"
+    )]
+    pub rev: Option<String>,
+    #[arg(long, requires = "git")]
+    pub package: Option<String>,
+    #[arg(
+        long,
+        help = "Inspect every external source in this existing lock; source-less local entries remain outside scope"
+    )]
+    pub lockfile: Option<PathBuf>,
+    #[arg(long, value_enum, default_value = "text")]
+    pub format: AuditOutputFormat,
+    #[arg(
+        long,
+        help = "Exclusively create a bounded canonical JSON report, independently of stdout format"
+    )]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Args)]
+pub(crate) struct IocSelectionArgs {
+    #[arg(
+        long,
+        help = "Exact package name, optionally @version; must be unambiguous"
+    )]
+    pub package: Option<String>,
+    #[arg(
+        long,
+        help = "Exact source ID already present in the report; generated commands provide it"
+    )]
+    pub source_id: Option<String>,
+    #[arg(
+        long = "path",
+        help = "Select this exact original relative path; repeat for multiple paths"
+    )]
+    pub paths: Vec<String>,
+    #[arg(
+        long = "rule",
+        help = "Select this exact built-in rule; repeat for multiple rules"
+    )]
+    pub rules: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct IocReviewArgs {
+    #[arg(long)]
+    pub inspection: PathBuf,
+    #[arg(long, help = "Exclusively create this PENDING review record")]
+    pub review_record: PathBuf,
+    #[command(flatten)]
+    pub selection: IocSelectionArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ToolIocExceptionArgs {
+    pub review_id: String,
+    #[arg(
+        long,
+        required = true,
+        help = "Attach only exact IOC disposition; independent tool checks remain required"
+    )]
+    pub ioc: bool,
+    #[arg(
+        long,
+        required_unless_present = "record",
+        conflicts_with = "record",
+        help = "Create PENDING record and grant fragment only, without authority mutation"
+    )]
+    pub review_record: Option<PathBuf>,
+    #[arg(
+        long,
+        required_unless_present = "review_record",
+        conflicts_with = "review_record",
+        help = "Validate this existing completed authority-relative record, then publish its reference"
+    )]
+    pub record: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Optional explicit IOC re-review deadline, YYYY-MM-DD; no default"
+    )]
+    pub review_by: Option<String>,
+    #[command(flatten)]
+    pub selection: IocSelectionArgs,
+    #[arg(long, conflicts_with = "repo")]
+    pub standalone: bool,
+    #[arg(long, value_enum, default_value = "text")]
+    pub format: AuditOutputFormat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -666,5 +972,141 @@ mod additive_install_tests {
         ];
         assert!(Cli::try_parse_from(args).is_ok());
         assert!(Cli::try_parse_from(args.into_iter().chain(["--allow-initial-default"])).is_err());
+    }
+}
+
+#[cfg(test)]
+mod cargo_tool_cli_tests {
+    use super::*;
+    #[test]
+    fn tool_selectors_do_not_conflict_with_governance_or_output_options() {
+        assert!(
+            Cli::try_parse_from([
+                "cargo-barbican",
+                "tool",
+                "review",
+                "sample@1.0.0",
+                "--standalone",
+                "--bin",
+                "sample",
+                "--format",
+                "json"
+            ])
+            .is_ok()
+        );
+        for selector in [
+            vec!["--lookup-path"],
+            vec!["--executable", "/trusted/sample"],
+            vec!["--cargo-subcommand", "sample"],
+        ] {
+            let mut args = vec![
+                "cargo-barbican",
+                "tool",
+                "admission-check",
+                "id",
+                "--bin",
+                "sample",
+                "--standalone",
+                "--format",
+                "json",
+            ];
+            args.extend(selector);
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+    }
+    #[test]
+    fn exact_tool_source_forms_are_mutually_exclusive() {
+        assert!(
+            Cli::try_parse_from([
+                "cargo-barbican",
+                "tool",
+                "review",
+                "sample@1.0.0",
+                "--standalone"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "cargo-barbican",
+                "tool",
+                "review",
+                "--git",
+                "https://example.test/tool",
+                "--rev",
+                "0000000000000000000000000000000000000000",
+                "--package",
+                "tool",
+                "--standalone"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["cargo-barbican", "tool", "review"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "cargo-barbican",
+                "tool",
+                "review",
+                "sample@1.0.0",
+                "--git",
+                "https://example.test/tool",
+                "--rev",
+                "0000000000000000000000000000000000000000",
+                "--package",
+                "tool"
+            ])
+            .is_err()
+        );
+    }
+    #[test]
+    fn tool_feature_and_cached_scope_are_explicit() {
+        assert!(
+            Cli::try_parse_from([
+                "cargo-barbican",
+                "tool",
+                "review",
+                "sample@1.0.0",
+                "--all-features",
+                "--features",
+                "extra"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "cargo-barbican",
+                "tool",
+                "install",
+                "id",
+                "--cached-admission"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "cargo-barbican",
+                "tool",
+                "accept",
+                "id",
+                "--record",
+                "done.md",
+                "--approve-repo"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "cargo-barbican",
+                "tool",
+                "admission-check",
+                "id",
+                "--bin",
+                "tool",
+                "--lookup-path",
+                "--executable",
+                "/bin/tool"
+            ])
+            .is_err()
+        );
     }
 }

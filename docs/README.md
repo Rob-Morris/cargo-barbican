@@ -11,6 +11,8 @@ routes to its artefacts.
   - [Operations](user/operations.md) — day-2 lifecycle: failing audits, updates, family lifecycle
   - [Hardening](user/hardening.md) — making the barbican gate hard to bypass
   - [Rust Toolchains](user/toolchains.md) — review and admit a Rust distribution before its first execution
+  - [Exact IOC Review](user/ioc.md) — independently check and govern exact source findings
+  - [Reviewed Cargo Tools](user/cargo-tools.md) — review tool inputs before building, then check installed outputs and actual selection
 - [Functional](functional/README.md) — CLI and behaviour contracts
 - [Architecture](architecture/README.md) — goals, boundaries, and design-decision routing
 - [Contributor](contributor/README.md) — how to contribute to this repo

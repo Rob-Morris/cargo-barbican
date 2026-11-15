@@ -715,7 +715,7 @@ pub(crate) fn gate_preflight(
         &cli.command,
         Command::Verify
             | Command::Gatehouse {
-                command: GatehouseCommand::PreRelease | GatehouseCommand::PolicyCheck
+                command: GatehouseCommand::PreRelease { .. } | GatehouseCommand::PolicyCheck { .. }
             }
             | Command::Toolchain {
                 command: ToolchainCommand::Check

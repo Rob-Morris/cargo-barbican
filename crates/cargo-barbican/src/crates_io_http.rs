@@ -52,32 +52,114 @@ impl UreqCratesIoClient {
             spec.version()
         )
     }
+    fn read_checked(
+        &self,
+        url: String,
+        limit: u64,
+        archive: bool,
+        check: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<Vec<u8>, CratesIoClientError> {
+        use std::io::Read;
+        let transport = |reason: String| CratesIoClientError::Transport { reason };
+        check().map_err(transport)?;
+        let mut response = self
+            .agent
+            .get(url)
+            .header("User-Agent", USER_AGENT)
+            .call()
+            .map_err(|e| transport(e.to_string()))?;
+        if response.status().is_client_error() || response.status().is_server_error() {
+            let status_code = response.status().as_u16();
+            return Err(if archive {
+                CratesIoClientError::TarballHttpStatus { status_code }
+            } else {
+                CratesIoClientError::HttpStatus { status_code }
+            });
+        }
+        let mut reader = response.body_mut().as_reader();
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 64 * 1024];
+        loop {
+            check().map_err(transport)?;
+            let count = reader
+                .read(&mut chunk)
+                .map_err(|e| transport(e.to_string()))?;
+            if count == 0 {
+                break;
+            }
+            if bytes.len() as u64 + count as u64 > limit {
+                return Err(transport(
+                    "crates.io response exceeds bounded source size".into(),
+                ));
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        Ok(bytes)
+    }
+    pub(crate) fn fetch_release_observed(
+        &self,
+        spec: &ExactCrateSpec,
+        mut check: impl FnMut() -> Result<(), String>,
+    ) -> Result<(CrateRelease, u64), CratesIoClientError> {
+        let bytes =
+            self.read_checked(self.version_url(spec), 8 * 1024 * 1024, false, &mut check)?;
+        parse_observed_release(spec, &bytes)
+    }
+    pub(crate) fn fetch_tarball_checked(
+        &self,
+        spec: &ExactCrateSpec,
+        mut check: impl FnMut() -> Result<(), String>,
+    ) -> Result<Vec<u8>, CratesIoClientError> {
+        self.read_checked(self.tarball_url(spec), MAX_TARBALL_BYTES, true, &mut check)
+    }
+}
+
+fn parse_observed_release(
+    spec: &ExactCrateSpec,
+    bytes: &[u8],
+) -> Result<(CrateRelease, u64), CratesIoClientError> {
+    let text = std::str::from_utf8(bytes).map_err(|e| CratesIoClientError::InvalidResponse {
+        detail: e.to_string(),
+    })?;
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|e| CratesIoClientError::InvalidResponse {
+            detail: e.to_string(),
+        })?;
+    if value
+        .pointer("/version/crate")
+        .and_then(serde_json::Value::as_str)
+        != Some(spec.crate_name())
+        || value
+            .pointer("/version/num")
+            .and_then(serde_json::Value::as_str)
+            != Some(spec.version())
+    {
+        return Err(CratesIoClientError::InvalidResponse {
+            detail: "release response identity differs from requested exact source".into(),
+        });
+    }
+    let updated = value
+        .pointer("/version/updated_at")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| CratesIoClientError::InvalidResponse {
+            detail: "mutable release observation has no authenticated source update time".into(),
+        })?;
+    let revision = barbican::tool_inputs::source_version_timestamp(updated)
+        .map_err(|detail| CratesIoClientError::InvalidResponse { detail })?;
+    Ok((parse_version_response_body(text)?, revision))
 }
 
 impl CratesIoClient for UreqCratesIoClient {
     fn fetch_release(&self, spec: &ExactCrateSpec) -> Result<CrateRelease, CratesIoClientError> {
-        let mut response = self
-            .agent
-            .get(self.version_url(spec))
-            .header("User-Agent", USER_AGENT)
-            .call()
-            .map_err(|error| CratesIoClientError::Transport {
-                reason: error.to_string(),
+        let bytes =
+            self.read_checked(self.version_url(spec), 8 * 1024 * 1024, false, &mut || {
+                Ok(())
             })?;
-
-        if response.status().is_client_error() || response.status().is_server_error() {
-            return Err(CratesIoClientError::HttpStatus {
-                status_code: response.status().as_u16(),
-            });
-        }
-
-        let body = response.body_mut().read_to_string().map_err(|error| {
-            CratesIoClientError::Transport {
-                reason: error.to_string(),
-            }
-        })?;
-
-        parse_version_response_body(&body)
+        let text =
+            std::str::from_utf8(&bytes).map_err(|e| CratesIoClientError::InvalidResponse {
+                detail: e.to_string(),
+            })?;
+        parse_version_response_body(text)
     }
 
     fn fetch_versions(&self, crate_name: &str) -> Result<Vec<VersionInfo>, CratesIoClientError> {
@@ -106,35 +188,38 @@ impl CratesIoClient for UreqCratesIoClient {
     }
 
     fn fetch_release_tarball(&self, spec: &ExactCrateSpec) -> Result<Vec<u8>, CratesIoClientError> {
-        let mut response = self
-            .agent
-            .get(self.tarball_url(spec))
-            .header("User-Agent", USER_AGENT)
-            .call()
-            .map_err(|error| CratesIoClientError::Transport {
-                reason: error.to_string(),
-            })?;
-
-        if response.status().is_client_error() || response.status().is_server_error() {
-            return Err(CratesIoClientError::TarballHttpStatus {
-                status_code: response.status().as_u16(),
-            });
-        }
-
-        response
-            .body_mut()
-            .with_config()
-            .limit(MAX_TARBALL_BYTES)
-            .read_to_vec()
-            .map_err(|error| CratesIoClientError::Transport {
-                reason: error.to_string(),
-            })
+        self.fetch_tarball_checked(spec, || Ok(()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{DEFAULT_CRATES_IO_BASE_URL, UreqCratesIoClient};
+    #[test]
+    fn observed_release_requires_exact_response_identity_and_source_mutation_time() {
+        let spec = "fixture@1.0.0".parse().unwrap();
+        let valid = serde_json::json!({"version":{"crate":"fixture","num":"1.0.0","checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"2026-05-01T00:00:00Z","updated_at":"2026-05-02T00:00:00Z","yanked":true}});
+        let parse = |value: &serde_json::Value| {
+            super::parse_observed_release(&spec, &serde_json::to_vec(value).unwrap())
+        };
+        let (release, version) = parse(&valid).unwrap();
+        assert!(release.yanked);
+        assert_eq!(
+            version,
+            barbican::tool_inputs::source_version_timestamp("2026-05-02T00:00:00Z").unwrap()
+        );
+        for (field, wrong) in [
+            ("crate", "other"),
+            ("num", "2.0.0"),
+            ("updated_at", "not a timestamp"),
+        ] {
+            let mut value = valid.clone();
+            value["version"][field] = wrong.into();
+            assert!(parse(&value).is_err());
+            value["version"].as_object_mut().unwrap().remove(field);
+            assert!(parse(&value).is_err());
+        }
+    }
 
     #[test]
     fn https_base_enforces_https_only_transport() {

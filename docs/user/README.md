@@ -10,6 +10,8 @@ hardening.
 - [Reviewed Families](families.md) — discover, inspect and extend exact family scope without completing review
 - [Reviewed Git Sources](git-sources.md) — exact source review, offline admission and scanner limits
 - [Rust Toolchains](toolchains.md) — pre-execution review, local acceptance, checked installation/component additions and separate activation
+- [Exact IOC Review](ioc.md) — original-source findings, explicit review and scoped authority
+- [Reviewed Cargo Tools](cargo-tools.md) — exact install-graph review, explicit acceptance, ordinary Cargo installation and actual consumer checks
 - [Integration](integration.md) — install, template, and re-sync model
 - [CI](ci.md) — legacy CI, protected-controller admission bootstrap and pre-commit hooks
 - [Operations](operations.md) — failing audits, lockfile recovery, routine updates and family lifecycle

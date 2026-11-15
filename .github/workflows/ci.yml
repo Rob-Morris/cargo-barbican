@@ -114,3 +114,5 @@ jobs:
       - run: sh scripts/verify.sh
       - name: Required real-scanner adoption journey
         run: sh scripts/verify-adoption.sh
+      - name: Required real-scanner Cargo tool policy journey
+        run: sh scripts/verify-cargo-tools.sh

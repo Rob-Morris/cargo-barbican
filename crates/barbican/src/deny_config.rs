@@ -40,6 +40,22 @@ pub fn generate_cargo_deny_runtime_config(
     toml::to_string_pretty(root).map_err(CargoDenyRuntimeConfigError::Serialize)
 }
 
+pub fn generate_cargo_tool_deny_runtime_config(
+    user_deny_toml: Option<&str>,
+    checks: &[CargoDenyCheck],
+) -> Result<String, CargoDenyRuntimeConfigError> {
+    let generated = generate_cargo_deny_runtime_config(user_deny_toml, checks)?;
+    let mut root: Value = toml::from_str(&generated).map_err(CargoDenyRuntimeConfigError::Parse)?;
+    let table = root
+        .as_table_mut()
+        .ok_or(CargoDenyRuntimeConfigError::ExpectedTable)?;
+    table.remove("graph");
+    for key in ["targets", "features", "all-features", "no-default-features"] {
+        table.remove(key);
+    }
+    toml::to_string_pretty(table).map_err(CargoDenyRuntimeConfigError::Serialize)
+}
+
 /// Any root `licenses` key counts as a declared policy: a malformed
 /// non-table value flows into the generated runtime config, where cargo-deny
 /// rejects it loudly, rather than being silently skipped here.
@@ -134,6 +150,43 @@ mod tests {
     };
     use crate::CargoDenyCheck;
     use toml::Value;
+
+    #[test]
+    fn tool_projection_preserves_policy_but_cannot_rescope_the_supplied_graph() {
+        let generated = super::generate_cargo_tool_deny_runtime_config(
+            Some(
+                r#"
+targets = ["other-host"]
+[graph]
+targets = ["other-host"]
+features = ["unreviewed"]
+exclude = ["vulnerable"]
+[advisories]
+ignore = ["RUSTSEC-2026-0001"]
+[licenses]
+allow = ["MIT"]
+[bans]
+multiple-versions = "deny"
+[sources]
+unknown-git = "deny"
+"#,
+            ),
+            &[
+                CargoDenyCheck::Advisories,
+                CargoDenyCheck::Licenses,
+                CargoDenyCheck::Bans,
+                CargoDenyCheck::Sources,
+            ],
+        )
+        .unwrap();
+        let value: Value = toml::from_str(&generated).unwrap();
+        assert!(value.get("graph").is_none());
+        assert!(value.get("targets").is_none());
+        assert!(value["advisories"]["ignore"].as_array().unwrap().is_empty());
+        assert_eq!(value["licenses"]["allow"][0].as_str(), Some("MIT"));
+        assert_eq!(value["bans"]["multiple-versions"].as_str(), Some("deny"));
+        assert_eq!(value["sources"]["unknown-git"].as_str(), Some("deny"));
+    }
 
     #[test]
     fn detects_declared_licenses_policy() {

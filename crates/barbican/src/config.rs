@@ -1,9 +1,9 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const MAXIMUM_RELEASE_AGE_MINIMUM_DAYS: u64 = 365_000;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BarbicanConfig {
     pub release_age: ReleaseAgeConfig,
@@ -11,23 +11,31 @@ pub struct BarbicanConfig {
     pub delegates: DelegatesConfig,
     pub verify: VerifyConfig,
     pub toolchain: ToolchainConfig,
+    pub tools: CargoToolsConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct CargoToolsConfig {
+    pub admission_scope: Option<String>,
+    pub exception_records: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ToolchainConfig {
     pub require_admission: bool,
     pub admission_scope: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct VerifyConfig {
     pub test_runner: TestRunner,
     pub nextest_version: Option<NextestVersion>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TestRunner {
     #[default]
@@ -35,7 +43,7 @@ pub enum TestRunner {
     Nextest,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 pub struct NextestVersion(String);
 
@@ -85,7 +93,7 @@ impl BarbicanConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReleaseAgeConfig {
     pub minimum_days: u64,
@@ -97,7 +105,7 @@ impl Default for ReleaseAgeConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HighScrutinyConfig {
     pub new_direct_dependencies: bool,
@@ -121,7 +129,7 @@ impl Default for HighScrutinyConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DelegatesConfig {
     pub unmanaged_delegated_policy: UnmanagedDelegatedPolicyMode,
@@ -129,7 +137,7 @@ pub struct DelegatesConfig {
     pub cargo_deny: CargoDenyDelegatesConfig,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UnmanagedDelegatedPolicyMode {
     #[default]
@@ -138,13 +146,13 @@ pub enum UnmanagedDelegatedPolicyMode {
     Allow,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdvisoryDelegatesConfig {
     pub lockfile_scanner: LockfileAdvisoryScanner,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LockfileAdvisoryScanner {
     #[default]
@@ -153,7 +161,7 @@ pub enum LockfileAdvisoryScanner {
     Both,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CargoDenyDelegatesConfig {
     pub checks: Option<Vec<CargoDenyCheck>>,
@@ -245,7 +253,7 @@ impl CargoDenyLicensesPosture {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CargoDenyCheck {
     Advisories,
@@ -256,6 +264,12 @@ pub enum CargoDenyCheck {
 
 #[derive(Debug, Error)]
 pub enum ConfigLoadError {
+    #[error(
+        "tools admission_scope must be nonempty, at most 256 bytes and contain no control characters"
+    )]
+    InvalidToolsAdmissionScope,
+    #[error("tools.exception_records must contain unique bounded relative paths")]
+    InvalidToolExceptionRecords,
     #[error(
         "toolchain admission_scope must be nonempty, at most 256 bytes and contain no control characters"
     )]
@@ -282,6 +296,26 @@ pub enum ConfigLoadError {
 
 impl BarbicanConfig {
     fn validate(self) -> Result<Self, ConfigLoadError> {
+        if self.tools.admission_scope.as_ref().is_some_and(|scope| {
+            scope.trim().is_empty() || scope.len() > 256 || scope.chars().any(char::is_control)
+        }) {
+            return Err(ConfigLoadError::InvalidToolsAdmissionScope);
+        }
+        let mut exception_paths = std::collections::BTreeSet::new();
+        for path in &self.tools.exception_records {
+            if path.is_empty()
+                || path.len() > 4096
+                || path.chars().any(char::is_control)
+                || path.contains('\\')
+                || path.split('/').count() > 128
+                || path
+                    .split('/')
+                    .any(|part| part.is_empty() || part == "." || part == "..")
+                || !exception_paths.insert(path)
+            {
+                return Err(ConfigLoadError::InvalidToolExceptionRecords);
+            }
+        }
         if self
             .toolchain
             .admission_scope
@@ -368,8 +402,164 @@ impl LockfileAdvisoryScanner {
     }
 }
 
+pub fn append_tool_exception_record(text: &str, path: &str) -> Result<String, String> {
+    let before = BarbicanConfig::from_toml_str(text).map_err(|e| e.to_string())?;
+    let mut expected = before.clone();
+    if expected
+        .tools
+        .exception_records
+        .iter()
+        .any(|old| old == path)
+    {
+        return Ok(text.to_owned());
+    }
+    expected.tools.exception_records.push(path.to_owned());
+    expected.clone().validate().map_err(|e| e.to_string())?;
+    #[derive(Deserialize, Default)]
+    struct Root {
+        #[serde(default)]
+        tools: Tools,
+    }
+    #[derive(Deserialize, Default)]
+    struct Tools {
+        exception_records: Option<toml::Spanned<Vec<String>>>,
+    }
+    let spans: Root = toml::from_str(text).map_err(|e| e.to_string())?;
+    let value =
+        serde_json::to_string(&expected.tools.exception_records).map_err(|e| e.to_string())?;
+    let mut output = text.to_owned();
+    if let Some(existing) = spans.tools.exception_records {
+        output.replace_range(existing.span(), &value);
+    } else {
+        #[derive(Deserialize)]
+        struct RootSpan {
+            tools: Option<toml::Spanned<toml::Value>>,
+        }
+        let root: RootSpan = toml::from_str(text).map_err(|e| e.to_string())?;
+        if let Some(tools) = root.tools {
+            let span = tools.span();
+            let body = text
+                .get(span.clone())
+                .ok_or("invalid tools table source span")?;
+            if body.trim_start().starts_with('{') {
+                let close =
+                    span.start + body.rfind('}').ok_or("unterminated inline tools table")?;
+                let comma = if body
+                    .trim()
+                    .trim_start_matches('{')
+                    .trim_end_matches('}')
+                    .trim()
+                    .is_empty()
+                {
+                    ""
+                } else {
+                    ", "
+                };
+                output.insert_str(close, &format!("{comma}exception_records = {value}"));
+            } else {
+                let marker = text
+                    .lines()
+                    .scan(0usize, |offset, line| {
+                        let start = *offset;
+                        *offset += line.len() + 1;
+                        Some((start, line))
+                    })
+                    .find(|(_, line)| {
+                        let header = line.split('#').next().unwrap_or("").trim();
+                        matches!(header, "[tools]" | "[\"tools\"]" | "['tools']")
+                    });
+                if let Some((offset, line)) = marker {
+                    output.insert_str(
+                        offset + line.len(),
+                        &format!("\nexception_records = {value}"),
+                    );
+                } else {
+                    output.insert_str(0, &format!("tools.exception_records = {value}\n"));
+                }
+            }
+        } else {
+            output.push_str(&format!("\n[tools]\nexception_records = {value}\n"));
+        }
+    }
+    if BarbicanConfig::from_toml_str(&output).map_err(|e| e.to_string())? != expected {
+        return Err("tool exception reference edit changed unrelated configuration".into());
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tool_exception_reference_edits_preserve_unrelated_policy() {
+        for original in [
+            "# untouched\n[release_age]\nminimum_days=9\n",
+            "# untouched\n[tools] # comment\nadmission_scope='repo'\n",
+            "# untouched\ntools = { admission_scope = 'repo' }\n",
+            "# untouched\ntools.admission_scope = 'repo'\n",
+            "# untouched\n[tools]\nexception_records = [\n  'old.json', # keep other policy\n]\nadmission_scope='repo'\n",
+        ] {
+            let changed =
+                super::append_tool_exception_record(original, "review/grant.json").unwrap();
+            assert!(changed.starts_with("# untouched") || changed.contains("\n# untouched"));
+            let before = super::BarbicanConfig::from_toml_str(original).unwrap();
+            let after = super::BarbicanConfig::from_toml_str(&changed).unwrap();
+            assert_eq!(after.release_age, before.release_age);
+            assert_eq!(after.tools.admission_scope, before.tools.admission_scope);
+            assert_eq!(
+                after.tools.exception_records.last().unwrap(),
+                "review/grant.json"
+            );
+            assert_eq!(
+                super::append_tool_exception_record(&changed, "review/grant.json").unwrap(),
+                changed
+            );
+        }
+        assert!(super::append_tool_exception_record("", "../outside").is_err());
+    }
+
+    #[test]
+    fn tool_governance_is_optional_and_exception_paths_are_confined() {
+        use super::BarbicanConfig;
+        assert!(
+            BarbicanConfig::from_toml_str("")
+                .unwrap()
+                .tools
+                .admission_scope
+                .is_none()
+        );
+        let valid = "[tools]\nadmission_scope='example/repo'\nexception_records=['docs/tool-reviews/exception.json']\n";
+        let config = BarbicanConfig::from_toml_str(valid).unwrap();
+        assert_eq!(
+            config.tools.admission_scope.as_deref(),
+            Some("example/repo")
+        );
+        assert_eq!(
+            serde_json::from_value::<BarbicanConfig>(serde_json::to_value(&config).unwrap())
+                .unwrap(),
+            config
+        );
+        for path in [
+            "/root/exception.json",
+            "../exception.json",
+            "a/../b",
+            "./b",
+            "a//b",
+            "a/",
+            "a\\b",
+            "",
+        ] {
+            let input = format!(
+                "[tools]\nexception_records=[{}]\n",
+                serde_json::to_string(path).unwrap()
+            );
+            assert!(BarbicanConfig::from_toml_str(&input).is_err(), "{path}");
+        }
+        assert!(BarbicanConfig::from_toml_str("[tools]\nadmission_scope='  '").is_err());
+        assert!(
+            BarbicanConfig::from_toml_str("[tools]\nexception_records=['same','same']").is_err()
+        );
+    }
+
     #[test]
     fn verify_policy_defaults_and_closed_runner_contract() {
         use super::{BarbicanConfig, TestRunner};

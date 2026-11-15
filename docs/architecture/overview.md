@@ -19,6 +19,19 @@ duplication with one versioned Rust policy tool that consumer repos pin and
 re-sync deliberately — a portable policy gate in its own right, not only a
 deduplication of undertask's scripts.
 
+## Exact source IOC policy
+
+The pure `ioc` module owns original-byte literal findings, semantic identity,
+coverage, review records and exact adjudication. Binary `ioc_intake` shares
+verified registry/Git custody and raw source knowledge with tool intake while
+using filesystem-only origin discovery. The independently callable `ioc check`
+has exact source or explicit external lock-source scope; source-less local
+entries remain outside scope. Portable rationale and repository/tool-subject
+authority are separate. Current record changes revoke applicability without
+clearing raw adverse knowledge. See [DD-002](decisions/dd-002-ioc-reviewed-findings.md)
+and [the workflow](../user/ioc.md). Gatehouse `--ioc` is explicit composition;
+verify does not acquire implicit source fetching.
+
 ## Platform Support
 
 cargo-barbican is developed and tested on macOS and Linux. The current binary
@@ -46,6 +59,37 @@ native installation support. See [toolchain operation](../user/toolchains.md).
 - Multi-workspace orchestration.
 
 ## Current implemented surface
+
+The `tool` family governs Cargo-installed binaries as exact installation
+subjects: review, personal acceptance, explicit native install, all-output
+installation check and separate actual-consumer admission. The pure
+`cargo_tool` module owns canonical identities, graph protocol and eligibility;
+binary `tool_intake` owns source collection, originating policy, native scanner
+projection, storage, publication and execution. The crate-inspection and audit
+owners are reused through explicit source/graph/policy inputs, so candidate
+configuration cannot become policy and tools cannot approve their replacements.
+Private filesystem storage is shared with compiler intake, while compiler and
+Cargo-tool authority/schema remain separate. See
+[DD-006](decisions/dd-006-reviewed-cargo-tools.md) and
+[the user workflow](../user/cargo-tools.md).
+
+Registry archives and exact Git materialisations retain independent original
+provenance; Cargo receives verified public directory/path inputs and an accepted
+effective lock. Native tracking honestly remains path-backed. A clean mutable
+API response cannot erase separate inspection/advisory knowledge. Relevant
+unfinished observations persist across later failures, and source rollback or
+same-version contradictions block cached authority. Successful unchanged
+refreshes preserve human assessment; fresh observation time does not itself
+change evidence content. Local personal acceptance, optional repository
+approval, installed correspondence and actual executable selection are
+independent checks. Existing Gatehouse workflows do not install tools.
+
+This is static one-writer admission around native execution. Accepted build
+scripts/proc macros remain ordinary native execution, and all-output artifact
+correspondence is not reproducible-build or benignness proof. Collection bounds
+do not impose a general native build sandbox or aggregate Git-cache quota.
+Unsupported graph/source/evaluator contexts refuse instead of falling back to
+weaker evidence.
 
 The simple hardening path is implemented. `age`, `age-lock`, `pick`, `resolve`,
 `update`, `assess`, `inspect`, `gatehouse candidate`, `gatehouse pre-release`, `gatehouse policy-check`, `toolchain check`, `policy init`,

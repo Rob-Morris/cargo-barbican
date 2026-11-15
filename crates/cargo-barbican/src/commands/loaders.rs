@@ -797,7 +797,7 @@ pub(crate) fn load_native_delegated_ignores(
     Ok(ignores)
 }
 
-fn native_ignore_entry(
+pub(crate) fn native_ignore_entry(
     source: &'static str,
     text: Option<&str>,
 ) -> Result<Option<NativeDelegatedIgnore>, CommandError> {

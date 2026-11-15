@@ -1,13 +1,13 @@
 use std::fmt;
 use std::io::{Cursor, Read};
-use std::path::{Component, Path};
+use std::path::Path;
 
 use miniz_oxide::inflate::decompress_to_vec_with_limit;
 use serde::Deserialize;
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 use tar::Archive;
 use time::OffsetDateTime;
-use toml::Value;
 
 use crate::assessment::RustAssessmentClassification;
 use crate::{
@@ -23,18 +23,6 @@ const GZIP_FLAG_FCOMMENT: u8 = 0b0001_0000;
 const GZIP_FLAG_FHCRC: u8 = 0b0000_0010;
 const GZIP_FLAG_RESERVED: u8 = 0b1110_0000;
 const MAX_DECOMPRESSED_CRATE_BYTES: usize = 128 * 1024 * 1024;
-const IOC_PATTERNS: [(&str, &str); 10] = [
-    ("Command::new(", "process execution"),
-    ("std::process::Command", "process execution"),
-    ("TcpStream::connect", "direct network use"),
-    ("UdpSocket::bind", "direct network use"),
-    ("reqwest::blocking::", "HTTP client use"),
-    ("reqwest::Client", "HTTP client use"),
-    ("ureq::get(", "HTTP client use"),
-    ("ureq::post(", "HTTP client use"),
-    ("curl ", "shell downloader token"),
-    ("wget ", "shell downloader token"),
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustInspectReport {
@@ -50,6 +38,7 @@ pub struct RustInspectReport {
     native_sys_crate: bool,
     native_source_paths: Vec<String>,
     ioc_hits: Vec<IocHit>,
+    ioc_inspection: Option<crate::ioc::Inspection>,
     inspection_failures: Vec<String>,
 }
 
@@ -66,6 +55,30 @@ impl RustInspectReport {
         } else {
             RustAssessmentClassification::RoutineSafe
         }
+    }
+
+    pub fn classification_with_ioc_allowances(
+        &self,
+        allowances: &[crate::ioc::Allowance],
+        now: i64,
+    ) -> Result<RustAssessmentClassification, String> {
+        let ioc_success = match &self.ioc_inspection {
+            Some(inspection) => crate::ioc::adjudicate(inspection, allowances, now)?.is_success(),
+            None => false,
+        };
+        Ok(
+            if !self.release_age.is_success()
+                || !self.checksum_matches
+                || !self.inspection_failures.is_empty()
+                || !ioc_success
+            {
+                RustAssessmentClassification::PolicyViolating
+            } else if self.has_execution_surface() {
+                RustAssessmentClassification::ElevatedRisk
+            } else {
+                RustAssessmentClassification::RoutineSafe
+            },
+        )
     }
 
     pub fn spec(&self) -> &ExactCrateSpec {
@@ -110,6 +123,10 @@ impl RustInspectReport {
 
     pub fn native_source_paths(&self) -> &[String] {
         &self.native_source_paths
+    }
+
+    pub fn ioc_inspection(&self) -> Option<&crate::ioc::Inspection> {
+        self.ioc_inspection.as_ref()
     }
 
     pub fn ioc_hits(&self) -> &[IocHit] {
@@ -211,9 +228,40 @@ pub fn inspect_published_crate_at(
     minimum_days: u64,
     exception: Option<&ReviewedReleaseAgeException>,
 ) -> RustInspectReport {
+    inspect_published_crate_at_with_ioc_budget(
+        spec,
+        release,
+        tarball_bytes,
+        now,
+        minimum_days,
+        exception,
+        crate::ioc::ScanControl {
+            budget: &mut crate::ioc::ScanBudget::default(),
+            check: &mut || Ok(()),
+        },
+    )
+}
+
+pub fn inspect_published_crate_at_with_ioc_budget(
+    spec: ExactCrateSpec,
+    release: CrateRelease,
+    tarball_bytes: &[u8],
+    now: OffsetDateTime,
+    minimum_days: u64,
+    exception: Option<&ReviewedReleaseAgeException>,
+    ioc_control: crate::ioc::ScanControl<'_>,
+) -> RustInspectReport {
     let published_checksum_sha256_hex = release.checksum_sha256_hex.to_string();
     let release_age = evaluate_release_age(spec.clone(), release, now, minimum_days, exception);
-    let local_checksum_sha256_hex = sha256_hex(tarball_bytes);
+    let checksum = if tarball_bytes.len() > MAX_DECOMPRESSED_CRATE_BYTES {
+        Err("crate archive compressed size exceeded".into())
+    } else {
+        crate::ioc::digest_checked(tarball_bytes, ioc_control.check)
+    };
+    let local_checksum_sha256_hex = checksum
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_default();
     let checksum_matches = local_checksum_sha256_hex == published_checksum_sha256_hex;
 
     if !checksum_matches {
@@ -230,11 +278,14 @@ pub fn inspect_published_crate_at(
             native_sys_crate: false,
             native_source_paths: Vec::new(),
             ioc_hits: Vec::new(),
-            inspection_failures: Vec::new(),
+            ioc_inspection: None,
+            inspection_failures: checksum.err().into_iter().collect(),
         };
     }
 
-    let tarball_inspection = inspect_verified_tarball(&spec, tarball_bytes);
+    let verified_checksum = checksum.expect("matching checksum was verified");
+    let tarball_inspection =
+        inspect_verified_tarball(&spec, tarball_bytes, verified_checksum, ioc_control);
 
     RustInspectReport {
         spec,
@@ -249,6 +300,7 @@ pub fn inspect_published_crate_at(
         native_sys_crate: tarball_inspection.native_sys_crate,
         native_source_paths: tarball_inspection.native_source_paths,
         ioc_hits: tarball_inspection.ioc_hits,
+        ioc_inspection: tarball_inspection.ioc_inspection,
         inspection_failures: tarball_inspection.inspection_failures,
     }
 }
@@ -262,19 +314,8 @@ struct TarballInspection {
     native_sys_crate: bool,
     native_source_paths: Vec<String>,
     ioc_hits: Vec<IocHit>,
+    ioc_inspection: Option<crate::ioc::Inspection>,
     inspection_failures: Vec<String>,
-}
-
-impl TarballInspection {
-    fn has_execution_surface(&self) -> bool {
-        has_execution_surface(
-            !self.build_script_paths.is_empty(),
-            self.proc_macro,
-            self.native_sys_crate,
-            self.package_links.is_some(),
-            !self.native_source_paths.is_empty(),
-        )
-    }
 }
 
 fn has_execution_surface(
@@ -290,42 +331,57 @@ fn has_execution_surface(
         || has_native_source
 }
 
-fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> TarballInspection {
+fn inspect_verified_tarball(
+    spec: &ExactCrateSpec,
+    tarball_bytes: &[u8],
+    checksum: crate::Sha256Digest,
+    control: crate::ioc::ScanControl<'_>,
+) -> TarballInspection {
     let mut inspection = TarballInspection {
         native_sys_crate: spec.is_native_sys(),
         ..TarballInspection::default()
     };
 
-    let decompressed = match decompress_crate_gzip(tarball_bytes) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            inspection
-                .inspection_failures
-                .push(format!("unable to decode crate tarball: {error}"));
-            return inspection;
-        }
-    };
+    let mut files = Vec::new();
+    if let Err(error) = visit_verified_crate_archive_checked(
+        spec,
+        tarball_bytes,
+        &checksum,
+        control.check,
+        |path, _, contents| {
+            if let Some(contents) = contents {
+                files.push(ArchiveFile {
+                    path: path.into(),
+                    contents: contents.to_vec(),
+                });
+            }
+            Ok(())
+        },
+    ) {
+        inspection.inspection_failures.push(
+            if error.starts_with("unable to decode crate tarball: ") {
+                error
+            } else {
+                format!("unable to inspect crate archive: {error}")
+            },
+        );
+        return inspection;
+    }
 
-    let files = match read_tar_text_files(&decompressed) {
-        Ok(files) => files,
-        Err(error) => {
-            inspection
-                .inspection_failures
-                .push(format!("unable to inspect crate archive: {error}"));
-            return inspection;
-        }
-    };
-
-    let cargo_toml = match files
-        .iter()
-        .find(|file| file.path == "Cargo.toml")
-        .map(|file| file.contents.as_str())
-    {
-        Some(text) => text,
+    let cargo_toml = match files.iter().find(|file| file.path == "Cargo.toml") {
+        Some(file) => match std::str::from_utf8(&file.contents) {
+            Ok(text) => text,
+            Err(_) => {
+                inspection
+                    .inspection_failures
+                    .push("published Cargo.toml is invalid: non-UTF8 manifest".into());
+                return inspection;
+            }
+        },
         None => {
             inspection
                 .inspection_failures
-                .push("published crate is missing Cargo.toml".to_owned());
+                .push("published crate is missing Cargo.toml".into());
             return inspection;
         }
     };
@@ -340,38 +396,66 @@ fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> Tarb
         }
     };
 
+    if manifest.name.as_deref() != Some(spec.crate_name())
+        || manifest.version.as_deref() != Some(spec.version())
+    {
+        inspection
+            .inspection_failures
+            .push("published manifest package identity differs from exact source".into());
+        return inspection;
+    }
     inspection.proc_macro = manifest.proc_macro;
     inspection.package_links = manifest.package_links;
 
-    if let Some(vcs_text) = files
+    if let Some(file) = files
         .iter()
         .find(|file| file.path == ".cargo_vcs_info.json")
-        .map(|file| file.contents.as_str())
     {
-        match parse_cargo_vcs_info(vcs_text) {
-            Ok(vcs_info) => inspection.vcs_info = Some(vcs_info),
-            Err(error) => inspection
+        match std::str::from_utf8(&file.contents) {
+            Ok(text) => match parse_cargo_vcs_info(text) {
+                Ok(vcs_info) => inspection.vcs_info = Some(vcs_info),
+                Err(error) => inspection
+                    .inspection_failures
+                    .push(format!("invalid .cargo_vcs_info.json: {error}")),
+            },
+            Err(_) => inspection
                 .inspection_failures
-                .push(format!("invalid .cargo_vcs_info.json: {error}")),
+                .push("invalid .cargo_vcs_info.json: non-UTF8 provenance file".into()),
         }
     }
 
-    let file_paths = files
-        .iter()
-        .map(|file| file.path.as_str())
-        .collect::<Vec<_>>();
-    if let Some(build_script_path) = manifest.build_script_path.as_deref() {
-        if file_paths.contains(&build_script_path) {
+    let file_paths: std::collections::BTreeSet<_> =
+        files.iter().map(|file| file.path.as_str()).collect();
+    let mut required_paths = std::collections::BTreeSet::new();
+    let mut required_failure = None;
+    let build_script = match &manifest.build_script {
+        crate::ioc::BuildScriptRole::Auto => file_paths.contains("build.rs").then_some("build.rs"),
+        crate::ioc::BuildScriptRole::Disabled => None,
+        crate::ioc::BuildScriptRole::Path(path) => Some(path.as_str()),
+    };
+    for (role, path) in build_script.map(|p| ("build script", p)).into_iter().chain(
+        manifest
+            .proc_macro_path
+            .as_deref()
+            .map(|p| ("proc-macro library", p)),
+    ) {
+        let normalised = archive_required_path(path);
+        if normalised
+            .as_ref()
+            .is_none_or(|path| !file_paths.contains(path.as_str()))
+        {
+            let error = format!(
+                "required {role} path is missing or outside the captured archive: {path:?}"
+            );
+            inspection.inspection_failures.push(error.clone());
+            required_failure = Some(error);
+        } else if role == "build script" {
             inspection
                 .build_script_paths
-                .push(build_script_path.to_owned());
+                .push(normalised.expect("qualified required path"));
         } else {
-            inspection.inspection_failures.push(format!(
-                "declared build script path is missing: {build_script_path}"
-            ));
+            required_paths.insert(normalised.expect("qualified required path"));
         }
-    } else if file_paths.contains(&"build.rs") {
-        inspection.build_script_paths.push("build.rs".to_owned());
     }
 
     inspection.native_source_paths = files
@@ -380,12 +464,55 @@ fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> Tarb
         .map(|file| file.path.clone())
         .collect();
 
-    inspection.ioc_hits = scan_ioc_hits(
-        &files,
-        &inspection.build_script_paths,
-        &inspection.native_source_paths,
-        inspection.has_execution_surface(),
-    );
+    let scope = crate::ioc::Scope {
+        package_prefix: String::new(),
+        required_paths,
+        explicit_paths: None,
+        build_script_paths: inspection.build_script_paths.iter().cloned().collect(),
+        proc_macro: inspection.proc_macro,
+        native_sys: inspection.native_sys_crate,
+        package_links: inspection.package_links.is_some(),
+        native_source_paths: inspection.native_source_paths.iter().cloned().collect(),
+    };
+    let source = crate::ioc::Source {
+        name: spec.crate_name().into(),
+        version: spec.version().to_string(),
+        origin: crate::ioc::Origin::CratesIo {
+            archive_sha256: checksum,
+        },
+    };
+    let mut scanner =
+        crate::ioc::ScanAccumulator::new(source).expect("validated exact crate source");
+    let mut failure = required_failure;
+    for file in &files {
+        if let Err(error) = scanner.scan_file_checked(
+            &file.path,
+            &file.contents,
+            &scope,
+            control.budget,
+            control.check,
+        ) {
+            failure = Some(error);
+            break;
+        }
+    }
+    let report = scanner.finish(failure);
+    if let crate::ioc::Coverage::Incomplete { reason } = &report.coverage {
+        inspection.inspection_failures.push(reason.clone());
+    }
+    inspection.ioc_hits = report
+        .findings
+        .iter()
+        .map(|finding| {
+            let rule = crate::ioc::rule(&finding.rule).expect("scanner emits maintained rules");
+            IocHit::new(
+                finding.path.clone(),
+                rule.category.into(),
+                rule.pattern.into(),
+            )
+        })
+        .collect();
+    inspection.ioc_inspection = Some(report);
     inspection.build_script_paths.sort();
     inspection.native_source_paths.sort();
     inspection.ioc_hits.sort();
@@ -394,83 +521,47 @@ fn inspect_verified_tarball(spec: &ExactCrateSpec, tarball_bytes: &[u8]) -> Tarb
     inspection
 }
 
-fn scan_ioc_hits(
-    files: &[ArchiveTextFile],
-    build_script_paths: &[String],
-    native_source_paths: &[String],
-    has_execution_surface: bool,
-) -> Vec<IocHit> {
-    files
-        .iter()
-        .filter(|file| {
-            build_script_paths.iter().any(|path| path == &file.path)
-                || native_source_paths.iter().any(|path| path == &file.path)
-                || (has_execution_surface && is_source_like_path(&file.path))
-        })
-        .flat_map(|file| {
-            IOC_PATTERNS.iter().filter_map(|(needle, description)| {
-                if file.contents.contains(needle) {
-                    Some(IocHit::new(
-                        file.path.clone(),
-                        (*description).to_owned(),
-                        (*needle).to_owned(),
-                    ))
-                } else {
-                    None
-                }
-            })
-        })
-        .collect()
-}
-
-fn is_proc_macro_source_path(path: &str) -> bool {
-    path.ends_with(".rs") && !is_non_production_path(path)
-}
-
-fn is_source_like_path(path: &str) -> bool {
-    is_proc_macro_source_path(path) || is_native_source_path(path)
-}
-
 fn is_native_source_path(path: &str) -> bool {
-    if is_non_production_path(path) {
-        return false;
+    crate::ioc::is_native_source_path(path)
+}
+
+fn archive_required_path(path: &str) -> Option<String> {
+    if path.len() > 4096 || path.contains('\\') || path.chars().any(char::is_control) {
+        return None;
     }
-
-    Path::new(path)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| {
-            matches!(
-                extension,
-                "c" | "cc" | "cpp" | "cxx" | "h" | "hh" | "hpp" | "s" | "S" | "asm"
-            )
-        })
-        .unwrap_or(false)
+    let mut parts = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            std::path::Component::Normal(part) => parts.push(part.to_str()?),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                parts.pop()?;
+            }
+            _ => return None,
+        }
+        if parts.len() > 128 {
+            return None;
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
-fn is_non_production_path(path: &str) -> bool {
-    path.starts_with("tests/") || path.starts_with("examples/") || path.starts_with("benches/")
-}
-
-fn parse_published_manifest(text: &str) -> Result<PublishedManifestSignals, toml::de::Error> {
-    let manifest: PublishedManifest = toml::from_str(text)?;
-    let proc_macro = manifest.lib.and_then(|lib| lib.proc_macro).unwrap_or(false);
-    let package_links = manifest
-        .package
-        .as_ref()
-        .and_then(|package| package.links.clone());
-    let build_script_path = match manifest.package.and_then(|package| package.build) {
-        None => None,
-        Some(Value::Boolean(true)) => Some("build.rs".to_owned()),
-        Some(Value::Boolean(false)) => None,
-        Some(Value::String(path)) => Some(path),
-        Some(other) => Some(other.to_string()),
-    };
-
+fn parse_published_manifest(text: &str) -> Result<PublishedManifestSignals, String> {
+    let manifest = crate::tool_inputs::source_manifest(text)?;
+    let roles = crate::ioc::manifest_roles(&manifest)?;
     Ok(PublishedManifestSignals {
-        build_script_path,
-        package_links,
-        proc_macro,
+        name: manifest
+            .pointer("/package/name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        version: manifest
+            .pointer("/package/version")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        build_script: roles.build_script,
+        package_links: roles.package_links,
+        proc_macro: roles.proc_macro,
+        proc_macro_path: roles.proc_macro_path,
     })
 }
 
@@ -482,60 +573,132 @@ fn parse_cargo_vcs_info(text: &str) -> Result<CrateVcsInfo, serde_json::Error> {
     })
 }
 
-fn read_tar_text_files(bytes: &[u8]) -> Result<Vec<ArchiveTextFile>, String> {
-    let mut archive = Archive::new(Cursor::new(bytes));
-    let mut files = Vec::new();
-    let entries = archive.entries().map_err(|error| error.to_string())?;
-
-    for entry in entries {
-        let mut entry = entry.map_err(|error| error.to_string())?;
-        if !entry.header().entry_type().is_file() {
-            continue;
-        }
-
-        let path = entry.path().map_err(|error| error.to_string())?;
-        let Some(normalized_path) = normalize_archive_path(&path)? else {
-            continue;
-        };
-
-        let should_read = normalized_path == "Cargo.toml"
-            || normalized_path == ".cargo_vcs_info.json"
-            || normalized_path.ends_with(".rs")
-            || is_native_source_path(&normalized_path);
-        if !should_read {
-            continue;
-        }
-
-        let mut contents = Vec::new();
-        entry
-            .read_to_end(&mut contents)
-            .map_err(|error| error.to_string())?;
-        files.push(ArchiveTextFile {
-            path: normalized_path,
-            contents: String::from_utf8_lossy(&contents).into_owned(),
-        });
-    }
-
-    Ok(files)
+/// Enumerate every original archive entry after verifying its independent digest.
+/// The visitor can enforce cumulative budgets and cancellation during extraction.
+pub fn visit_verified_crate_archive(
+    spec: &ExactCrateSpec,
+    compressed: &[u8],
+    expected: &crate::Sha256Digest,
+    visit: impl FnMut(&str, u32, Option<&[u8]>) -> Result<(), String>,
+) -> Result<(), String> {
+    visit_verified_crate_archive_checked(spec, compressed, expected, &mut || Ok(()), visit)
 }
 
-fn normalize_archive_path(path: &Path) -> Result<Option<String>, String> {
-    let mut parts = Vec::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(value) => parts.push(value.to_string_lossy().into_owned()),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(format!("unsupported archive path: {}", path.display()));
-            }
+pub fn visit_verified_crate_archive_checked(
+    spec: &ExactCrateSpec,
+    compressed: &[u8],
+    expected: &crate::Sha256Digest,
+    check: &mut dyn FnMut() -> Result<(), String>,
+    mut visit: impl FnMut(&str, u32, Option<&[u8]>) -> Result<(), String>,
+) -> Result<(), String> {
+    use std::collections::BTreeMap;
+    if compressed.len() > MAX_DECOMPRESSED_CRATE_BYTES {
+        return Err("crate archive compressed size exceeded".into());
+    }
+    let observed = crate::ioc::digest_checked(compressed, check)?;
+    if &observed != expected {
+        return Err("crate archive checksum mismatch".into());
+    }
+    let bytes = decompress_crate_gzip(compressed)
+        .map_err(|error| format!("unable to decode crate tarball: {error}"))?;
+    check()?;
+    let mut archive = Archive::new(Cursor::new(bytes));
+    let prefix = format!("{}-{}", spec.crate_name(), spec.version());
+    let mut paths = BTreeMap::new();
+    for entry in archive.entries().map_err(|e| e.to_string())? {
+        check()?;
+        let mut entry = entry.map_err(|e| e.to_string())?;
+        let kind = entry.header().entry_type();
+        if !kind.is_file() && !kind.is_dir() {
+            return Err("crate archive contains a link or unsupported entry type".into());
         }
+        let raw = entry.path().map_err(|e| e.to_string())?;
+        let raw = raw
+            .to_str()
+            .ok_or("non-UTF8 archive path")?
+            .trim_end_matches('/');
+        if raw.len() > 4096
+            || raw.contains('\\')
+            || raw.chars().any(char::is_control)
+            || raw.split('/').count() > 129
+            || raw
+                .split('/')
+                .any(|p| p.is_empty() || p == "." || p == "..")
+        {
+            return Err("unsafe or excessive crate archive path".into());
+        }
+        if raw == prefix && kind.is_dir() {
+            continue;
+        }
+        let path = raw
+            .strip_prefix(&format!("{prefix}/"))
+            .ok_or("archive entry outside exact crate root")?
+            .to_owned();
+        if paths.insert(path.clone(), kind.is_dir()).is_some() || paths.len() > 100_000 {
+            return Err("duplicate or excessive archive entries".into());
+        }
+        let mut ancestor = Path::new(&path).parent();
+        while let Some(parent) = ancestor {
+            if parent
+                .to_str()
+                .is_some_and(|p| paths.get(p) == Some(&false))
+            {
+                return Err("archive file/directory path collision".into());
+            }
+            ancestor = parent.parent();
+        }
+        let descendant = format!("{path}/");
+        if !kind.is_dir()
+            && paths
+                .range(descendant.clone()..)
+                .next()
+                .is_some_and(|(key, _)| key.starts_with(&descendant))
+        {
+            return Err("archive file/directory path collision".into());
+        }
+        let mode = entry.header().mode().map_err(|e| e.to_string())?;
+        let file_type = mode & 0o170000;
+        let expected_type = if kind.is_dir() { 0o040000 } else { 0o100000 };
+        if mode & !0o170777 != 0 || (file_type != 0 && file_type != expected_type) {
+            return Err("unsupported archive permission bits".into());
+        }
+        let mode = mode & 0o777;
+        if kind.is_dir() {
+            visit(&path, mode, None)?;
+            continue;
+        }
+        if entry.size() > MAX_DECOMPRESSED_CRATE_BYTES as u64 {
+            return Err("archive file exceeds 128 MiB".into());
+        }
+        let mut contents = Vec::new();
+        let mut chunk = [0; 64 * 1024];
+        loop {
+            check()?;
+            let count = entry.read(&mut chunk).map_err(|e| e.to_string())?;
+            if count == 0 {
+                break;
+            }
+            if contents.len() + count > MAX_DECOMPRESSED_CRATE_BYTES {
+                return Err("archive file exceeds 128 MiB".into());
+            }
+            contents.extend_from_slice(&chunk[..count]);
+        }
+        visit(&path, mode, Some(&contents))?;
     }
-
-    if parts.len() < 2 {
-        return Ok(None);
+    if !paths.contains_key("Cargo.toml") {
+        return Err("crate archive has no Cargo.toml".into());
     }
-
-    Ok(Some(parts[1..].join("/")))
+    let cursor = archive.into_inner();
+    let position =
+        usize::try_from(cursor.position()).map_err(|_| "archive position exceeds platform size")?;
+    let bytes = cursor.into_inner();
+    if bytes.len() % 512 != 0
+        || position > bytes.len()
+        || bytes[position..].iter().any(|byte| *byte != 0)
+    {
+        return Err("unsupported trailing data after archive entries".into());
+    }
+    Ok(())
 }
 
 fn decompress_crate_gzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
@@ -607,6 +770,7 @@ fn skip_nul_terminated(bytes: &[u8], offset: usize) -> Result<usize, String> {
         .ok_or_else(|| "gzip header overflow".to_owned())
 }
 
+#[cfg(test)]
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut output = String::with_capacity(digest.len() * 2);
@@ -619,31 +783,16 @@ fn sha256_hex(bytes: &[u8]) -> String {
     output
 }
 
-struct ArchiveTextFile {
+struct ArchiveFile {
     path: String,
-    contents: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PublishedManifest {
-    package: Option<PublishedPackage>,
-    lib: Option<PublishedLib>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PublishedPackage {
-    build: Option<Value>,
-    links: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PublishedLib {
-    #[serde(rename = "proc-macro")]
-    proc_macro: Option<bool>,
+    contents: Vec<u8>,
 }
 
 struct PublishedManifestSignals {
-    build_script_path: Option<String>,
+    name: Option<String>,
+    version: Option<String>,
+    build_script: crate::ioc::BuildScriptRole,
+    proc_macro_path: Option<String>,
     package_links: Option<String>,
     proc_macro: bool,
 }
@@ -670,9 +819,21 @@ mod tests {
     };
 
     fn build_crate_tarball(files: &[(&str, &str)]) -> Vec<u8> {
+        let package = files
+            .iter()
+            .find(|(path, _)| *path == "Cargo.toml")
+            .and_then(|(_, text)| toml::from_str::<toml::Value>(text).ok())
+            .and_then(|value| {
+                value
+                    .get("package")?
+                    .get("name")?
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| "sample".into());
         let prefixed = files
             .iter()
-            .map(|(path, contents)| (format!("sample-0.1.0/{path}"), *contents))
+            .map(|(path, contents)| (format!("{package}-0.1.0/{path}"), *contents))
             .collect::<Vec<_>>();
         let entries = prefixed
             .iter()
@@ -1194,6 +1355,100 @@ mod tests {
     }
 
     #[test]
+    fn every_proc_macro_role_form_scans_its_required_target_even_in_excluded_directories() {
+        for role in [
+            "proc-macro = true",
+            "proc_macro = true",
+            "crate-type = ['proc-macro']",
+            "crate_type = ['proc-macro']",
+        ] {
+            for (declared, actual) in [
+                (None, "src/lib.rs"),
+                (Some("tests/entry.rs"), "tests/entry.rs"),
+                (Some("examples/entry.rs"), "examples/entry.rs"),
+                (Some("./src/../src/entry.rs"), "src/entry.rs"),
+            ] {
+                let path = declared
+                    .map(|path| format!("path={path:?}\n"))
+                    .unwrap_or_default();
+                let manifest = format!(
+                    "[package]\nname='sample'\nversion='0.1.0'\nedition='2021'\n[lib]\n{role}\n{path}"
+                );
+                let tarball = build_crate_tarball(&[
+                    ("Cargo.toml", &manifest),
+                    (actual, "// inert original-byte fixture: Command::new(\n"),
+                ]);
+                let report = inspect(spec("sample"), &tarball);
+                assert!(report.proc_macro(), "{role}");
+                assert!(
+                    report.inspection_failures().is_empty(),
+                    "{:?}",
+                    report.inspection_failures()
+                );
+                let ioc = report.ioc_inspection().unwrap();
+                assert!(matches!(ioc.coverage, crate::ioc::Coverage::Complete));
+                assert!(
+                    ioc.findings
+                        .iter()
+                        .any(|finding| finding.path == actual
+                            && finding.rule == "process-command-new")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn required_proc_macro_target_missing_or_outside_archive_is_incomplete() {
+        for path in [None, Some("../outside.rs"), Some("tests/missing.rs")] {
+            let path = path
+                .map(|path| format!("path={path:?}\n"))
+                .unwrap_or_default();
+            let manifest = format!(
+                "[package]\nname='sample'\nversion='0.1.0'\n[lib]\nproc_macro=true\n{path}"
+            );
+            let report = inspect(
+                spec("sample"),
+                &build_crate_tarball(&[("Cargo.toml", &manifest)]),
+            );
+            assert_eq!(
+                report.classification(),
+                RustAssessmentClassification::PolicyViolating
+            );
+            assert!(matches!(
+                report.ioc_inspection().unwrap().coverage,
+                crate::ioc::Coverage::Incomplete { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn present_non_utf8_vcs_provenance_is_invalid_not_absent() {
+        let entries: [(&str, &[u8]); 2] = [
+            (
+                "sample-0.1.0/Cargo.toml",
+                b"[package]\nname=\"sample\"\nversion=\"0.1.0\"\n",
+            ),
+            ("sample-0.1.0/.cargo_vcs_info.json", &[0xff]),
+        ];
+        let report = inspect_hostile("sample", &gzip_wrap(&build_tar(&entries)));
+        assert_eq!(
+            report.classification(),
+            RustAssessmentClassification::PolicyViolating
+        );
+        assert_eq!(
+            report.inspection_failures(),
+            ["invalid .cargo_vcs_info.json: non-UTF8 provenance file"]
+        );
+        assert!(report.vcs_info().is_none());
+        let absent = inspect_hostile("sample", &gzip_wrap(&build_tar(&entries[..1])));
+        assert!(absent.inspection_failures().is_empty());
+        assert_eq!(
+            absent.classification(),
+            RustAssessmentClassification::RoutineSafe
+        );
+    }
+
+    #[test]
     fn non_utf8_cargo_toml_contents_fail_closed_without_panic() {
         let entries: [(&str, &[u8]); 1] = [("sample-0.1.0/Cargo.toml", &[0xff, 0xfe, 0x00, 0xff])];
         let tarball_bytes = gzip_wrap(&build_tar(&entries));
@@ -1227,5 +1482,137 @@ mod tests {
         assert!(report.checksum_matches());
         assert!(report.inspection_failures().is_empty());
         assert!(report.ioc_hits().is_empty());
+    }
+    #[test]
+    fn full_archive_custody_accepts_matching_legacy_type_bits_but_not_special_or_conflicting_modes()
+    {
+        for (mode, valid) in [
+            (0o100644, true),
+            (0o644, true),
+            (0o104644, false),
+            (0o102644, false),
+            (0o101644, false),
+            (0o040644, false),
+        ] {
+            let mut builder = Builder::new(Vec::new());
+            let contents = b"[package]\nname='sample'\nversion='0.1.0'\n";
+            let mut header = Header::new_gnu();
+            header.set_path("sample-0.1.0/Cargo.toml").unwrap();
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_size(contents.len() as u64);
+            header.set_mode(mode);
+            header.set_cksum();
+            builder.append(&header, contents.as_slice()).unwrap();
+            let archive = gzip_wrap(&builder.into_inner().unwrap());
+            let digest = crate::cargo_tool::sha256(&archive);
+            let result = super::visit_verified_crate_archive(
+                &spec("sample"),
+                &archive,
+                &digest,
+                |_, actual_mode, _| {
+                    assert_eq!(actual_mode, 0o644);
+                    Ok(())
+                },
+            );
+            assert_eq!(result.is_ok(), valid, "mode {mode:o}: {result:?}");
+        }
+    }
+    #[test]
+    fn full_archive_custody_preserves_non_text_files_and_rejects_checksum_first() {
+        let archive = gzip_wrap(&build_tar(&[
+            (
+                "sample-0.1.0/Cargo.toml",
+                b"[package]\nname='sample'\nversion='0.1.0'\n",
+            ),
+            ("sample-0.1.0/asset.bin", &[0, 255, 1]),
+        ]));
+        let digest = crate::cargo_tool::sha256(&archive);
+        let mut files = Vec::new();
+        super::visit_verified_crate_archive(
+            &spec("sample"),
+            &archive,
+            &digest,
+            |path, mode, bytes| {
+                files.push((path.to_owned(), mode, bytes.map(<[u8]>::to_vec)));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            files
+                .iter()
+                .any(|(path, _, bytes)| path == "asset.bin"
+                    && bytes.as_deref() == Some(&[0, 255, 1]))
+        );
+        let mut called = false;
+        assert!(
+            super::visit_verified_crate_archive(
+                &spec("sample"),
+                &archive,
+                &crate::cargo_tool::sha256(b"wrong"),
+                |_, _, _| {
+                    called = true;
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert!(!called);
+    }
+    #[test]
+    fn full_archive_custody_rejects_duplicate_paths_and_noncanonical_crate_root() {
+        for entries in [
+            vec![
+                ("sample-0.1.0/Cargo.toml", b"first".as_slice()),
+                ("sample-0.1.0/Cargo.toml", b"second".as_slice()),
+            ],
+            vec![("different-0.1.0/Cargo.toml", b"manifest".as_slice())],
+        ] {
+            let archive = gzip_wrap(&build_tar(&entries));
+            let digest = crate::cargo_tool::sha256(&archive);
+            assert!(
+                super::visit_verified_crate_archive(
+                    &spec("sample"),
+                    &archive,
+                    &digest,
+                    |_, _, _| Ok(())
+                )
+                .is_err()
+            );
+        }
+    }
+    #[test]
+    fn full_archive_custody_rejects_links_and_hidden_trailing_archive_data() {
+        let mut bytes = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut bytes);
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Symlink);
+            header.set_path("sample-0.1.0/Cargo.toml").unwrap();
+            header.set_link_name("/etc/passwd").unwrap();
+            header.set_size(0);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append(&header, std::io::empty()).unwrap();
+            builder.finish().unwrap();
+        }
+        let archive = gzip_wrap(&bytes);
+        let digest = crate::cargo_tool::sha256(&archive);
+        assert!(
+            super::visit_verified_crate_archive(&spec("sample"), &archive, &digest, |_, _, _| Ok(
+                ()
+            ))
+            .is_err()
+        );
+        let mut bytes = build_tar(&[("sample-0.1.0/Cargo.toml", b"manifest")]);
+        bytes.extend_from_slice(&[42; 512]);
+        let archive = gzip_wrap(&bytes);
+        let digest = crate::cargo_tool::sha256(&archive);
+        assert!(
+            super::visit_verified_crate_archive(&spec("sample"), &archive, &digest, |_, _, _| Ok(
+                ()
+            ))
+            .is_err()
+        );
     }
 }

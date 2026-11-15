@@ -2,7 +2,7 @@
 
 This is the authoritative user-facing reference for cargo-barbican's two
 policy files: `barbican.toml` (behaviour policy) and `reviewed-targets.toml`
-(reviewed dependency families and toolchain admissions). Both live at the consumer repo root. It also
+(reviewed dependency families, toolchain admissions and optional Cargo-tool admissions). Both live at the consumer repo root. It also
 covers how the CLI `--min-age-days` override and the delegated `deny.toml`
 boundary interact with them.
 
@@ -91,6 +91,54 @@ coverage floor. Component evidence and supported native profile selection are
 reviewed inputs, not additional configuration switches. An omitted repository
 profile resolves to minimal and never inherits Rustup's ambient profile; explicit
 supported components are additive. See [toolchains.md](toolchains.md#trust-and-storage).
+
+### `[tools]`
+
+Optional Cargo-tool governance is independent of compiler admission and crate
+families. It does not make Gatehouse install or execute tools automatically.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `admission_scope` | string | unset | Explicit repository governance identity for `tool accept --approve-repo`; nonblank, at most 256 bytes, without controls. |
+| `exception_records` | array of strings | `[]` | Unique confined relative paths to completed exact-subject Cargo-tool exception JSON records. |
+
+```toml
+[tools]
+admission_scope = "your-organisation/your-repository"
+exception_records = []
+```
+
+Ordinary local review and personal acceptance inside a repository do not require
+repository opt-in: absent a configured scope, their policy binds a hash of the
+actual canonical local governance root. Portable repository approval requires
+the explicit scope. Source, licence and ban policy still comes from that
+originating repository, never the downloaded candidate.
+
+Exception records are typed `ToolException` JSON values in the schema-1 tool
+policy, bound to the exact subject,
+package/source, base policy, finite expiry, reviewer and completed prose. Only
+the typed release-age or assigned-advisory exception is eligible; ordinary
+acceptance prose and unrelated workspace family grants cannot suppress tool
+findings. Checksum, yank, indicator and incomplete required-coverage failures
+remain blocking. The base policy hash excludes exception-record references and contents to avoid
+an authoring bootstrap cycle, while the full policy identity includes the validated
+exact exception set. Changing it requires matching review and acceptance.
+
+Repository tool approval adds rows of this form to `reviewed-targets.toml`:
+
+```toml
+[[rust.tools]]
+subject_id = "cargo-tool:subject:v1:<64 lowercase hexadecimal digits>"
+record = "docs/tool-reviews/<admission-digest>.json"
+record_sha256 = "<SHA256 of that exact portable bundle>"
+```
+
+Use `tool accept --approve-repo --repo-record PATH` to publish a real bound
+bundle and declaration; the placeholders above are not usable approval.
+Duplicate subject rows, unsupported schema/kind and unsafe record paths refuse.
+Tool rows do not count as reviewed Rust families, do not cover dependency
+backlog and do not transfer personal acceptance to another user. See
+[the tool guide](cargo-tools.md).
 
 ### `[high_scrutiny]`
 
@@ -597,3 +645,24 @@ exceptions never authorise Git targets; cargo-deny permission remains separate.
 validation, exact toolchain/configuration controls and selected-nextest alias
 checks, but does not probe or execute a test runner. Nextest installation and
 runtime-version enforcement remain requirements of actual `verify` execution.
+
+
+## Exact IOC review references
+
+Repository IOC authority is independent of family membership and resolved pins:
+
+```toml
+[[rust.ioc_records]]
+record = "docs/dependency-reviews/source-ioc.md"
+record_sha256 = "EXACT_SHA256_OF_COMPLETED_RECORD"
+```
+
+Use `pin exception --ioc --inspection REPORT --record PATH` to derive the exact
+reference after deliberate record completion and source revalidation. The
+placeholder above is not a valid digest or an active grant. `--review-record`
+scaffolds only PENDING rationale and does not write this table. Current record
+bytes and exact findings must remain applicable; no package-wide ignore is
+created. Pre-add IOC references do not satisfy active-family pin or source
+admission requirements. Tool IOC references instead bind the exact tool Subject
+and originating base policy through `[tools].exception_records`. See
+[exact IOC review](ioc.md) for scope, authority-relative paths and revocation.

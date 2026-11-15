@@ -134,6 +134,27 @@ runner. See the [provenance record](../dependency-reviews/2026-11-08-native-fixt
 Linux retains unsupported-host refusal coverage and does not claim native
 installation qualification.
 
+Cargo-tool tests are a separate native Cargo/rustc1.95.0 route on macOS ARM64
+and Linux x86-64. The ordinary hermetic suite includes an explicitly authored,
+reviewed inert two-binary fixture: it may compile/install only into its owned
+temporary roots and statically inspect outputs, never execute installed fixture
+binaries. `sh scripts/verify-cargo-tools.sh` additionally requires the existing
+reviewed cargo-deny0.19.6 and cargo-audit0.22.1 and working network access. It
+runs all three native journeys in the release profile, matching shipped code
+and avoiding repeated debug-build hashing costs. It freshly fetches advisory
+data before frozen scanner evaluation, proves stable
+review identity across unchanged refreshes and checks an explicit root-licence
+rejection. A separate authored-source journey drives the application owners
+through explicit acceptance, cached input handoff, native install, correspondence,
+consumer admission and controlled native failure/cancellation/late publication.
+Installed fixture programs are never invoked; deliberately authored build
+fixtures run only after their completed assessment. CI invokes all three journeys
+on both native runners after scanner provisioning. Their synthetic origins do
+not establish publisher authentication; authenticated registry and Git journeys
+require separate qualification. Ordinary tests also compare production graph
+binding to independent native rustc observations for resolver2 and resolver3.
+Missing native prerequisites are failures, not silently skipped required proof.
+
 The real nextest journey uses `sh scripts/verify-nextest.sh`, which pins the
 reviewed minimal-feature 0.9.146 route and exports
 `NEXTEST_USER_CONFIG_FILE=none` and `NEXTEST_EXPERIMENTAL_RECORD=0` before its

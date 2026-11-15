@@ -1,0 +1,328 @@
+{
+  "capture": "cargo-audit 0.22.1, Cargo 1.95.0, aarch64-apple-darwin, normal/build tree, 2026-11-14; static metadata only; no candidate execution",
+  "inputs_sha256": {
+    "metadata.stdout": "7308f7928bd147121c7984c99575e5216b2ae58d45c51a17e8d5181b071082ba",
+    "tree.stdout": "12abfffdc1ed10a3737842b0dc6b42a31f820cd7e204fdaaf738fbbc856d17dc",
+    "ambiguous-conditions.json": "f13a0f3355f4fe14bb0ffab62bac19dece6a9aa2f014a50cbc9b71cdbcfcca15"
+  },
+  "edges": [
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#cpufeatures@0.2.17",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.180",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "aarch64-linux-android"
+        },
+        {
+          "kind": null,
+          "target": "cfg(all(target_arch = \"aarch64\", target_os = \"linux\"))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(all(target_arch = \"aarch64\", target_vendor = \"apple\"))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(all(target_arch = \"loongarch64\", target_os = \"linux\"))"
+        }
+      ],
+      "selected_by_native_tree": true
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#errno@0.3.14",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.180",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "cfg(unix)"
+        },
+        {
+          "kind": null,
+          "target": "cfg(target_os = \"hermit\")"
+        },
+        {
+          "kind": null,
+          "target": "cfg(target_os = \"wasi\")"
+        }
+      ],
+      "selected_by_native_tree": true
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#flate2@1.1.9",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#miniz_oxide@0.8.9",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": null
+        },
+        {
+          "kind": null,
+          "target": "cfg(all(target_arch = \"wasm32\", not(target_os = \"emscripten\")))"
+        }
+      ],
+      "selected_by_native_tree": true
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#getrandom@0.3.4",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.180",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "cfg(all(any(target_os = \"linux\", target_os = \"android\"), not(any(all(target_os = \"linux\", target_env = \"\"), getrandom_backend = \"custom\", getrandom_backend = \"linux_raw\", getrandom_backend = \"rdrand\", getrandom_backend = \"rndr\"))))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(any(target_os = \"dragonfly\", target_os = \"freebsd\", target_os = \"hurd\", target_os = \"illumos\", target_os = \"cygwin\", all(target_os = \"horizon\", target_arch = \"arm\")))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(any(target_os = \"haiku\", target_os = \"redox\", target_os = \"nto\", target_os = \"aix\"))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(any(target_os = \"ios\", target_os = \"visionos\", target_os = \"watchos\", target_os = \"tvos\"))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(any(target_os = \"macos\", target_os = \"openbsd\", target_os = \"vita\", target_os = \"emscripten\"))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(target_os = \"netbsd\")"
+        },
+        {
+          "kind": null,
+          "target": "cfg(target_os = \"solaris\")"
+        },
+        {
+          "kind": null,
+          "target": "cfg(target_os = \"vxworks\")"
+        }
+      ],
+      "selected_by_native_tree": true
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#jiff@0.2.18",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#jiff-static@0.2.18",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": null
+        },
+        {
+          "kind": null,
+          "target": "cfg(any())"
+        }
+      ],
+      "selected_by_native_tree": false
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#mio@1.1.1",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.180",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "cfg(unix)"
+        },
+        {
+          "kind": null,
+          "target": "cfg(target_os = \"hermit\")"
+        },
+        {
+          "kind": null,
+          "target": "cfg(target_os = \"wasi\")"
+        }
+      ],
+      "selected_by_native_tree": true
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#ring@0.17.14",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.180",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "cfg(all(all(target_arch = \"aarch64\", target_endian = \"little\"), target_vendor = \"apple\", any(target_os = \"ios\", target_os = \"macos\", target_os = \"tvos\", target_os = \"visionos\", target_os = \"watchos\")))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(all(any(all(target_arch = \"aarch64\", target_endian = \"little\"), all(target_arch = \"arm\", target_endian = \"little\")), any(target_os = \"android\", target_os = \"linux\")))"
+        }
+      ],
+      "selected_by_native_tree": false
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#rustix@1.1.3",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#errno@0.3.14",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "cfg(all(not(rustix_use_libc), not(miri), target_os = \"linux\", any(target_endian = \"little\", any(target_arch = \"s390x\", target_arch = \"powerpc\")), any(target_arch = \"arm\", all(target_arch = \"aarch64\", target_pointer_width = \"64\"), target_arch = \"riscv64\", all(rustix_use_experimental_asm, target_arch = \"powerpc\"), all(rustix_use_experimental_asm, target_arch = \"powerpc64\"), all(rustix_use_experimental_asm, target_arch = \"s390x\"), all(rustix_use_experimental_asm, target_arch = \"mips\"), all(rustix_use_experimental_asm, target_arch = \"mips32r6\"), all(rustix_use_experimental_asm, target_arch = \"mips64\"), all(rustix_use_experimental_asm, target_arch = \"mips64r6\"), target_arch = \"x86\", all(target_arch = \"x86_64\", target_pointer_width = \"64\"))))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(all(not(windows), any(rustix_use_libc, miri, not(all(target_os = \"linux\", any(target_endian = \"little\", any(target_arch = \"s390x\", target_arch = \"powerpc\")), any(target_arch = \"arm\", all(target_arch = \"aarch64\", target_pointer_width = \"64\"), target_arch = \"riscv64\", all(rustix_use_experimental_asm, target_arch = \"powerpc\"), all(rustix_use_experimental_asm, target_arch = \"powerpc64\"), all(rustix_use_experimental_asm, target_arch = \"s390x\"), all(rustix_use_experimental_asm, target_arch = \"mips\"), all(rustix_use_experimental_asm, target_arch = \"mips32r6\"), all(rustix_use_experimental_asm, target_arch = \"mips64\"), all(rustix_use_experimental_asm, target_arch = \"mips64r6\"), target_arch = \"x86\", all(target_arch = \"x86_64\", target_pointer_width = \"64\")))))))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(windows)"
+        }
+      ],
+      "selected_by_native_tree": true
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#rustix@1.1.3",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.180",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "cfg(all(not(rustix_use_libc), not(miri), target_os = \"linux\", any(target_endian = \"little\", any(target_arch = \"s390x\", target_arch = \"powerpc\")), any(target_arch = \"arm\", all(target_arch = \"aarch64\", target_pointer_width = \"64\"), target_arch = \"riscv64\", all(rustix_use_experimental_asm, target_arch = \"powerpc\"), all(rustix_use_experimental_asm, target_arch = \"powerpc64\"), all(rustix_use_experimental_asm, target_arch = \"s390x\"), all(rustix_use_experimental_asm, target_arch = \"mips\"), all(rustix_use_experimental_asm, target_arch = \"mips32r6\"), all(rustix_use_experimental_asm, target_arch = \"mips64\"), all(rustix_use_experimental_asm, target_arch = \"mips64r6\"), target_arch = \"x86\", all(target_arch = \"x86_64\", target_pointer_width = \"64\"))))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(all(not(windows), any(rustix_use_libc, miri, not(all(target_os = \"linux\", any(target_endian = \"little\", any(target_arch = \"s390x\", target_arch = \"powerpc\")), any(target_arch = \"arm\", all(target_arch = \"aarch64\", target_pointer_width = \"64\"), target_arch = \"riscv64\", all(rustix_use_experimental_asm, target_arch = \"powerpc\"), all(rustix_use_experimental_asm, target_arch = \"powerpc64\"), all(rustix_use_experimental_asm, target_arch = \"s390x\"), all(rustix_use_experimental_asm, target_arch = \"mips\"), all(rustix_use_experimental_asm, target_arch = \"mips32r6\"), all(rustix_use_experimental_asm, target_arch = \"mips64\"), all(rustix_use_experimental_asm, target_arch = \"mips64r6\"), target_arch = \"x86\", all(target_arch = \"x86_64\", target_pointer_width = \"64\")))))))"
+        }
+      ],
+      "selected_by_native_tree": true
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#rustix@1.1.3",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#linux-raw-sys@0.11.0",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "cfg(all(not(rustix_use_libc), not(miri), target_os = \"linux\", any(target_endian = \"little\", any(target_arch = \"s390x\", target_arch = \"powerpc\")), any(target_arch = \"arm\", all(target_arch = \"aarch64\", target_pointer_width = \"64\"), target_arch = \"riscv64\", all(rustix_use_experimental_asm, target_arch = \"powerpc\"), all(rustix_use_experimental_asm, target_arch = \"powerpc64\"), all(rustix_use_experimental_asm, target_arch = \"s390x\"), all(rustix_use_experimental_asm, target_arch = \"mips\"), all(rustix_use_experimental_asm, target_arch = \"mips32r6\"), all(rustix_use_experimental_asm, target_arch = \"mips64\"), all(rustix_use_experimental_asm, target_arch = \"mips64r6\"), target_arch = \"x86\", all(target_arch = \"x86_64\", target_pointer_width = \"64\"))))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(all(any(target_os = \"linux\", target_os = \"android\"), any(rustix_use_libc, miri, not(all(target_os = \"linux\", any(target_endian = \"little\", any(target_arch = \"s390x\", target_arch = \"powerpc\")), any(target_arch = \"arm\", all(target_arch = \"aarch64\", target_pointer_width = \"64\"), target_arch = \"riscv64\", all(rustix_use_experimental_asm, target_arch = \"powerpc\"), all(rustix_use_experimental_asm, target_arch = \"powerpc64\"), all(rustix_use_experimental_asm, target_arch = \"s390x\"), all(rustix_use_experimental_asm, target_arch = \"mips\"), all(rustix_use_experimental_asm, target_arch = \"mips32r6\"), all(rustix_use_experimental_asm, target_arch = \"mips64\"), all(rustix_use_experimental_asm, target_arch = \"mips64r6\"), target_arch = \"x86\", all(target_arch = \"x86_64\", target_pointer_width = \"64\")))))))"
+        }
+      ],
+      "selected_by_native_tree": false
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#rustls-platform-verifier@0.6.2",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#rustls-webpki@0.103.9",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "cfg(all(unix, not(target_os = \"android\"), not(target_vendor = \"apple\"), not(target_arch = \"wasm32\")))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(target_arch = \"wasm32\")"
+        },
+        {
+          "kind": null,
+          "target": "cfg(target_os = \"android\")"
+        }
+      ],
+      "selected_by_native_tree": false
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#tokio@1.49.0",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.180",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "cfg(all(tokio_unstable, target_os = \"linux\"))"
+        },
+        {
+          "kind": null,
+          "target": "cfg(unix)"
+        }
+      ],
+      "selected_by_native_tree": true
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#tokio@1.49.0",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#mio@1.1.1",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": null
+        },
+        {
+          "kind": null,
+          "target": "cfg(all(tokio_unstable, target_os = \"linux\"))"
+        }
+      ],
+      "selected_by_native_tree": true
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#windows-targets@0.42.2",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#windows_aarch64_msvc@0.42.2",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "aarch64-pc-windows-msvc"
+        },
+        {
+          "kind": null,
+          "target": "aarch64-uwp-windows-msvc"
+        }
+      ],
+      "selected_by_native_tree": false
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#windows-targets@0.42.2",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#windows_i686_gnu@0.42.2",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "i686-pc-windows-gnu"
+        },
+        {
+          "kind": null,
+          "target": "i686-uwp-windows-gnu"
+        }
+      ],
+      "selected_by_native_tree": false
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#windows-targets@0.42.2",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#windows_i686_msvc@0.42.2",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "i686-pc-windows-msvc"
+        },
+        {
+          "kind": null,
+          "target": "i686-uwp-windows-msvc"
+        }
+      ],
+      "selected_by_native_tree": false
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#windows-targets@0.42.2",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#windows_x86_64_gnu@0.42.2",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "x86_64-pc-windows-gnu"
+        },
+        {
+          "kind": null,
+          "target": "x86_64-uwp-windows-gnu"
+        }
+      ],
+      "selected_by_native_tree": false
+    },
+    {
+      "from": "registry+https://github.com/rust-lang/crates.io-index#windows-targets@0.42.2",
+      "to": "registry+https://github.com/rust-lang/crates.io-index#windows_x86_64_msvc@0.42.2",
+      "dep_kinds": [
+        {
+          "kind": null,
+          "target": "x86_64-pc-windows-msvc"
+        },
+        {
+          "kind": null,
+          "target": "x86_64-uwp-windows-msvc"
+        }
+      ],
+      "selected_by_native_tree": false
+    }
+  ]
+}

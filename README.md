@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.41.2-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.42.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -27,6 +27,8 @@ Use it to:
 - enforce checked-in reviewed-target policy before build/test execution
 - [review and explicitly accept Rust toolchains](docs/user/toolchains.md) before
   installation or execution on qualified native routes
+- [review Cargo-installed tools](docs/user/cargo-tools.md), explicitly accept
+  their exact build inputs and check installed outputs and consumer selection
 - run the delegated advisory and deny checks through one workflow
 - produce review-focused output for humans deciding whether to trust a dependency
 
@@ -73,11 +75,19 @@ certification:
   filesystem guarantees and a general hostile-checkout sandbox remain deferred
 - `gatehouse candidate` gathers crates.io candidate evidence; it does not prove
   a Cargo tool-install workflow or execute the candidate
+- `tool` supplies the separate exact tool lifecycle; ordinary accepted builds
+  remain native execution, and static correspondence is not a sandbox or proof
+  of binary benignness
 
 ## Platform Support
 
 cargo-barbican is developed and tested on macOS and Linux. The current binary
 requires Unix APIs and does not support Windows.
+
+**Cargo-tool review/install has an exact evaluator boundary:** native Cargo and
+rustc 1.95.0 on macOS ARM64 or Linux x86-64, with the reviewed scanner versions.
+Unsupported evaluator/host/source/graph cases refuse; cross compilation is not
+included. See [reviewed Cargo tools](docs/user/cargo-tools.md).
 
 **Rust toolchain installation/adoption has narrower support:** native macOS
 ARM64 only, using exact qualified official Rustup 1.29.3 or existing reviewed
@@ -96,7 +106,7 @@ explicitly select your trusted toolchain with `RUSTUP_TOOLCHAIN`. Install the
 insiders release candidate from its immutable git tag:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.2
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.42.0
 ```
 
 The tag is the install identity; do not replace it with a moving branch in
@@ -281,7 +291,7 @@ The main files, all documented in the
 [configuration reference](docs/user/configuration.md):
 
 - [`barbican.toml`](docs/user/configuration.md) — release-age, high-scrutiny, and delegate settings
-- [`reviewed-targets.toml`](docs/user/configuration.md) — active reviewed dependency families, exact resolved targets and separate toolchain admissions
+- [`reviewed-targets.toml`](docs/user/configuration.md) — active reviewed dependency families, exact resolved targets and separate compiler/Cargo-tool admissions
 - [`docs/dependency-reviews/`](docs/user/configuration.md) — checked-in human review records
 - [`deny.toml`](docs/user/configuration.md) — native `cargo-deny` policy, delegated rather than redefined
 - `rust-toolchain.toml` — exact Rust toolchain input required by `verify` and
@@ -305,6 +315,7 @@ tools instead of becoming a cross-ecosystem package-management framework.
 - [docs/user/configuration.md](docs/user/configuration.md) — `barbican.toml` and `reviewed-targets.toml` reference
 - [docs/user/integration.md](docs/user/integration.md) — install and template integration
 - [docs/user/toolchains.md](docs/user/toolchains.md) — compiler review, acceptance and qualified installation
+- [docs/user/cargo-tools.md](docs/user/cargo-tools.md) — tool review, acceptance, native installation and consumer checks
 - [docs/user/ci.md](docs/user/ci.md) — GitHub Actions CI workflow example
 - [docs/user/operations.md](docs/user/operations.md) — day-2 operations: failing audits, updates, family lifecycle
 - [docs/user/hardening.md](docs/user/hardening.md) — making the gate hard to bypass

@@ -22,6 +22,13 @@ including Barbican itself, before installing it. Tool-install records are
 separate from graph-family records. First-principles review is the default;
 inherit only matching, explicitly trusted prior evidence.
 
+Once a trusted checker and its required evaluators are available, use the
+[Cargo-tool lifecycle](cargo-tools.md) for new scanner/tool versions and Barbican
+self-updates. It reviews exact sources and the real install graph before native
+build code runs, then checks all published outputs and actual consumer selection.
+It cannot bootstrap trust by first installing the candidate scanner or checker;
+the initial trusted-tool bootstrap remains a separate explicit review.
+
 Install only what `[delegates]` in `barbican.toml` selects. For the default
 cargo-deny scanner/checks:
 
@@ -113,7 +120,7 @@ Follow [Adoption](adoption.md) for the ordered new/existing project journey.
 Install this release using its immutable identity:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.41.2 cargo-barbican
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.42.0 cargo-barbican
 ```
 
 Init preserves regular policy/process/template files and completed records.
@@ -127,7 +134,7 @@ release into a scratch area. This does not assume an upstream checkout:
 
 ```sh
 barbican_source=$(mktemp -d)
-git clone --depth 1 --branch v0.41.2 \
+git clone --depth 1 --branch v0.42.0 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream"
 # Review templates in "$barbican_source/upstream/templates" before copying.
 ```
@@ -148,7 +155,7 @@ and copying desired files.
 
 ## Versioning and re-sync
 
-Every shipped template carries `Synced from cargo-barbican v0.41.2` provenance.
+Every shipped template carries `Synced from cargo-barbican v0.42.0` provenance.
 The process README and record template are consumer-owned and may be tailored.
 On upgrade, install the reviewed immutable release, obtain its templates in a
 scratch checkout as above, and review diffs before merging desired changes.

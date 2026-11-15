@@ -75,6 +75,14 @@ docs/
 
 ## Current state
 
+Cargo-installed binary intake lives in pure `cargo_tool` and binary
+`tool_intake`. Keep exact source/selection/effective-lock identity, personal
+acceptance, separate repository authority, installed outputs and actual
+consumer selection distinct. Reuse the inspection/audit policy owners through
+explicit candidate inputs; never read candidate policy as origin policy.
+See [the workflow](../user/cargo-tools.md) and
+[DD-006](../architecture/decisions/dd-006-reviewed-cargo-tools.md).
+
 Rust distribution intake lives in the pure `rust_distribution` and
 `toolchain_admission` modules and the binary's `toolchain_intake` effects
 boundary. Direct static dispatch and opted-in gate admission run before any

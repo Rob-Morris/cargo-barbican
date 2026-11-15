@@ -37,6 +37,7 @@ For exact parser rules and behaviour contracts, see
 | `cargo barbican verify` | Base execution gate | Run the final local execution gate. |
 | `cargo barbican gatehouse` | Workflow namespace | Run supported gatehouse workflows over the base commands. |
 | `cargo-barbican toolchain` | Toolchain admission | [Review and maintain Rust toolchains](toolchains.md), including explicit reviewed component additions. Use the direct trusted executable before candidate acceptance. |
+| `cargo-barbican tool` | Cargo-tool lifecycle | [Review exact install inputs, explicitly accept, install and check outputs/actual consumers](cargo-tools.md). Use the direct trusted checker before candidate execution. |
 
 ## Glossary
 
@@ -69,10 +70,10 @@ For exact parser rules and behaviour contracts, see
   blocking finding for a crate already present in a family's `resolved` map:
   `allowed_age_exceptions` for too-fresh releases, `allowed_advisories` for
   advisory findings with a `review_by` re-review deadline.
-- **Dossier** — the human-readable pre-add intake report `gatehouse candidate`
-  produces, combining candidate inspection, an isolated sandbox lockfile,
-  `cargo tree`, and `cargo audit` into one document. It is evidence for a
-  review, not itself a policy verdict.
+- **Dossier** — collected review evidence. `gatehouse candidate` combines
+  inspection with a synthetic dependency project; `tool review` supplies real
+  native install-graph, source and policy details. Neither is completed human
+  approval.
 
 ## Common Workflows
 
@@ -169,29 +170,26 @@ pre-execution admission.
 
 ### Reviewing A Rust Tool Before Local Installation
 
-For a Cargo-installed tool published on crates.io, the base evidence command is:
+Use the already trusted direct executable and the dedicated
+[Cargo tool lifecycle](cargo-tools.md):
 
 ```bash
-cargo barbican inspect cargo-audit@0.22.1
+cargo-barbican tool review cargo-audit@0.22.1 --standalone
 ```
 
-Then decide whether you need additional manual review of the tool's dependency
-graph, advisories, provenance, and high-risk transitive crates.
+`tool review` collects the selected native normal/build graph and verified
+crates.io or exact-Git sources without building or running the candidate.
+Complete its PENDING human assessment, explicitly `tool accept`, then use
+`tool install` for unchanged accepted inputs through normal Cargo roots.
+`tool installation-check` verifies every recorded output; `tool admission-check`
+separately checks the actual selected executable, policy and authority.
+Local acceptance and optional repository approval are distinct. See the guide
+for evaluator prerequisites, path-backed native tracking, update baselines,
+freshness, collision/recovery and self-update boundaries.
 
-`gatehouse candidate` is useful when you want cargo-barbican to assemble an
-isolated pre-install dossier:
-
-```bash
-cargo barbican gatehouse candidate cargo-audit@0.22.1
-```
-
-Treat the dossier as partial review evidence, not full install proof. For a
-tool crate, `gatehouse candidate` builds a synthetic single-dependency library
-graph; it does not model `cargo install --locked` semantics or prove the
-tool's real install graph. It also does not build, test, or execute the tool.
-For large dependency graphs, follow up with manual review of high-risk
-transitive crates, especially crates with build scripts, proc macros, native
-code, unusual provenance, or advisory history.
+`inspect` remains exact single-crate evidence. `gatehouse candidate` retains its
+synthetic dependency-project dossier; neither replaces the real tool-install
+graph or grants installation authority.
 
 ### Updating An Existing Dependency
 

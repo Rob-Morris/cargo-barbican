@@ -245,15 +245,18 @@ fn inspect_renders_reviewed_release_age_exception() {
 
 #[test]
 fn inspect_reports_elevated_risk_for_build_script_and_native_surface() {
-    let tarball = build_crate_tarball(&[
-        (
-            "Cargo.toml",
-            "[package]\nname = \"native-sys\"\nversion = \"0.1.0\"\nlinks = \"native\"\n",
-        ),
-        ("build.rs", "fn main() {}\n"),
-        ("src/lib.rs", "pub fn ok() {}\n"),
-        ("vendor/native.c", "int native(void) { return 0; }\n"),
-    ]);
+    let tarball = build_crate_tarball_with_root(
+        "native-sys-0.1.0",
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"native-sys\"\nversion = \"0.1.0\"\nlinks = \"native\"\n",
+            ),
+            ("build.rs", "fn main() {}\n"),
+            ("src/lib.rs", "pub fn ok() {}\n"),
+            ("vendor/native.c", "int native(void) { return 0; }\n"),
+        ],
+    );
     let checksum = sha256_hex(&tarball);
     let cli = Cli::parse_from(["cargo-barbican", "inspect", "native-sys@0.1.0"]);
     let client = FakeCratesIoClient::default()
@@ -271,11 +274,16 @@ fn inspect_reports_elevated_risk_for_build_script_and_native_surface() {
     assert_eq!(exit_code, ExitCode::from(1));
     assert!(stderr.is_empty());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
-    assert!(rendered.contains("classification: elevated-risk"));
+    assert!(
+        rendered.contains("classification: elevated-risk"),
+        "{rendered}"
+    );
     assert!(rendered.contains("build.rs surfaces: build.rs"));
     assert!(rendered.contains("crate name ends with -sys"));
     assert!(rendered.contains("package.links=native"));
     assert!(rendered.contains("native sources: vendor/native.c"));
+    assert!(rendered.contains("IOC hits: none"));
+    assert!(rendered.contains("inspection failures: none"));
 }
 
 #[test]
@@ -323,7 +331,7 @@ fn inspect_explains_ioc_driven_policy_violation_with_remediation() {
     // shells out reads as "do not add this" with no path forward. The verdict
     // basis must name the IOC hits as the driver, the IOC line must render each
     // matched pattern unambiguously, and the remediation must point at the
-    // reviewed-family path plus the fuller gatehouse dossier.
+    // exact finding review path, separate surface authority, and fuller dossier.
     let tarball = build_crate_tarball(&[
         (
             "Cargo.toml",
@@ -358,7 +366,17 @@ fn inspect_explains_ioc_driven_policy_violation_with_remediation() {
     assert!(rendered.contains("build.rs (process execution: `Command::new(`)"));
     assert!(rendered.contains("build.rs (process execution: `std::process::Command`)"));
     assert!(rendered.contains("verdict basis: policy-violating is driven by the IOC hits above."));
-    assert!(rendered.contains("record the crate in a reviewed family with an allowed_surfaces"));
+    assert!(rendered.contains("cargo barbican ioc check sample@0.1.0 --output REPORT"));
+    assert!(rendered.contains("pin exception --ioc --inspection REPORT --review-record PATH"));
+    assert!(
+        rendered
+            .contains("Completed source review and explicit authority publication are separate.")
+    );
+    assert!(rendered.contains("An IOC allowance does not grant an allowed_surfaces exception."));
+    assert!(
+        rendered
+            .contains("IOC disposition: 0 reviewed-allowed, 2 unreviewed; raw matches retained.")
+    );
     assert!(rendered.contains("cargo barbican pin add sample"));
     assert!(rendered.contains("docs/user/configuration.md"));
     assert!(rendered.contains("cargo barbican gatehouse candidate sample@0.1.0"));

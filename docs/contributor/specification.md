@@ -76,6 +76,15 @@ blocking I/O is acceptable at the CLI boundary.
   the binary owns explicit trust, storage, source retrieval and native effects.
   Do not replace current checks with a stored installation receipt or let a
   copied repository assessment create another user's personal acceptance.
+- Cargo-tool intake follows the same static-entry and authority separation with
+  tool-specific graph/input identities. Reuse canonical crate/audit rules through
+  explicit candidate sources, originating policy and already trusted evaluators.
+  Verify every materialised entry and active normal/build context before
+  assessment; candidate configuration and native exception files cannot provide
+  policy. Native Cargo consumes accepted public path/directory inputs with
+  honest tracking. All-output correspondence and actual consumer selection remain
+  independent, and complete publication requires final source/policy/evaluator/
+  authority/cancellation checks. See [DD-006](../architecture/decisions/dd-006-reviewed-cargo-tools.md).
 
 ## Current implemented policy surface
 

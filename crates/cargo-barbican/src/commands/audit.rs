@@ -60,6 +60,108 @@ use super::{
     load_reviewed_targets, read_optional_text_no_symlink, render_allowed_policy_exceptions,
 };
 
+pub(crate) struct ExplicitAuditPolicy {
+    pub checks: Vec<barbican::CargoDenyCheck>,
+    pub licenses_posture: CargoDenyLicensesPosture,
+    pub scanner: LockfileAdvisoryScanner,
+}
+
+impl ExplicitAuditPolicy {
+    pub fn tool_runtime_config(&self, deny_toml: Option<&str>) -> Result<String, String> {
+        barbican::deny_config::generate_cargo_tool_deny_runtime_config(deny_toml, &self.checks)
+            .map_err(|error| error.to_string())
+    }
+    pub fn runtime_config(&self, deny_toml: Option<&str>) -> Result<String, String> {
+        generate_cargo_deny_runtime_config(deny_toml, &self.checks)
+            .map_err(|error| error.to_string())
+    }
+    pub fn uses_cargo_audit(&self) -> bool {
+        matches!(
+            self.scanner,
+            LockfileAdvisoryScanner::CargoAudit | LockfileAdvisoryScanner::Both
+        )
+    }
+}
+
+pub(crate) fn prepare_explicit_audit_policy(
+    config: &barbican::BarbicanConfig,
+    deny_toml: Option<&str>,
+) -> Result<ExplicitAuditPolicy, String> {
+    let declared = deny_toml
+        .map(deny_toml_declares_licenses_policy)
+        .transpose()
+        .map_err(|error| error.to_string())?
+        .unwrap_or(false);
+    let checks = config.delegates.cargo_deny.resolved_checks(declared);
+    let licenses_posture = config.delegates.cargo_deny.licenses_posture(declared);
+    Ok(ExplicitAuditPolicy {
+        checks,
+        licenses_posture,
+        scanner: config.delegates.advisories.lockfile_scanner,
+    })
+}
+
+pub(crate) fn parse_deny_evidence(
+    output: &CommandOutput,
+) -> Result<barbican::CargoDenyAdvisoryReport, String> {
+    let report = parse_cargo_deny_json_lines(&output.stderr).map_err(|error| error.to_string())?;
+    let findings_status = report
+        .summary_counts()
+        .iter()
+        .filter(|count| count.errors() > 0)
+        .fold(0, |status, count| {
+            status
+                | match count.check() {
+                    "advisories" => 0x1,
+                    "bans" => 0x2,
+                    "licenses" => 0x4,
+                    "sources" => 0x8,
+                    _ => 0,
+                }
+        });
+    if output.exit_code != Some(0)
+        && (findings_status == 0 || output.exit_code != Some(findings_status))
+    {
+        return Err("exit status does not match structured findings".into());
+    }
+    Ok(report)
+}
+
+pub(crate) fn parse_audit_evidence(
+    output: &CommandOutput,
+) -> Result<barbican::CargoAuditAdvisoryReport, String> {
+    let report = parse_cargo_audit_json(&output.stdout).map_err(|error| error.to_string())?;
+    let has_findings = !report.findings().is_empty() || report.idless_warnings() > 0;
+    if output.exit_code != Some(0) && !(output.exit_code == Some(1) && has_findings) {
+        return Err("exit status does not match structured findings".into());
+    }
+    Ok(report)
+}
+
+pub(crate) fn evaluate_explicit_audit(
+    policy: &ExplicitAuditPolicy,
+    source_lockfile: Option<&barbican::Lockfile>,
+    cargo_deny_report: &mut barbican::CargoDenyAdvisoryReport,
+    mut cargo_audit_report: Option<&mut barbican::CargoAuditAdvisoryReport>,
+    bound_exceptions: &[&ReviewedAdvisoryException],
+    now: OffsetDateTime,
+) -> AdvisoryAuditOutcome {
+    if let Some(lockfile) = source_lockfile {
+        cargo_deny_report.attribute_sources(lockfile);
+        if let Some(report) = &mut cargo_audit_report {
+            report.attribute_sources(lockfile);
+        }
+    }
+    evaluate_advisory_audit(
+        policy.scanner,
+        &policy.checks,
+        Some(cargo_deny_report),
+        cargo_audit_report.as_deref(),
+        bound_exceptions,
+        now,
+    )
+}
+
 pub(super) fn run_audit<R>(
     output_format: AuditOutputFormat,
     current_dir: &Path,
@@ -111,26 +213,12 @@ where
 
     let user_deny_toml = read_optional_text_no_symlink(current_dir, Path::new("deny.toml"))
         .map_err(CommandError::Io)?;
-    let declares_licenses_policy = user_deny_toml
-        .as_deref()
-        .map(deny_toml_declares_licenses_policy)
-        .transpose()
-        .map_err(|error| CommandError::Io(io::Error::other(error)))?
-        .unwrap_or(false);
-    let cargo_deny_checks = config
-        .delegates
-        .cargo_deny
-        .resolved_checks(declares_licenses_policy);
-    let licenses_posture = config
-        .delegates
-        .cargo_deny
-        .licenses_posture(declares_licenses_policy);
+    let explicit_policy = prepare_explicit_audit_policy(&config, user_deny_toml.as_deref())
+        .map_err(|error| CommandError::Io(io::Error::other(error)))?;
+    let cargo_deny_checks = explicit_policy.checks.clone();
+    let licenses_posture = explicit_policy.licenses_posture;
     let native_ignores = load_native_delegated_ignores(current_dir)?;
-
-    let uses_cargo_audit = matches!(
-        config.delegates.advisories.lockfile_scanner,
-        LockfileAdvisoryScanner::CargoAudit | LockfileAdvisoryScanner::Both
-    );
+    let uses_cargo_audit = explicit_policy.uses_cargo_audit();
     if let Some(exit_code) = ensure_delegate_available(runner, Delegate::CargoDeny, stderr)? {
         return Ok(exit_code);
     }
@@ -142,51 +230,20 @@ where
     }
 
     let scratch = ScratchDir::create("cargo-barbican-audit", false).map_err(CommandError::Io)?;
-    let generated_config =
-        generate_cargo_deny_runtime_config(user_deny_toml.as_deref(), &cargo_deny_checks)
-            .map_err(|error| CommandError::Io(io::Error::other(error)))?;
+    let generated_config = explicit_policy
+        .runtime_config(user_deny_toml.as_deref())
+        .map_err(|error| CommandError::Io(io::Error::other(error)))?;
     let generated_config_path = scratch.path().join("deny.toml");
     fs::write(&generated_config_path, generated_config).map_err(CommandError::Io)?;
 
     let mut cargo_deny_report =
         match runner.cargo_deny_json(current_dir, &generated_config_path, &cargo_deny_checks) {
-            Ok(output) => match parse_cargo_deny_json_lines(&output.stderr) {
-                Ok(report) => {
-                    // cargo-deny documents a bitset of checks with errors. A
-                    // terminal report cannot authorise abnormal termination or
-                    // an unexplained non-zero status.
-                    let findings_status = report
-                        .summary_counts()
-                        .iter()
-                        .filter(|count| count.errors() > 0)
-                        .fold(0, |status, count| {
-                            status
-                                | match count.check() {
-                                    "advisories" => 0x1,
-                                    "bans" => 0x2,
-                                    "licenses" => 0x4,
-                                    "sources" => 0x8,
-                                    _ => 0,
-                                }
-                        });
-                    if output.exit_code != Some(0)
-                        && (findings_status == 0 || output.exit_code != Some(findings_status))
-                    {
-                        return fail(
-                            stderr,
-                            delegate_output_failure(
-                                Delegate::CargoDeny,
-                                &output,
-                                "exit status does not match structured findings",
-                            ),
-                        );
-                    }
-                    report
-                }
-                Err(error) => {
+            Ok(output) => match parse_deny_evidence(&output) {
+                Ok(report) => report,
+                Err(reason) => {
                     return fail(
                         stderr,
-                        delegate_output_failure(Delegate::CargoDeny, &output, &error.to_string()),
+                        delegate_output_failure(Delegate::CargoDeny, &output, &reason),
                     );
                 }
             },
@@ -194,33 +251,14 @@ where
                 return fail(stderr, format!("{}: {error}", Delegate::CargoDeny.binary()));
             }
         };
-
     let mut cargo_audit_report = if uses_cargo_audit {
-        let lockfile_path = current_dir.join("Cargo.lock");
-        match runner.cargo_audit_json(scratch.path(), &lockfile_path) {
-            Ok(output) => match parse_cargo_audit_json(&output.stdout) {
-                Ok(report) => {
-                    // cargo-audit uses 1 for findings and 2 for operational
-                    // errors. Retain reviewed-exception reconciliation for 1.
-                    let has_findings =
-                        !report.findings().is_empty() || report.idless_warnings() > 0;
-                    if output.exit_code != Some(0) && !(output.exit_code == Some(1) && has_findings)
-                    {
-                        return fail(
-                            stderr,
-                            delegate_output_failure(
-                                Delegate::CargoAudit,
-                                &output,
-                                "exit status does not match structured findings",
-                            ),
-                        );
-                    }
-                    Some(report)
-                }
-                Err(error) => {
+        match runner.cargo_audit_json(scratch.path(), &current_dir.join("Cargo.lock")) {
+            Ok(output) => match parse_audit_evidence(&output) {
+                Ok(report) => Some(report),
+                Err(reason) => {
                     return fail(
                         stderr,
-                        delegate_output_failure(Delegate::CargoAudit, &output, &error.to_string()),
+                        delegate_output_failure(Delegate::CargoAudit, &output, &reason),
                     );
                 }
             },
@@ -234,29 +272,19 @@ where
     } else {
         None
     };
-
-    if let Some(lockfile) = source_lockfile {
-        cargo_deny_report.attribute_sources(lockfile);
-        if let Some(report) = &mut cargo_audit_report {
-            report.attribute_sources(lockfile);
-        }
-    }
-    let outcome = evaluate_advisory_audit(
-        config.delegates.advisories.lockfile_scanner,
-        &cargo_deny_checks,
-        Some(&cargo_deny_report),
-        cargo_audit_report.as_ref(),
+    let outcome = evaluate_explicit_audit(
+        &explicit_policy,
+        source_lockfile,
+        &mut cargo_deny_report,
+        cargo_audit_report.as_mut(),
         &bound_exceptions,
         now,
     );
     let reconciled_native_ignores = reconcile_native_ignores(&native_ignores, &outcome);
-    let native_ignores_fail = reconciled_native_ignores
-        .iter()
-        .any(ReconciledNativeIgnore::has_unmanaged_ids)
-        && matches!(
-            config.delegates.unmanaged_delegated_policy,
-            UnmanagedDelegatedPolicyMode::Deny
-        );
+    let native_ignores_fail = unmanaged_native_ignores_fail(
+        &reconciled_native_ignores,
+        config.delegates.unmanaged_delegated_policy,
+    );
     let passed = outcome.is_success() && !native_ignores_fail;
     let dependency_paths = collect_dependency_paths(current_dir, runner, &outcome, output_format);
     let remediations = collect_remediations(
@@ -1200,7 +1228,7 @@ fn render_native_ignore_ids(ids: &[String]) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ReconciledNativeIgnore {
+pub(crate) struct ReconciledNativeIgnore {
     source: &'static str,
     advisory_ids: Vec<String>,
     governed_advisory_ids: Vec<String>,
@@ -1208,19 +1236,19 @@ struct ReconciledNativeIgnore {
 }
 
 impl ReconciledNativeIgnore {
-    fn source(&self) -> &'static str {
+    pub(crate) fn source(&self) -> &'static str {
         self.source
     }
 
-    fn advisory_ids(&self) -> &[String] {
+    pub(crate) fn advisory_ids(&self) -> &[String] {
         &self.advisory_ids
     }
 
-    fn governed_advisory_ids(&self) -> &[String] {
+    pub(crate) fn governed_advisory_ids(&self) -> &[String] {
         &self.governed_advisory_ids
     }
 
-    fn unmanaged_advisory_ids(&self) -> &[String] {
+    pub(crate) fn unmanaged_advisory_ids(&self) -> &[String] {
         &self.unmanaged_advisory_ids
     }
 
@@ -1229,7 +1257,7 @@ impl ReconciledNativeIgnore {
     }
 }
 
-fn reconcile_native_ignores(
+pub(crate) fn reconcile_native_ignores(
     native_ignores: &[NativeDelegatedIgnore],
     outcome: &AdvisoryAuditOutcome,
 ) -> Vec<ReconciledNativeIgnore> {
@@ -1250,6 +1278,16 @@ fn reconcile_native_ignores(
             }
         })
         .collect()
+}
+
+pub(crate) fn unmanaged_native_ignores_fail(
+    native_ignores: &[ReconciledNativeIgnore],
+    mode: UnmanagedDelegatedPolicyMode,
+) -> bool {
+    matches!(mode, UnmanagedDelegatedPolicyMode::Deny)
+        && native_ignores
+            .iter()
+            .any(ReconciledNativeIgnore::has_unmanaged_ids)
 }
 
 fn render_finding(finding: &AdvisoryFinding) -> String {

@@ -21,9 +21,80 @@ const RUSTSEC_ID_LEN: usize = 17;
 pub struct ReviewedTargets {
     rust_families: Vec<ReviewedRustFamily>,
     rust_toolchains: Vec<crate::toolchain_admission::ReviewedToolchainAdmission>,
+    rust_tools: Vec<ReviewedCargoTool>,
+    ioc_records: Vec<crate::ioc::IocRecordReference>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawReviewedCargoTool", into = "RawReviewedCargoTool")]
+pub struct ReviewedCargoTool {
+    pub subject_id: crate::cargo_tool::RecordId,
+    pub record: String,
+    pub record_sha256: Sha256Digest,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawReviewedCargoTool {
+    subject_id: String,
+    record: String,
+    record_sha256: Sha256Digest,
+}
+
+impl ReviewedCargoTool {
+    pub fn validate(&self) -> Result<(), String> {
+        self.subject_id
+            .require_kind(crate::cargo_tool::RecordKind::Subject)
+            .map_err(|error| error.to_string())?;
+        if self.record.is_empty()
+            || self.record.len() > 4096
+            || reviewed_target_string_is_blank_or_control(&self.record)
+            || self.record.contains('\\')
+            || self.record.split('/').count() > 128
+            || self
+                .record
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+        {
+            return Err("tool admission record must be a bounded confined relative path".into());
+        }
+        Ok(())
+    }
+}
+
+impl TryFrom<RawReviewedCargoTool> for ReviewedCargoTool {
+    type Error = String;
+    fn try_from(raw: RawReviewedCargoTool) -> Result<Self, String> {
+        let value = Self {
+            subject_id: raw
+                .subject_id
+                .parse::<crate::cargo_tool::RecordId>()
+                .map_err(|error| error.to_string())?,
+            record: raw.record,
+            record_sha256: raw.record_sha256,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+}
+
+impl From<ReviewedCargoTool> for RawReviewedCargoTool {
+    fn from(value: ReviewedCargoTool) -> Self {
+        Self {
+            subject_id: value.subject_id.to_string(),
+            record: value.record,
+            record_sha256: value.record_sha256,
+        }
+    }
 }
 
 impl ReviewedTargets {
+    pub fn ioc_records(&self) -> &[crate::ioc::IocRecordReference] {
+        &self.ioc_records
+    }
+    pub fn rust_tools(&self) -> &[ReviewedCargoTool] {
+        &self.rust_tools
+    }
     pub fn rust_toolchains(&self) -> &[crate::toolchain_admission::ReviewedToolchainAdmission] {
         &self.rust_toolchains
     }
@@ -395,6 +466,39 @@ impl Ord for ReviewedAdvisoryException {
 }
 
 impl ReviewedAdvisoryException {
+    pub fn from_explicit_binding(
+        spec: ExactCrateSpec,
+        checksum_sha256: Sha256Digest,
+        advisory_id: RustSecAdvisoryId,
+        review_by: Date,
+        authority: String,
+        review_record: String,
+    ) -> Result<Self, String> {
+        if reviewed_target_string_is_blank_or_control(&authority)
+            || reviewed_target_string_is_blank_or_control(&review_record)
+            || review_record_path_is_unsafe(&review_record)
+        {
+            return Err("invalid explicit advisory exception authority or review reference".into());
+        }
+        let expected_target = ReviewedResolvedTarget {
+            version: spec.version().to_owned(),
+            spec: spec.clone(),
+            source: ReviewedResolvedSource::CratesIo {
+                checksum_sha256: Some(checksum_sha256.clone()),
+            },
+        };
+        Ok(Self {
+            binding: ReviewedAllowanceBinding {
+                spec,
+                family: authority,
+                review_record,
+            },
+            advisory_id,
+            checksum_sha256,
+            review_by,
+            expected_target,
+        })
+    }
     pub fn advisory_id(&self) -> &RustSecAdvisoryId {
         &self.advisory_id
     }
@@ -569,6 +673,28 @@ pub(crate) struct ObservedResolvedTarget {
 
 pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, ReviewedTargetsError> {
     let raw: RawReviewedTargets = toml::from_str(text).map_err(ReviewedTargetsError::Parse)?;
+    let mut ioc_paths = BTreeSet::new();
+    for reference in &raw.rust.ioc_records {
+        reference
+            .validate()
+            .map_err(ReviewedTargetsError::IocAllowance)?;
+        if !ioc_paths.insert(&reference.record) {
+            return Err(ReviewedTargetsError::IocAllowance(
+                "duplicate IOC record path".into(),
+            ));
+        }
+    }
+    let mut tool_subjects = BTreeSet::new();
+    for admission in &raw.rust.tools {
+        admission
+            .validate()
+            .map_err(ReviewedTargetsError::CargoToolAdmission)?;
+        if !tool_subjects.insert(admission.subject_id.clone()) {
+            return Err(ReviewedTargetsError::CargoToolAdmission(
+                "duplicate Cargo tool subject".into(),
+            ));
+        }
+    }
     let mut toolchain_subjects = BTreeSet::new();
     for admission in &raw.rust.toolchains {
         admission
@@ -896,7 +1022,94 @@ pub fn parse_reviewed_targets_toml(text: &str) -> Result<ReviewedTargets, Review
     Ok(ReviewedTargets {
         rust_families,
         rust_toolchains: raw.rust.toolchains,
+        rust_tools: raw.rust.tools,
+        ioc_records: raw.rust.ioc_records,
     })
+}
+
+/// Upserts one explicitly reapproved subject without rewriting unrelated policy
+/// or its comments. The old bundle remains an independent historical record.
+pub fn rewrite_reviewed_cargo_tool(
+    text: &str,
+    replacement: &ReviewedCargoTool,
+) -> Result<String, String> {
+    replacement.validate()?;
+    let before = parse_reviewed_targets_toml(text).map_err(|error| error.to_string())?;
+    let current = before
+        .rust_tools()
+        .iter()
+        .find(|row| row.subject_id == replacement.subject_id);
+    if current == Some(replacement) {
+        return Ok(text.to_owned());
+    }
+    let quoted = |value: &str| serde_json::to_string(value).map_err(|error| error.to_string());
+    let mut updated = text.to_owned();
+    if current.is_some() {
+        #[derive(Deserialize, Default)]
+        struct Root {
+            #[serde(default)]
+            rust: Rust,
+        }
+        #[derive(Deserialize, Default)]
+        struct Rust {
+            #[serde(default)]
+            tools: Vec<Row>,
+        }
+        #[derive(Deserialize)]
+        struct Row {
+            subject_id: String,
+            record: toml::Spanned<String>,
+            record_sha256: toml::Spanned<String>,
+        }
+        let spans: Root = toml::from_str(text).map_err(|error| error.to_string())?;
+        let row = spans
+            .rust
+            .tools
+            .into_iter()
+            .find(|row| row.subject_id == replacement.subject_id.to_string())
+            .ok_or("validated tool subject has no editable row")?;
+        let mut edits = [
+            (row.record.span(), quoted(&replacement.record)?),
+            (
+                row.record_sha256.span(),
+                quoted(&replacement.record_sha256.to_string())?,
+            ),
+        ];
+        edits.sort_by_key(|edit| std::cmp::Reverse(edit.0.start));
+        for (span, value) in edits {
+            if updated.get(span.clone()).is_none() {
+                return Err("invalid tool row scalar span".into());
+            }
+            updated.replace_range(span, &value);
+        }
+    } else {
+        updated.push_str(&format!(
+            "\n[[rust.tools]]\nsubject_id = {}\nrecord = {}\nrecord_sha256 = {}\n",
+            quoted(&replacement.subject_id.to_string())?,
+            quoted(&replacement.record)?,
+            quoted(&replacement.record_sha256.to_string())?,
+        ));
+    }
+    let after = parse_reviewed_targets_toml(&updated).map_err(|error| error.to_string())?;
+    let mut expected = before;
+    expected
+        .rust_tools
+        .retain(|row| row.subject_id != replacement.subject_id);
+    let mut observed = after;
+    let actual = observed
+        .rust_tools
+        .iter()
+        .find(|row| row.subject_id == replacement.subject_id);
+    if actual != Some(replacement) {
+        return Err("rewritten Cargo tool row does not match explicit approval".into());
+    }
+    observed
+        .rust_tools
+        .retain(|row| row.subject_id != replacement.subject_id);
+    if expected != observed {
+        return Err("rewriting Cargo tool admission changed unrelated policy".into());
+    }
+    Ok(updated)
 }
 
 const ALLOWED_SURFACES_TABLE: &str = "allowed_surfaces";
@@ -985,6 +1198,10 @@ fn is_terminal_control_char(character: char) -> bool {
 
 #[derive(Debug, Error)]
 pub enum ReviewedTargetsError {
+    #[error("invalid IOC allowance: {0}")]
+    IocAllowance(String),
+    #[error("invalid Cargo tool admission: {0}")]
+    CargoToolAdmission(String),
     #[error("invalid toolchain admission: {0}")]
     ToolchainAdmission(crate::toolchain_admission::AdmissionError),
     #[error("{0}")]
@@ -1155,6 +1372,10 @@ pub(crate) struct RawRustReviewedTargets {
     pub(crate) families: Vec<RawReviewedRustFamily>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) toolchains: Vec<crate::toolchain_admission::ReviewedToolchainAdmission>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) tools: Vec<ReviewedCargoTool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) ioc_records: Vec<crate::ioc::IocRecordReference>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1226,6 +1447,39 @@ pub(crate) struct RawGitResolvedTarget {
     pub(crate) rev: String,
 }
 
+pub fn append_ioc_record(
+    text: &str,
+    reference: &crate::ioc::IocRecordReference,
+) -> Result<String, String> {
+    reference.validate()?;
+    let before = parse_reviewed_targets_toml(text).map_err(|e| e.to_string())?;
+    if let Some(existing) = before
+        .ioc_records
+        .iter()
+        .find(|row| row.record == reference.record)
+    {
+        return if existing == reference {
+            Ok(text.into())
+        } else {
+            Err("IOC record reference already exists with another digest; review and remove the old declaration explicitly".into())
+        };
+    }
+    let path = serde_json::to_string(&reference.record).map_err(|e| e.to_string())?;
+    let result = format!(
+        "{text}\n[[rust.ioc_records]]\nrecord = {path}\nrecord_sha256 = \"{}\"\n",
+        reference.record_sha256
+    );
+    let after = parse_reviewed_targets_toml(&result).map_err(|e| e.to_string())?;
+    if after.rust_families != before.rust_families
+        || after.rust_tools != before.rust_tools
+        || after.rust_toolchains != before.rust_toolchains
+        || after.ioc_records.len() != before.ioc_records.len() + 1
+    {
+        return Err("IOC reference edit changed unrelated policy".into());
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1234,6 +1488,97 @@ mod tests {
     };
     use crate::Sha256Digest;
     use time::{Date, Month};
+
+    fn cargo_tool_row(digit: char) -> super::ReviewedCargoTool {
+        super::ReviewedCargoTool {
+            subject_id: format!("cargo-tool:subject:v1:{}", "a".repeat(64))
+                .parse()
+                .unwrap(),
+            record: format!("docs/tool-reviews/{digit}.json"),
+            record_sha256: Sha256Digest::try_from(digit.to_string().repeat(64)).unwrap(),
+        }
+    }
+
+    #[test]
+    fn tool_reapproval_replaces_only_the_exact_subject_record_scalars() {
+        let text = format!(
+            "# governance history\n[rust]\n\n[[rust.tools]]\nsubject_id = '{}'\nrecord = 'docs/tool-reviews/1.json' # retain history\nrecord_sha256 = '{}' # reviewed\n",
+            cargo_tool_row('1').subject_id,
+            "1".repeat(64),
+        );
+        let changed = super::rewrite_reviewed_cargo_tool(&text, &cargo_tool_row('2')).unwrap();
+        assert_eq!(
+            changed,
+            text.replace("'docs/tool-reviews/1.json'", "\"docs/tool-reviews/2.json\"")
+                .replace(
+                    &format!("'{}'", "1".repeat(64)),
+                    &format!("\"{}\"", "2".repeat(64))
+                )
+        );
+        assert_eq!(
+            super::rewrite_reviewed_cargo_tool(&changed, &cargo_tool_row('2')).unwrap(),
+            changed
+        );
+        assert_eq!(
+            parse_reviewed_targets_toml(&changed).unwrap().rust_tools(),
+            &[cargo_tool_row('2')]
+        );
+    }
+
+    #[test]
+    fn tool_admission_append_and_invalid_rows_fail_closed() {
+        let text = "# preserve\n[rust]\n";
+        let appended = super::rewrite_reviewed_cargo_tool(text, &cargo_tool_row('1')).unwrap();
+        assert!(appended.starts_with(text));
+        assert_eq!(
+            parse_reviewed_targets_toml(&appended).unwrap().rust_tools(),
+            &[cargo_tool_row('1')]
+        );
+        let mut invalid = cargo_tool_row('1');
+        invalid.record = "../other.json".into();
+        assert!(super::rewrite_reviewed_cargo_tool(&appended, &invalid).is_err());
+        invalid = cargo_tool_row('1');
+        invalid.subject_id = format!("cargo-tool:review:v1:{}", "b".repeat(64))
+            .parse()
+            .unwrap();
+        assert!(super::rewrite_reviewed_cargo_tool(text, &invalid).is_err());
+        assert!(
+            super::rewrite_reviewed_cargo_tool(
+                &format!("{appended}{}", appended.trim_start_matches(text)),
+                &cargo_tool_row('2')
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn explicit_advisory_binding_retains_exact_artifact_authority() {
+        let spec = "example@1.0.0".parse::<crate::ExactCrateSpec>().unwrap();
+        let checksum = Sha256Digest::try_from("1".repeat(64)).unwrap();
+        let binding = super::ReviewedAdvisoryException::from_explicit_binding(
+            spec.clone(),
+            checksum.clone(),
+            super::RustSecAdvisoryId::parse("RUSTSEC-2026-0001").unwrap(),
+            Date::from_calendar_date(2027, Month::January, 1).unwrap(),
+            "tool-exact-authority".into(),
+            "docs/tool-reviews/assessment.md".into(),
+        )
+        .unwrap();
+        assert_eq!(binding.spec(), &spec);
+        assert_eq!(binding.checksum_sha256(), &checksum);
+        assert_eq!(binding.family(), "tool-exact-authority");
+        assert!(
+            super::ReviewedAdvisoryException::from_explicit_binding(
+                spec,
+                checksum,
+                binding.advisory_id().clone(),
+                binding.review_by(),
+                "tool-exact-authority".into(),
+                "../unsafe.md".into(),
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn parses_rust_reviewed_families() {

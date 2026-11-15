@@ -27,6 +27,9 @@ const POLICY_CHECK_STEP_COUNT: u8 = 4;
 pub(super) fn run_gatehouse<C, R>(
     command: GatehouseCommand,
     current_dir: &Path,
+    data: Option<&Path>,
+    cache: Option<&Path>,
+    legacy_ioc: Option<&crate::ioc_intake::Context>,
     client: &C,
     runner: &R,
     now: OffsetDateTime,
@@ -48,16 +51,30 @@ where
             stdout,
             stderr,
         ),
-        GatehouseCommand::PreRelease => run_pre_release(current_dir, runner, now, stdout, stderr),
-        GatehouseCommand::PolicyCheck => run_policy_check(current_dir, runner, now, stdout, stderr),
-        GatehouseCommand::Candidate(args) => {
-            run_candidate(args, current_dir, client, runner, now, stdout, stderr)
+        GatehouseCommand::PreRelease { ioc } => {
+            run_pre_release(current_dir, data, cache, ioc, runner, now, stdout, stderr)
         }
+        GatehouseCommand::PolicyCheck { ioc } => {
+            run_policy_check(current_dir, data, cache, ioc, runner, now, stdout, stderr)
+        }
+        GatehouseCommand::Candidate(args) => run_candidate(
+            args,
+            current_dir,
+            legacy_ioc,
+            client,
+            runner,
+            now,
+            stdout,
+            stderr,
+        ),
     }
 }
 
 fn run_pre_release<R>(
     current_dir: &Path,
+    data: Option<&Path>,
+    cache: Option<&Path>,
+    ioc: bool,
     runner: &R,
     now: OffsetDateTime,
     stdout: &mut dyn IoWrite,
@@ -88,7 +105,15 @@ where
             return Ok(exit_code);
         }
     };
-
+    if ioc {
+        writeln!(stdout, "Optional IOC locked-source policy (blocking):")
+            .map_err(CommandError::Io)?;
+        let exit = super::ioc::gate(current_dir, data, cache, now, stdout, stderr)
+            .map_err(|detail| CommandError::Io(std::io::Error::other(detail)))?;
+        if exit != ExitCode::SUCCESS {
+            return Ok(exit);
+        }
+    }
     writeln!(stdout).map_err(CommandError::Io)?;
     write_gatehouse_step(
         stdout,
@@ -144,6 +169,9 @@ where
 
 fn run_policy_check<R>(
     current_dir: &Path,
+    data: Option<&Path>,
+    cache: Option<&Path>,
+    ioc: bool,
     runner: &R,
     now: OffsetDateTime,
     stdout: &mut dyn IoWrite,
@@ -174,6 +202,15 @@ where
             return Ok(exit);
         }
     };
+    if ioc {
+        writeln!(stdout, "Optional IOC locked-source policy (blocking):")
+            .map_err(CommandError::Io)?;
+        let exit = super::ioc::gate(current_dir, data, cache, now, stdout, stderr)
+            .map_err(|detail| CommandError::Io(std::io::Error::other(detail)))?;
+        if exit != ExitCode::SUCCESS {
+            return Ok(exit);
+        }
+    }
     writeln!(stdout).map_err(CommandError::Io)?;
     write_gatehouse_step(
         stdout,
@@ -236,6 +273,7 @@ fn write_gatehouse_step(
 fn run_candidate<C, R>(
     args: GatehouseCandidateArgs,
     current_dir: &Path,
+    legacy_ioc: Option<&crate::ioc_intake::Context>,
     client: &C,
     runner: &R,
     now: OffsetDateTime,
@@ -258,14 +296,19 @@ where
     };
     let (minimum_days, reviewed_release_age_exceptions) =
         load_release_age_context(current_dir, None)?;
+    let ioc_authority = super::ioc::RepositoryAllowances::capture(current_dir)
+        .map_err(|detail| CommandError::Io(std::io::Error::other(detail)))?;
     let mut dossier = CandidateDossier::new(&spec);
 
     match render_candidate_inspect(
         &spec,
         minimum_days,
         &reviewed_release_age_exceptions,
+        &ioc_authority,
+        legacy_ioc,
         client,
         now,
+        &mut OffsetDateTime::now_utc,
     ) {
         Ok((rendered, failed)) => {
             dossier.push_inspect(&rendered);
@@ -327,6 +370,9 @@ where
     }
 
     dossier.push_next_step(args.preserve_sandbox);
+    ioc_authority
+        .check()
+        .map_err(|detail| CommandError::Io(std::io::Error::other(detail)))?;
     let failed = dossier.failed();
     write!(stdout, "{}", dossier.finish()).map_err(CommandError::Io)?;
 
@@ -337,12 +383,15 @@ where
     })
 }
 
-fn render_candidate_inspect<C>(
+pub(super) fn render_candidate_inspect<C>(
     spec: &ExactCrateSpec,
     minimum_days: u64,
     reviewed_release_age_exceptions: &ReviewedReleaseAgeExceptions,
+    ioc_authority: &super::ioc::RepositoryAllowances,
+    legacy_ioc: Option<&crate::ioc_intake::Context>,
     client: &C,
     now: OffsetDateTime,
+    clock: &mut dyn FnMut() -> OffsetDateTime,
 ) -> Result<(String, bool), String>
 where
     C: CratesIoClient + ?Sized,
@@ -350,6 +399,9 @@ where
     let release = client
         .fetch_release(spec)
         .map_err(|error| format!("{spec}: {error}"))?;
+    if let Some(ctx) = legacy_ioc {
+        super::ioc::begin_legacy(ctx, spec, &release)?;
+    }
     let age_exception = reviewed_release_age_exceptions
         .honoured()
         .iter()
@@ -381,13 +433,19 @@ where
         minimum_days,
         age_exception,
     );
-    let failed = !matches!(
-        report.classification(),
-        RustAssessmentClassification::RoutineSafe
-    );
-
+    if let Some(ctx) = legacy_ioc {
+        super::ioc::remember_legacy(ctx, &report)?;
+    }
+    let (classification, ioc_decision) =
+        super::inspect::current_ioc_decision(&report, ioc_authority, now, clock)?;
+    let failed = !matches!(classification, RustAssessmentClassification::RoutineSafe);
     Ok((
-        render_inspect_report(&report, InspectRenderContext::GatehouseCandidate),
+        render_inspect_report(
+            &report,
+            InspectRenderContext::GatehouseCandidate,
+            classification,
+            ioc_decision.as_ref(),
+        ),
         failed,
     ))
 }

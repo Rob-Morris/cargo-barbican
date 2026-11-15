@@ -57,8 +57,12 @@ where
             spec,
             advisories,
             review_by,
+            ioc: false,
+            ..
         } => run_pin_exception(
-            &spec,
+            spec.as_deref().ok_or_else(|| {
+                CommandError::PinEdit("advisory exception requires a crate".into())
+            })?,
             &advisories,
             review_by.as_deref(),
             current_dir,
@@ -66,6 +70,9 @@ where
             stdout,
             stderr,
         ),
+        PinCommand::Exception { ioc: true, .. } => {
+            unreachable!("IOC authoring dispatches statically")
+        }
         PinCommand::Check { config } => {
             super::pin_check::run_pin_check(&config, current_dir, runner, stdout)
         }

@@ -7,11 +7,14 @@
 pub mod advisory;
 pub mod assessment;
 pub mod cargo_config;
+pub mod cargo_tool;
 pub mod config;
 pub mod crates_io;
 pub mod deny_config;
 pub mod inspect;
 pub mod inventory;
+pub mod ioc;
+pub use reviewed_targets::append_ioc_record;
 mod iso_date;
 pub mod lockfile;
 pub mod manifest;
@@ -48,6 +51,7 @@ pub use cargo_config::{
     cargo_config_has_nextest_alias, cargo_config_lockfile_selection_key,
     cargo_config_source_override_key, cargo_config_toolchain_executable_control_key,
 };
+pub use config::append_tool_exception_record;
 pub use config::{
     AdvisoryDelegatesConfig, BarbicanConfig, CargoDenyCheck, CargoDenyDelegatesConfig,
     CargoDenyLicensesPosture, ConfigLoadError, DEFAULT_CARGO_DENY_CHECKS, DelegatesConfig,
@@ -62,7 +66,10 @@ pub use deny_config::{
     CargoDenyRuntimeConfigError, advisory_ignores_from_toml, deny_toml_declares_licenses_policy,
     generate_cargo_deny_runtime_config,
 };
-pub use inspect::{CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate_at};
+pub use inspect::{
+    CrateVcsInfo, IocHit, RustInspectReport, inspect_published_crate_at,
+    inspect_published_crate_at_with_ioc_budget,
+};
 pub use inventory::{
     INVENTORY_ADVISORY_SOON_TO_EXPIRE_DAYS, Inventory, InventoryAdvisoryException,
     InventoryAdvisoryExceptionStatus, InventoryCoverageFloor, InventoryDeclaredSurface,
@@ -143,3 +150,5 @@ pub use toolchain::{
     ExactRustToolchainChannel, RustToolchainConformance, RustToolchainError,
     evaluate_rust_toolchain_conformance, parse_rust_toolchain_toml,
 };
+
+pub mod tool_inputs;

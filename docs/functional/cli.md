@@ -70,6 +70,207 @@ not acquire this graph constraint. Explicit reader/baseline `--lockfile` options
 do not authorise alternate Cargo selection. Concurrent filesystem changes and
 general build-script/test subprocess containment remain outside this guarantee.
 
+## Cargo-tool lifecycle
+
+The direct trusted `cargo-barbican tool` family dispatches before Cargo workspace
+discovery. `--repo ROOT` chooses filesystem governance; `--standalone` is
+explicitly separate. Global `--data-dir` and `--cache-dir` retain private-store
+ownership/type/containment checks. Candidate configuration never becomes the
+origin policy or chooses an evaluator. The [tool guide](../user/cargo-tools.md)
+owns prerequisites, human assessment and recovery guidance.
+
+```text
+cargo-barbican [--repo ROOT] tool review CRATE@VERSION [review options]
+cargo-barbican [--repo ROOT] tool review --git HTTPS-URL --rev FULL-COMMIT
+    --package NAME [review options]
+cargo-barbican [--repo ROOT] tool accept REVIEW-ID --record COMPLETED-PATH
+    [--approve-repo --repo-record REPOSITORY-COMPLETED-PATH] [operation options]
+cargo-barbican [--repo ROOT] tool install REVIEW-ID
+    [--root ROOT] [--replace-existing] [operation options]
+cargo-barbican tool installation-check INSTALLATION-ID [--format text|json]
+cargo-barbican [--repo ROOT] tool admission-check INSTALLATION-ID --bin NAME
+    (--executable ABSOLUTE-PATH | --lookup-path | --cargo-subcommand NAME)
+    [operation options]
+```
+
+Review options are repeated `--bin NAME`, `--features A,B`,
+`--no-default-features`, `--all-features`, `--profile release|dev`, native-only
+`--target HOST`, `--from INSTALLATION-ID`, `--cargo TRUSTED-PATH`,
+`--rustc TRUSTED-PATH`, `--standalone` and `--format text|json`.
+`--all-features` conflicts with `--features` and `--no-default-features`.
+Operation options are `--standalone`, `--cached-admission --cache-reason REASON`
+and `--format text|json`. Cached mode is opt-in for that operation, never a
+fallback or stored default. `installation-check` has no freshness mode.
+
+Schema-1 record IDs are domain-separated `cargo-tool:KIND:v1:SHA256`; a review
+excludes mutable PENDING prose, while its completed assessment separately binds
+the exact prose/reviewer and review. Evidence content excludes collection times
+and generated freshness deadlines; observations separately bind fresh checks.
+Material source/security/policy/evaluator changes invalidate old authority.
+
+The native frozen graph protocol is qualified for the exact Cargo/rustc1.95.0
+commits and resolver2/3. It retains real selected binary targets, features,
+normal/build parentage and host/proc-macro context. Ambiguous/unbound/truncated
+output refuses; it cannot fall back to the all-metadata graph. `declared_targets`
+on an edge preserves Cargo metadata declaration alternatives (including inactive
+or overlapping declarations), not a claim about the active predicate. Only the
+native tree determines selected edges, contexts and features; declarations never
+add units to scanner scope. Both original lock provenance and an explicitly
+derived effective lock remain recorded.
+
+Review verifies source and policy evidence without candidate build/execution.
+Acceptance refreshes it and requires completed exact human assessment. Optional
+repository publication is separate from local personal authority. Install
+rechecks both and consumes unchanged verified sources through public native
+`--path` staging with offline/frozen Cargo, ordinary roots and honest path-backed
+tracking. Compiler artifacts must correspond to all selected installed outputs.
+Relative install roots resolve from the original invocation directory before
+private staging; the captured absolute destination is passed to native Cargo.
+No private Cargo ledger/cache editing, native source-identity substitution,
+automatic source-mode fallback or implicit rollback is permitted.
+
+Installation-check is all-output local static correspondence, including scoped
+native tracking. Admission-check additionally proves the actual first consumer
+selection, local authority, current originating policy, adverse knowledge and
+any required repository approval. It cannot skip an unsupported first match or
+certify interactive shell state. Unchanged continuing use has its own bound
+context; it does not erase current policy, expiry or known-adverse checks.
+Cargo external lookup prepends Cargo-home `bin` only when that path is absent
+from process PATH; otherwise its existing position is preserved. Actual first
+PATH Cargo and external executable identity are both checked independently.
+
+JSON results have `schema_version: 1` and operation-scoped statuses:
+`evidence-complete-pending-human`, `evidence-complete-blocked`,
+`locally-accepted`, `installed-complete`, `local-correspondence`,
+`consumer-admission`, `blocked-or-unavailable` or `invalid-input`.
+Exit0 means scoped success, exit1 means blocked/unavailable/correspondence
+failure, and exit2 means invalid command input. Complete blocked review returns
+its evidence but fails. Existing commands retain their exit mappings.
+
+Collection bounds and one-writer/native-build limits are documented in the tool
+guide. Native installer success never certifies benignness, reproducible builds,
+general confinement or future consumer selection.
+
+## IOC source inspection and reviewed findings
+
+```text
+cargo barbican ioc check <crate@version>... [--format text|json] [--output PATH]
+cargo barbican ioc check --git URL --rev FULL_40_HEX_COMMIT --package NAME [--format text|json] [--output PATH]
+cargo barbican ioc check --lockfile PATH [--format text|json] [--output PATH]
+cargo barbican ioc review --inspection REPORT --review-record PATH [--package NAME[@VERSION]] [--source-id SOURCE_ID] [--path RELATIVE_PATH]... [--rule RULE_ID]...
+cargo barbican pin exception [NAME[@VERSION]] --ioc --inspection REPORT (--review-record PATH | --record PATH) [--source-id SOURCE_ID] [--review-by YYYY-MM-DD] [--path RELATIVE_PATH]... [--rule RULE_ID]...
+cargo-barbican tool exception REVIEW_ID --ioc (--review-record PATH | --record PATH) [--package NAME[@VERSION]] [--source-id SOURCE_ID] [--review-by YYYY-MM-DD] [--path RELATIVE_PATH]... [--rule RULE_ID]... [--standalone] [--format text|json]
+cargo barbican gatehouse policy-check [--ioc]
+cargo barbican gatehouse pre-release [--ioc]
+```
+
+IOC check, review and IOC pin-exception dispatch statically before Cargo
+workspace discovery. They require no Cargo/rustc/scanner probes. Exactly one
+explicit check selector is required; registry specs, Git tuples and lockfile
+selection conflict. Git requires a canonical supported URL, full immutable
+revision and uniquely resolved package. `--format` defaults to text. `--output`
+always exclusively creates bounded canonical schema-1 JSON, independently of
+stdout format, without replacing a file or following an unsafe path. Progress
+and path notes use stderr.
+
+Global `--repo` selects the filesystem-only originating policy directory.
+Otherwise ancestor policy-marker discovery must be unambiguous. Unreadable,
+malformed or ambiguous authority refuses; the inspected file's directory cannot
+select policy. Without an origin, check uses labelled no-repository/no-allowance
+policy, portable review works, and pin authority publication requires `--repo`.
+No authoring command automatically initialises repository policy.
+
+The lockfile is a captured read-only source set: every exact externally
+identified registry/Git entry is inspected, including inactive/dev/optional
+versions. Source-less local/path entries are explicitly outside this scope.
+There is no metadata, resolution, feature or target selection and no lock
+repair. Alternative registries, unbound source identities and unsupported
+required inputs produce incomplete requested coverage. Complete-empty is valid
+only for the named external-source scope, never an assertion about mutable
+workspace code or the compilation graph.
+
+A finding binds exact original source identity, canonical file path/hash, stable
+built-in rule, scope semantics and its complete sorted occurrence set. Literal
+matching can include comments and strings. Input and scanned counters are
+separate. Partial occurrence sets remain visible and unapprovable; limits are
+enforced before accumulating unbounded findings, snippets or report output.
+Registry and Git use the same pure detector over verified original bytes;
+rewritten Cargo transport inputs are not source authority.
+
+`ioc review` writes only portable PENDING rationale. Exception authoring requires
+exactly one explicit mode: `--review-record` creates PENDING content plus a grant
+fragment without policy mutation; `--record` validates existing completed
+content and current original source/finding evidence before publishing a
+reference. There is no guessed record filename or implicit approval. Package,
+source-ID, path and rule selectors match exactly, must be nonempty when supplied,
+and never guess same-name registry/Git provenance. Review records are bounded
+Markdown with one versioned JSON block; approved conclusions are
+`expected-behaviour` and `false-positive`, with completed reviewer, UTC timestamp
+and rationale. No human-authorship attestation is imposed.
+
+Repository records are safe relative paths under the captured origin. They are
+referenced by `[[rust.ioc_records]]` rows (`record`, `record_sha256`) independently
+of active families. This supports pre-add review without adoption, pinning,
+source allowlisting or an execution-surface grant. Tool records are relative to
+the originating repository or standalone private data-store root, never cwd or
+policy.toml. Tool references additionally bind exact Subject/base policy;
+scaffolding may use a blocked stored review without first accepting it.
+Completed record bytes are re-read at policy capture, current/cached/continuing
+eligibility and final publication guards. Mutated, removed, unsafe or expired
+records cannot retain old authority. IOC deadlines are optional; an explicit
+`--review-by` is the end of that UTC date and must match completed content.
+Existing advisory/age deadline rules are unchanged.
+
+The narrow IOC exit is 0 only for complete source/custody/IOC coverage with every
+finding absent or currently reviewed-allowed; 1 denotes unresolved policy,
+source integrity, unavailable/incomplete evidence or current authority failure;
+2 denotes invalid selector/argument usage. Independent age, yank, advisory and
+general execution-risk policy are not silently added to this verdict. Their
+observations remain retained and their owning tool/general gates still block.
+Existing inspect/candidate share IOC disposition but preserve broad non-IOC
+risk and exit semantics. `--ioc` explicitly composes locked-source checking
+after Gatehouse conformance and before build/test; default workflows and verify
+remain unchanged.
+
+The canonical public check result has `schema_version: 1`, `operation:
+"ioc-check"`, `status`, optional `origin`, `checker_sha256`,
+`detector_semantics`, `authority_records`, captured `input`, a nested
+`inspection` and aligned `decisions`. Inspection contains scope, exact source reports, explicit excluded
+entries and errors. Each decision exposes complete, allowed, blocked and errors;
+reviewed matches remain raw findings. Incomplete source acquisition can emit an
+explicit incomplete result, while a fatal command-context error emits a
+schema-1 diagnostic with `blocked-or-unavailable` (or `invalid-input`) status.
+Neither form is a benignness proof. Untrusted reports are revalidated against
+original source before any applicable authority publication.
+
+`input` binds the requested source set, including requests that could not be
+inspected. It contains `lockfile` (null or `{path, sha256}`),
+`requested_source_count`, `source_set_sha256`, and sorted, deduplicated
+`requested_sources`. Each row contains `source` and `coverage`. Source variants
+are `crates-io` (`name`, `version`, optional `checksum`), `git` (`url`, full
+`rev`, `package`, optional `version`), or `unsupported` (`name`, `version`,
+`source_sha256`). Coverage is `inspected` with the exact `source_id`,
+`unavailable` with a reason, or `uninspected` after collection failed before
+that request. An inspected row must bind matching evidence; unavailable or
+uninspected rows cannot accompany a complete collection.
+
+The source-set digest covers the canonical requested identities, independently
+of acquisition progress. A `locked-external-source-set` inspection requires
+the captured lock path and SHA-256 of the original bytes; an
+`explicit-exact-source-set` inspection has no lock descriptor. Unknown or
+mismatched scopes, removed descriptors, changed request counts/digests, and
+unbound or duplicate inspected sources are rejected. Missing or unreadable
+lock input produces a diagnostic rather than an invented lock hash or a clean
+empty report. The lock descriptor identifies the inspected input; it does not
+select policy authority or establish the active compilation graph.
+
+Source knowledge is shared with the tool lifecycle. New unmatched IOC findings,
+conflicts and interrupted collection affect older relevant cached evidence.
+Allowances never clear raw adverse facts or forgive missing coverage. Rechecking
+saved immutable findings does not renew their observation time or prior review
+completion time. See [the workflow](../user/ioc.md) and
+[DD-002](../architecture/decisions/dd-002-ioc-reviewed-findings.md).
+
 ## Toolchain intake and early admission
 
 Use the direct already trusted `cargo-barbican` executable to review a candidate.

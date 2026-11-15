@@ -502,7 +502,7 @@ fn gatehouse_candidate_keeps_collecting_evidence_after_non_routine_inspect() {
 #[test]
 fn gatehouse_candidate_explains_ioc_verdict_without_self_referential_pointer() {
     // The dossier embeds the inspect report, so it carries the same verdict
-    // basis and reviewed-family remediation. It must NOT tell the reviewer to
+    // basis and exact IOC review remediation. It must NOT tell the reviewer to
     // run `gatehouse candidate` again — that pointer is inspect-only.
     let tarball = build_crate_tarball(&[
         (
@@ -545,7 +545,17 @@ fn gatehouse_candidate_explains_ioc_verdict_without_self_referential_pointer() {
     assert!(rendered.contains("classification: policy-violating"));
     assert!(rendered.contains("(process execution: `std::process::Command`)"));
     assert!(rendered.contains("verdict basis: policy-violating is driven by the IOC hits above."));
-    assert!(rendered.contains("record the crate in a reviewed family with an allowed_surfaces"));
+    assert!(rendered.contains("cargo barbican ioc check sample@0.1.0 --output REPORT"));
+    assert!(rendered.contains("pin exception --ioc --inspection REPORT --review-record PATH"));
+    assert!(
+        rendered
+            .contains("Completed source review and explicit authority publication are separate.")
+    );
+    assert!(rendered.contains("An IOC allowance does not grant an allowed_surfaces exception."));
+    assert!(
+        rendered
+            .contains("IOC disposition: 0 reviewed-allowed, 2 unreviewed; raw matches retained.")
+    );
     assert!(rendered.contains("cargo barbican pin add sample"));
     assert!(!rendered.contains("gatehouse candidate sample"));
 }

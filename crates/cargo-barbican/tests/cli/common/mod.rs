@@ -1246,11 +1246,15 @@ pub(crate) fn run_pin_add(temp_dir: &Path, spec: &str) -> (ExitCode, String, Str
 }
 
 pub(crate) fn build_crate_tarball(files: &[(&str, &str)]) -> Vec<u8> {
+    build_crate_tarball_with_root("sample-0.1.0", files)
+}
+
+pub(crate) fn build_crate_tarball_with_root(root: &str, files: &[(&str, &str)]) -> Vec<u8> {
     let mut tarball = Vec::new();
     {
         let mut builder = Builder::new(&mut tarball);
         for (path, contents) in files {
-            let full_path = format!("sample-0.1.0/{path}");
+            let full_path = format!("{root}/{path}");
             let bytes = contents.as_bytes();
             let mut header = Header::new_gnu();
             header.set_size(bytes.len() as u64);

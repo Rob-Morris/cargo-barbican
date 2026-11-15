@@ -1,13 +1,14 @@
 mod age;
 mod age_lock;
 mod assess;
-mod audit;
+pub(crate) mod audit;
 mod baseline;
 mod diff_render;
 mod errors;
 mod gatehouse;
 mod inspect;
 mod inventory;
+pub(crate) mod ioc;
 mod loaders;
 mod lockfile_identity;
 mod lockfile_ops;
@@ -59,8 +60,8 @@ pub(crate) use loaders::{
     load_git_base_lockfile, load_lockfile_from_path, load_manifest_dependencies_from_root,
     load_manifest_patched_crate_names, load_manifest_texts_from_root,
     load_native_delegated_ignores, load_release_age_context, load_reviewed_targets,
-    parse_manifest_requirements, read_optional_text_no_symlink, release_age_override_note,
-    source_replacement_finding,
+    native_ignore_entry, parse_manifest_requirements, read_optional_text_no_symlink,
+    release_age_override_note, source_replacement_finding,
 };
 pub(crate) use render::{
     escape_render_field, fail, join_display, render_allowed_policy_exceptions,
@@ -88,6 +89,28 @@ fn run_at(
     stderr: &mut dyn Write,
 ) -> Result<ExitCode, CommandError> {
     let current_dir = env::current_dir().map_err(CommandError::Io)?;
+    if ioc::is_static(&cli) {
+        return ioc::run(
+            &cli,
+            &current_dir,
+            OffsetDateTime::now_utc(),
+            stdout,
+            stderr,
+        )
+        .map_err(|detail| CommandError::Io(std::io::Error::other(detail)));
+    }
+    if crate::tool_intake::is_static(&cli) {
+        return crate::tool_intake::run(
+            &cli,
+            &current_dir,
+            OffsetDateTime::now_utc(),
+            stdout,
+            true,
+        )
+        .map_err(|detail| {
+            CommandError::Io(std::io::Error::other(format!("tool intake: {detail}")))
+        });
+    }
     if crate::toolchain_intake::is_static(&cli) {
         return crate::toolchain_intake::run(
             &cli,
@@ -112,10 +135,19 @@ fn run_at(
         )
         .map_err(CommandError::Io)?;
     }
+    let authenticated_original_sources = base_url == DEFAULT_CRATES_IO_BASE_URL;
     let client = UreqCratesIoClient::new(base_url);
     let runner = RealCommandRunner;
-
-    run_cli_with_runner(cli, &current_dir, &client, &runner, stdout, stderr)
+    dispatch_command(
+        cli,
+        &current_dir,
+        &client,
+        &runner,
+        OffsetDateTime::now_utc(),
+        stdout,
+        stderr,
+        authenticated_original_sources,
+    )
 }
 
 fn cargo_subcommand_args<I>(args: I) -> Vec<OsString>
@@ -182,7 +214,7 @@ where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
-    match dispatch_command(cli, current_dir, client, runner, now, stdout, stderr) {
+    match dispatch_command(cli, current_dir, client, runner, now, stdout, stderr, false) {
         Ok(exit_code) => Ok(exit_code),
         Err(error) => fail(stderr, error),
     }
@@ -196,11 +228,21 @@ fn dispatch_command<C, R>(
     now: OffsetDateTime,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
+    authenticated_original_sources: bool,
 ) -> Result<ExitCode, CommandError>
 where
     C: CratesIoClient + ?Sized,
     R: CommandRunner + ?Sized,
 {
+    if ioc::is_static(&cli) {
+        return ioc::run(&cli, current_dir, now, stdout, stderr)
+            .map_err(|detail| CommandError::Io(std::io::Error::other(detail)));
+    }
+    if crate::tool_intake::is_static(&cli) {
+        return crate::tool_intake::run(&cli, current_dir, now, stdout, false).map_err(|detail| {
+            CommandError::Io(std::io::Error::other(format!("tool intake: {detail}")))
+        });
+    }
     if crate::toolchain_intake::is_static(&cli) {
         return crate::toolchain_intake::run(&cli, current_dir, now, stdout, false)
             .map_err(CommandError::ToolchainIntake);
@@ -222,6 +264,26 @@ where
         lockfile_identity::check_execution_root(workspace.root(), runner)?;
     }
     let current_dir = workspace.root();
+    let legacy_ioc = if authenticated_original_sources
+        && matches!(
+            &cli.command,
+            Command::Inspect { .. }
+                | Command::Gatehouse {
+                    command: crate::cli::GatehouseCommand::Candidate(_)
+                }
+        ) {
+        Some(
+            crate::ioc_intake::Context::capture(
+                current_dir,
+                Some(current_dir),
+                cli.data_dir.as_deref(),
+                cli.cache_dir.as_deref(),
+            )
+            .map_err(|detail| CommandError::Io(std::io::Error::other(detail)))?,
+        )
+    } else {
+        None
+    };
 
     match cli.command {
         Command::Age {
@@ -303,6 +365,7 @@ where
             min_age_days,
             specs,
             current_dir,
+            legacy_ioc.as_ref(),
             client,
             now,
             stdout,
@@ -311,10 +374,21 @@ where
         Command::Pick { min_age_days, spec } => {
             pick::run_pick(min_age_days, spec, current_dir, client, now, stdout, stderr)
         }
-        Command::Gatehouse { command } => {
-            gatehouse::run_gatehouse(command, current_dir, client, runner, now, stdout, stderr)
-        }
+        Command::Gatehouse { command } => gatehouse::run_gatehouse(
+            command,
+            current_dir,
+            cli.data_dir.as_deref(),
+            cli.cache_dir.as_deref(),
+            legacy_ioc.as_ref(),
+            client,
+            runner,
+            now,
+            stdout,
+            stderr,
+        ),
         Command::Policy { command } => policy::run_policy(command, current_dir, stdout),
+        Command::Ioc { .. } => unreachable!("IOC commands dispatch before workspace discovery"),
+        Command::Tool { .. } => unreachable!("tool commands dispatch before workspace discovery"),
         Command::Toolchain { command } => {
             toolchain::run_toolchain(command, current_dir, runner, stdout, stderr)
         }
