@@ -108,7 +108,17 @@ pub(super) fn observe(
     executable: bool,
     cancelled: &AtomicBool,
 ) -> Result<FileObservation> {
-    observe_as(path, uid, uid, executable, cancelled)
+    observe_as(path, uid, uid, executable, Links::Single, cancelled)
+}
+
+pub(super) fn observe_build_artifact(
+    path: &Path,
+    uid: u32,
+    cancelled: &AtomicBool,
+) -> Result<FileObservation> {
+    // Cargo can hard-link temporary target artifacts. These establish byte
+    // correspondence only; installed outputs still require independent custody.
+    observe_as(path, uid, uid, true, Links::BuildArtifact, cancelled)
 }
 
 pub(super) fn observe_trusted_executable(
@@ -120,7 +130,12 @@ pub(super) fn observe_trusted_executable(
     if owner != uid && owner != 0 {
         return Err("selected evaluator has unsupported ownership".into());
     }
-    observe_as(path, uid, owner, true, cancelled)
+    observe_as(path, uid, owner, true, Links::Single, cancelled)
+}
+
+enum Links {
+    Single,
+    BuildArtifact,
 }
 
 fn observe_as(
@@ -128,6 +143,7 @@ fn observe_as(
     uid: u32,
     owner: u32,
     executable: bool,
+    links: Links,
     cancelled: &AtomicBool,
 ) -> Result<FileObservation> {
     check_cancelled(cancelled)?;
@@ -136,12 +152,17 @@ fn observe_as(
         fs::symlink_metadata(path).map_err(|e| format!("inspect {}: {e}", path.display()))?;
     if !metadata.file_type().is_file()
         || metadata.uid() != owner
-        || metadata.nlink() != 1
+        || (matches!(links, Links::Single) && metadata.nlink() != 1)
         || metadata.mode() & 0o7022 != 0
         || (executable && metadata.mode() & 0o100 == 0)
     {
         return Err(format!(
-            "expected protected singly linked {}file: {}",
+            "expected protected {}{}file: {}",
+            if matches!(links, Links::Single) {
+                "singly linked "
+            } else {
+                ""
+            },
             if executable { "executable " } else { "" },
             path.display()
         ));

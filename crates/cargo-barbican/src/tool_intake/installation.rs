@@ -198,7 +198,7 @@ pub(super) fn artifact_outputs(
         if !executable.starts_with(prepared_target) {
             return Err("native artifact is outside fresh build state".into());
         }
-        let observed = output_files::observe(&executable, uid, true, cancelled)?;
+        let observed = output_files::observe_build_artifact(&executable, uid, cancelled)?;
         if artifacts.insert(name.into(), observed).is_some() {
             return Err("ambiguous duplicate native binary artifact".into());
         }

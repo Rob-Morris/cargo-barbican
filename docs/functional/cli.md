@@ -124,6 +124,9 @@ repository publication is separate from local personal authority. Install
 rechecks both and consumes unchanged verified sources through public native
 `--path` staging with offline/frozen Cargo, ordinary roots and honest path-backed
 tracking. Compiler artifacts must correspond to all selected installed outputs.
+Temporary build artifacts may retain Cargo's hard links while their identity and
+bytes are checked; installed outputs and native tracking files must remain
+singly linked protected files.
 Relative install roots resolve from the original invocation directory before
 private staging; the captured absolute destination is passed to native Cargo.
 No private Cargo ledger/cache editing, native source-identity substitution,

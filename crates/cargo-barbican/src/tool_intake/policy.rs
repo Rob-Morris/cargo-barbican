@@ -1947,8 +1947,7 @@ mod tests {
         let budget = process::Budget::new(false).unwrap();
         let executable = process::Executable::capture(Path::new("/bin/sh"), &budget).unwrap();
         let evaluator = process::Evaluator {
-            inspector: process::Executable::capture(&std::env::current_exe().unwrap(), &budget)
-                .unwrap(),
+            inspector: executable.clone(),
             cargo: executable.clone(),
             rustc: executable.clone(),
             deny: executable,

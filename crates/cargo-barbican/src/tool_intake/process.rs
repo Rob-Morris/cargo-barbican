@@ -23,7 +23,6 @@ impl Evaluator {
         uses_audit: bool,
     ) -> Result<Self> {
         let host = native_host()?;
-        let inspector = Executable::capture(&std::env::current_exe().map_err(err)?, budget)?;
         let toolchain = match std::env::var_os("RUSTUP_HOME") {
             Some(value) => PathBuf::from(value),
             None => absolute_home()?.join(".rustup"),
@@ -33,6 +32,7 @@ impl Evaluator {
         let cargo = capture_native_evaluator(cargo.unwrap_or(&toolchain.join("bin/cargo")), budget).map_err(|e| format!("trusted Cargo unavailable: {e}; supply --cargo /absolute/already-installed/cargo and --rustc /absolute/already-installed/rustc"))?;
         let rustc =
             capture_native_evaluator(rustc.unwrap_or(&toolchain.join("bin/rustc")), budget)?;
+        let inspector = Executable::capture(&std::env::current_exe().map_err(err)?, budget)?;
         let deny = capture_native_evaluator(&lookup_trusted("cargo-deny")?, budget)?;
         let audit = if uses_audit {
             Some(capture_native_evaluator(

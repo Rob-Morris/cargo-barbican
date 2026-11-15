@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.42.1](changelog/v0.42.1.md) | 2026-11-15 | Qualify Linux Cargo artifact custody |
 | [v0.42.0](changelog/v0.42.0.md) | 2026-11-15 | Review Cargo tools and govern source IOC findings |
 | [v0.41.2](changelog/v0.41.2.md) | 2026-11-13 | Fix comparative evidence in admission CI |
 | [v0.41.1](changelog/v0.41.1.md) | 2026-11-13 | Keep distinct provisional RustSec findings before admission |

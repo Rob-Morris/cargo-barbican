@@ -86,6 +86,54 @@ fn output_hashing_detects_bytes_modes_links_and_cancellation_without_execution()
 }
 
 #[test]
+fn cargo_artifact_hardlinks_preserve_digest_checks_and_installed_output_isolation() {
+    let scratch = Scratch::new();
+    let artifact = scratch.output("owned", b"inert build artifact; never executed");
+    let alias = scratch.0.join("cargo-artifact-alias");
+    fs::hard_link(&artifact, &alias).unwrap();
+    let selected = BTreeSet::from(["owned".into()]);
+    let protocol = serde_json::to_vec(&serde_json::json!({
+        "reason": "compiler-artifact",
+        "target": { "kind": ["bin"], "name": "owned" },
+        "executable": artifact,
+    }))
+    .unwrap();
+    let cancel = AtomicBool::new(false);
+    let observe_artifacts = || {
+        super::installation::artifact_outputs(
+            &protocol,
+            &scratch.0,
+            &selected,
+            scratch.uid(),
+            &cancel,
+        )
+    };
+    let baseline = observe_artifacts().unwrap();
+    let installed = scratch.0.join("independent-installed-copy");
+    fs::copy(&artifact, &installed).unwrap();
+    assert_eq!(
+        baseline["owned"],
+        output_files::observe(&installed, scratch.uid(), true, &cancel).unwrap()
+    );
+    assert!(output_files::observe(&artifact, scratch.uid(), true, &cancel).is_err());
+    assert!(output_files::observe_trusted_executable(&artifact, scratch.uid(), &cancel).is_err());
+    assert!(output_files::read_record(&artifact, scratch.uid(), 1024, &cancel).is_err());
+
+    fs::write(&alias, b"changed through the other artifact link").unwrap();
+    assert_ne!(observe_artifacts().unwrap(), baseline);
+    assert_eq!(
+        output_files::observe(&installed, scratch.uid(), true, &cancel).unwrap(),
+        baseline["owned"]
+    );
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(observe_artifacts().is_err());
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::remove_file(&artifact).unwrap();
+    symlink(&alias, &artifact).unwrap();
+    assert!(observe_artifacts().is_err());
+}
+
+#[test]
 fn native_tracking_reconciles_both_ledgers_and_preserves_unrelated_owners() {
     let scratch = Scratch::new();
     let owner = "owned 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)";
