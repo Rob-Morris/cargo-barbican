@@ -19,5 +19,6 @@ mod source;
 
 #[cfg(test)]
 mod apply_tests;
+mod exception_authoring;
 mod git_dependency;
 mod ioc_exception;

@@ -1,11 +1,13 @@
 //! Pure Cargo source-tool identity, approval and installed-correspondence rules.
 mod evidence;
+mod exception_authoring;
 mod graph_protocol;
 mod identity;
 mod installation;
 mod record;
 
 pub use evidence::*;
+pub use exception_authoring::*;
 pub use graph_protocol::*;
 pub use identity::*;
 pub use installation::*;

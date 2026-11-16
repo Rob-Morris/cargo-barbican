@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.42.2-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.43.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -29,6 +29,8 @@ Use it to:
   installation or execution on qualified native routes
 - [review Cargo-installed tools](docs/user/cargo-tools.md), explicitly accept
   their exact build inputs and check installed outputs and consumer selection
+- author exact, reviewed [tool policy exceptions](docs/user/cargo-tools.md)
+  with explicit expiry for release-age and assigned-advisory findings
 - run the delegated advisory and deny checks through one workflow
 - produce review-focused output for humans deciding whether to trust a dependency
 
@@ -106,7 +108,7 @@ explicitly select your trusted toolchain with `RUSTUP_TOOLCHAIN`. Install the
 insiders release candidate from its immutable git tag:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.42.2
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.43.0
 ```
 
 The tag is the install identity; do not replace it with a moving branch in

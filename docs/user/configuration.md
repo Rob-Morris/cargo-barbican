@@ -119,10 +119,18 @@ policy, bound to the exact subject,
 package/source, base policy, finite expiry, reviewer and completed prose. Only
 the typed release-age or assigned-advisory exception is eligible; ordinary
 acceptance prose and unrelated workspace family grants cannot suppress tool
-findings. Checksum, yank, indicator and incomplete required-coverage failures
-remain blocking. The base policy hash excludes exception-record references and contents to avoid
+findings. Checksum, yank and incomplete required-coverage failures remain
+blocking; IOC findings need their separate exact reviewed disposition. The base policy hash excludes exception-record references and contents to avoid
 an authoring bootstrap cycle, while the full policy identity includes the validated
 exact exception set. Changing it requires matching review and acceptance.
+Use `tool exception REVIEW_ID --age` or `--advisory RUSTSEC-ID` with
+`--review-record PATH --review-by YYYY-MM-DD` to scaffold the existing JSON
+schema. Complete the reviewer and embedded prose, then publish with `--record
+PATH`. Zero review time marks an unreferenced draft; explicit publication derives
+time and digest. Referenced records validate unchanged or refuse, and duplicate
+exception values under different paths refuse. The referenced JSON stays live
+authority, so review and acceptance must be recollected after changes. See the
+[tool exception workflow](cargo-tools.md#review-an-age-or-assigned-advisory-finding).
 
 Repository tool approval adds rows of this form to `reviewed-targets.toml`:
 

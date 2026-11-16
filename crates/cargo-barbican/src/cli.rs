@@ -333,7 +333,9 @@ pub(crate) enum ToolCommand {
     },
     #[command(about = "Check current evidence and the executable selected by an actual consumer")]
     AdmissionCheck(ToolAdmissionArgs),
-    #[command(about = "Scaffold or attach an exact reviewed IOC disposition to this tool subject")]
+    #[command(
+        about = "Scaffold or publish an exact age, assigned-advisory or IOC exception for this tool subject"
+    )]
     Exception(ToolIocExceptionArgs),
 }
 
@@ -861,15 +863,29 @@ pub(crate) struct ToolIocExceptionArgs {
     pub review_id: String,
     #[arg(
         long,
-        required = true,
+        required_unless_present_any = ["age", "advisory"],
+        conflicts_with_all = ["age", "advisory"],
         help = "Attach only exact IOC disposition; independent tool checks remain required"
     )]
     pub ioc: bool,
     #[arg(
         long,
+        conflicts_with_all = ["ioc", "advisory"],
+        help = "Author one exact registry release-age exception"
+    )]
+    pub age: bool,
+    #[arg(
+        long,
+        value_name = "RUSTSEC_ID",
+        conflicts_with_all = ["ioc", "age"],
+        help = "Author one exact assigned-advisory exception"
+    )]
+    pub advisory: Option<String>,
+    #[arg(
+        long,
         required_unless_present = "record",
         conflicts_with = "record",
-        help = "Create PENDING record and grant fragment only, without authority mutation"
+        help = "Exclusively create a PENDING record without publishing authority"
     )]
     pub review_record: Option<PathBuf>,
     #[arg(
@@ -881,7 +897,7 @@ pub(crate) struct ToolIocExceptionArgs {
     pub record: Option<PathBuf>,
     #[arg(
         long,
-        help = "Optional explicit IOC re-review deadline, YYYY-MM-DD; no default"
+        help = "UTC review deadline YYYY-MM-DD; required for new age/advisory records"
     )]
     pub review_by: Option<String>,
     #[command(flatten)]

@@ -117,6 +117,26 @@ fn capture_with_budget(ctx: &Context, budget: &process::Budget) -> Result<Origin
     .chain(evaluator.audit.iter())
     .map(|exe| exe.sha256.clone())
     .collect();
+    let (tool_exceptions, ioc_exceptions) = load_exceptions(ctx, &config, &policy_sha256, budget)?;
+    let policy = OriginPolicy {
+        schema_version: 1,
+        scope,
+        policy_sha256,
+        required_checks,
+        evaluator_sha256,
+        tool_exceptions,
+        ioc_exceptions,
+    };
+    policy.validate().map_err(err)?;
+    Ok(policy)
+}
+
+pub(crate) fn load_exceptions(
+    ctx: &Context,
+    config: &BarbicanConfig,
+    policy_sha256: &Sha256Digest,
+    budget: &process::Budget,
+) -> Result<(BTreeSet<ToolException>, BTreeSet<ToolIocException>)> {
     let mut tool_exceptions = BTreeSet::new();
     let mut ioc_exceptions = BTreeSet::new();
     for path in &config.tools.exception_records {
@@ -135,31 +155,21 @@ fn capture_with_budget(ctx: &Context, budget: &process::Budget) -> Result<Origin
             let reference: super::ioc_exception::ToolIocRecordReference =
                 serde_json::from_slice(&bytes).map_err(err)?;
             let exception = reference.load(ctx, budget)?;
-            if exception.policy_sha256 != policy_sha256 || !ioc_exceptions.insert(exception) {
+            if exception.policy_sha256 != *policy_sha256 || !ioc_exceptions.insert(exception) {
                 return Err("duplicate or wrong-policy tool IOC exception".into());
             }
             continue;
         }
         let exception: ToolException = serde_json::from_slice(&bytes).map_err(err)?;
         exception.validate().map_err(err)?;
-        if exception.policy_sha256 != policy_sha256 {
+        if exception.policy_sha256 != *policy_sha256 {
             return Err("tool exception binds another base origin policy".into());
         }
         if !tool_exceptions.insert(exception) {
             return Err("duplicate tool exception".into());
         }
     }
-    let policy = OriginPolicy {
-        schema_version: 1,
-        scope,
-        policy_sha256,
-        required_checks,
-        evaluator_sha256,
-        tool_exceptions,
-        ioc_exceptions,
-    };
-    policy.validate().map_err(err)?;
-    Ok(policy)
+    Ok((tool_exceptions, ioc_exceptions))
 }
 
 pub(crate) fn origin_binding(ctx: &Context) -> Result<(PolicyScope, Sha256Digest)> {

@@ -376,7 +376,13 @@ fn run_operation(
         )?);
     }
     let result = match command {
-        ToolCommand::Exception(args) => super::ioc_exception::run(&ctx, args, now)?,
+        ToolCommand::Exception(args) => {
+            if args.ioc {
+                super::ioc_exception::run(&ctx, args, now)?
+            } else {
+                super::exception_authoring::run(&ctx, args, now)?
+            }
+        }
         ToolCommand::Review(args) => {
             let evaluator = ctx.evaluator()?;
             let request = ReviewRequest {

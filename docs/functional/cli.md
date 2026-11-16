@@ -162,7 +162,7 @@ cargo barbican ioc check --git URL --rev FULL_40_HEX_COMMIT --package NAME [--fo
 cargo barbican ioc check --lockfile PATH [--format text|json] [--output PATH]
 cargo barbican ioc review --inspection REPORT --review-record PATH [--package NAME[@VERSION]] [--source-id SOURCE_ID] [--path RELATIVE_PATH]... [--rule RULE_ID]...
 cargo barbican pin exception [NAME[@VERSION]] --ioc --inspection REPORT (--review-record PATH | --record PATH) [--source-id SOURCE_ID] [--review-by YYYY-MM-DD] [--path RELATIVE_PATH]... [--rule RULE_ID]...
-cargo-barbican tool exception REVIEW_ID --ioc (--review-record PATH | --record PATH) [--package NAME[@VERSION]] [--source-id SOURCE_ID] [--review-by YYYY-MM-DD] [--path RELATIVE_PATH]... [--rule RULE_ID]... [--standalone] [--format text|json]
+cargo-barbican tool exception REVIEW_ID (--ioc | --age | --advisory RUSTSEC-ID) (--review-record PATH | --record PATH) [--package NAME[@VERSION]] [--source-id SOURCE_ID] [--review-by YYYY-MM-DD] [--path RELATIVE_PATH]... [--rule RULE_ID]... [--standalone] [--format text|json]
 cargo barbican gatehouse policy-check [--ioc]
 cargo barbican gatehouse pre-release [--ioc]
 ```
@@ -223,6 +223,35 @@ eligibility and final publication guards. Mutated, removed, unsafe or expired
 records cannot retain old authority. IOC deadlines are optional; an explicit
 `--review-by` is the end of that UTC date and must match completed content.
 Existing advisory/age deadline rules are unchanged.
+
+For `tool exception --age` and `--advisory RUSTSEC-ID`, select exactly one
+registry finding from the stored typed dossier, including blocked dossiers.
+`--package NAME[@VERSION]` and `--source-id` disambiguate; omitted selectors are
+permitted only for one eligible finding. `--path` and `--rule` are IOC-only.
+Age selects release-age findings, never yanks. Advisory selection requires an
+assigned canonical RustSec ID; provisional/body-only identities and Git are
+ineligible. Authoring invokes no evaluator, scanner, network or candidate code.
+
+New age/advisory scaffolds require explicit finite `--review-by YYYY-MM-DD`,
+covering that entire UTC date. They exclusively create PENDING `ToolException`
+JSON with exact derived subject/package/checksum/base-policy bindings (and
+advisory body digest). Complete `reviewer` and embedded `review_record` prose;
+leave `reviewed_at_utc=0` and its digest as scaffolded. `--record` checks the
+selected binding and derives completion time and prose digest only for this
+unreferenced sentinel draft. Valid finalised metadata is preserved on retry;
+future metadata, incomplete reviewer/prose and expired records refuse.
+
+Publication finalises the same bounded authority-relative JSON file, then adds
+its path to `[tools].exception_records`, preserving unrelated TOML/comments.
+It rejects duplicate configured exception values. Referenced files are live
+authority and are never normalised or renewed: only unchanged valid idempotent
+publication succeeds. To change an active record, explicitly remove its
+reference, review and re-add. Byte, policy, expiry and cancellation guards run
+before mutation; a failed second write can retain completed unreferenced JSON
+at the reported path. This is not a cross-file transaction or protection from
+a hostile same-user writer. Recollect tool review under the changed full policy,
+then complete assessment and accept. No installation or repository admission
+follows from exception authoring; other findings and hard blockers remain.
 
 The narrow IOC exit is 0 only for complete source/custody/IOC coverage with every
 finding absent or currently reviewed-allowed; 1 denotes unresolved policy,

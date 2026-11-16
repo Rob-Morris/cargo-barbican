@@ -68,6 +68,47 @@ Use `--from INSTALLATION-ID` when updating a tool with a prior Barbican binding.
 A missing or invalid baseline reports `baseline-unavailable`; it does not claim
 that the old bytes have been reviewed or suppress full new-subject review.
 
+## Review an age or assigned-advisory finding
+
+A blocked dossier can supply the exact bindings for a narrowly reviewed
+exception. Select one finding and a finite deadline, for example:
+
+```sh
+cargo-barbican --repo /path/to/repo tool exception REVIEW_ID --age \
+  --package example-tool@1.2.3 --review-by 2026-12-01 \
+  --review-record docs/tool-reviews/example-age.json
+```
+
+Use `--advisory RUSTSEC-YYYY-NNNN` in place of `--age` for an assigned advisory.
+The command reports candidates if the package/source is ambiguous and prints
+a publication command. Paths are relative to the originating repository, or
+the private data root with `--standalone`. The deadline covers the whole UTC
+date; there is no default. Git, provisional advisories and yanks cannot receive
+these exceptions. `--path` and `--rule` are reserved for IOC review.
+
+Edit the generated JSON's `reviewer` and embedded `review_record` prose with
+the evidence, exact risk, mitigations and reason for the deadline. Remove all
+pending content. Leave `reviewed_at_utc=0` and the derived digest alone; explicit
+publication computes them. Then run the printed command, or use:
+
+```sh
+cargo-barbican --repo /path/to/repo tool exception REVIEW_ID --age \
+  --package example-tool@1.2.3 --record docs/tool-reviews/example-age.json
+```
+
+The scaffold grants nothing. Publication finalises that JSON and references it
+in `[tools].exception_records`. The file remains live authority: edits/removal
+invalidate its previous binding. Publication never rewrites or renews an active
+record; remove its reference and deliberately review/re-add if changes are
+needed. A failed policy write may leave a completed unreferenced record; retry
+preserves valid completion metadata. Commit the policy and record together.
+
+Recollect tool review under the new policy before completing assessment and
+acceptance. This authoring step runs no evaluators or scanners and does not
+install or grant repository admission. Subsequent review and installation
+still check current evidence, source integrity, yanks, coverage, expiry and
+all independent findings.
+
 ## Review individual IOC findings
 
 Use `tool exception REVIEW_ID --ioc --review-record PATH` to scaffold exact

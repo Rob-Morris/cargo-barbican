@@ -65,3 +65,24 @@ diagnostics and never claims rollback or a complete installation. Unsupported
 hosts, graph protocols, source layouts and first selected shims refuse.
 Reproducible builds, hostile concurrent writers and general confinement remain
 outside this decision.
+
+
+## Exact tool exception authoring
+
+Pure `cargo_tool` selects one typed registry finding and validates completion;
+binary `tool_intake::exception_authoring` owns confined JSON publication and
+comment-preserving configuration edits. The static command does not capture
+an evaluator or rerun scanners. Age and assigned-advisory authoring reuses the
+existing `ToolException` authority schema and eligibility rules; IOC retains
+its separate source-revalidation and record-reference owner.
+
+Pending scaffolds carry exact subject/package/checksum/base-policy bindings,
+finite explicit expiry and a zero completion-time sentinel. Only explicit
+publication of an unreferenced draft derives completion metadata. Active
+records validate unchanged or refuse; retries preserve completed metadata.
+The live authority file is finalised before its reference is published, with
+captured full configuration, referenced bytes, current policy/time and
+cancellation guards. The base hash excludes references for bootstrap, while
+full policy identity includes validated grants. These are guarded sequential
+writes, not a cross-file transaction; a failure may retain an unreferenced
+completed record. Fresh review, assessment and acceptance remain separate.

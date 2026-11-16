@@ -467,7 +467,7 @@ fn native_policy_matrix_preserves_sources_closure_advisories_and_refuses_bad_cov
     }
     eprintln!("{QUALIFICATION}");
     let stage = source::Stage::new().unwrap();
-    let ctx = context(&stage);
+    let mut ctx = context(&stage);
     configure(&ctx, &[], false);
     let mut baseline = fixture(&ctx, false, "MIT", "MIT");
     let clean = collected(&ctx, &baseline, "closure-excludes-dev-inactive-unselected");
@@ -612,6 +612,109 @@ fn native_policy_matrix_preserves_sources_closure_advisories_and_refuses_bad_cov
                 && finding.package().crate_name() == "time")
     );
     actual_native_coverage_controls(&ctx, &vulnerable, &deny, &audit_output);
+
+    // Exercise the authoring owner against actual scanner evidence before the
+    // independent wrong-subject and all-advisory reconciliation controls below.
+    let review = Review {
+        schema_version: 1,
+        subject_id: vulnerable.subject.id().unwrap(),
+        policy_id: advisory.policy.id().unwrap(),
+        evidence_content_id: advisory.content.id().unwrap(),
+        assessment_requirements: BTreeSet::from(["risk".into()]),
+    };
+    let stored = super::super::frontend::StoredReview {
+        subject: vulnerable.subject.clone(),
+        policy: advisory.policy.clone(),
+        review,
+        evidence: EvidenceRecord {
+            content: advisory.content.clone(),
+            observation: advisory.observation.clone(),
+        },
+        request: collection::ReviewRequest {
+            spec: Some("time@0.1.44".into()),
+            git: None,
+            rev: None,
+            package: None,
+            bins: vec!["owned-policy-tool".into()],
+            features: vec![],
+            no_default_features: false,
+            all_features: false,
+            profile: "release".into(),
+            target: None,
+            from: None,
+            cargo: ctx.evaluator().unwrap().cargo.path.clone(),
+            rustc: ctx.evaluator().unwrap().rustc.path.clone(),
+        },
+    };
+    let review_id = super::super::frontend::save_review(&ctx, &stored).unwrap();
+    let mut args = crate::cli::ToolIocExceptionArgs {
+        review_id: review_id.to_string(),
+        ioc: false,
+        age: false,
+        advisory: Some(ADVISORY.into()),
+        review_record: Some("authored-native-advisory.json".into()),
+        record: None,
+        review_by: Some("2099-01-01".into()),
+        selection: crate::cli::IocSelectionArgs {
+            package: Some("time@0.1.44".into()),
+            source_id: None,
+            paths: vec![],
+            rules: vec![],
+        },
+        standalone: true,
+        format: crate::cli::AuditOutputFormat::Json,
+    };
+    super::super::exception_authoring::run(&ctx, &args, barbican::OffsetDateTime::now_utc())
+        .unwrap();
+    let path = Path::new("authored-native-advisory.json");
+    let pending = ctx.stores.data.read(path, MAX_RECORD_BYTES as u64).unwrap();
+    let mut authored: ToolException = serde_json::from_slice(pending.bytes()).unwrap();
+    assert!(authored.validate().is_err());
+    authored.reviewer = "owned native qualification reviewer".into();
+    authored.review_record = "Reviewed only this inert authored registry transport fixture and this assigned advisory. No published time code is approved; only the disposable exact synthetic subject receives this bounded exception.".into();
+    policy_file(
+        &ctx,
+        path.to_str().unwrap(),
+        &serde_json::to_vec(&authored).unwrap(),
+    );
+    args.record = args.review_record.take();
+    super::super::exception_authoring::run(&ctx, &args, barbican::OffsetDateTime::now_utc())
+        .unwrap();
+    ctx.now = barbican::OffsetDateTime::now_utc().unix_timestamp();
+    let published_subject = vulnerable.subject.id().unwrap();
+    // A new invocation requires fresh archive inspection as well as fresh scanners.
+    // Re-inspect the same inert synthetic archive; do not renew timestamps alone.
+    synthetic_registry_root(&ctx, &mut vulnerable);
+    assert_eq!(vulnerable.subject.id().unwrap(), published_subject);
+    let recollected = collected(
+        &ctx,
+        &vulnerable,
+        "authoring-scaffold-completed-published-native-recollection",
+    );
+    assert_eq!(recollected.policy.tool_exceptions.len(), 1);
+    assert!(
+        recollected
+            .content
+            .findings
+            .iter()
+            .any(|finding| finding.identity == ADVISORY && !finding.blocking)
+    );
+    for finding in advisory
+        .content
+        .findings
+        .iter()
+        .filter(|f| f.kind == FindingKind::Advisory && f.identity != ADVISORY)
+    {
+        assert!(
+            recollected
+                .content
+                .findings
+                .iter()
+                .any(|current| current.identity == finding.identity && current.blocking)
+        );
+    }
+    actual_native_coverage_controls(&ctx, &vulnerable, &deny, &audit_output);
+    configure(&ctx, &[], true);
 
     let prose = "Reviewed only this authored inert synthetic registry transport fixture; this is not a grant to published time crate code or any other subject.";
     let mut exceptions = Vec::new();

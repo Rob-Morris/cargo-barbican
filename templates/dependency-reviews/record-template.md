@@ -1,4 +1,4 @@
-<!-- Synced from cargo-barbican v0.42.2; consumer-owned: tailor locally and review upstream diffs when upgrading. -->
+<!-- Synced from cargo-barbican v0.43.0; consumer-owned: tailor locally and review upstream diffs when upgrading. -->
 
 # Dependency Review: <subject>
 

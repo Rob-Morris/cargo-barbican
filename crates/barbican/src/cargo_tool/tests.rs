@@ -1983,3 +1983,140 @@ fn many_ioc_findings_use_one_scoped_current_index_and_preserve_all_cause_checks(
     unknown.identity = unknown.detail_sha256.to_string();
     assert!(!index.allows(&unknown));
 }
+
+#[test]
+fn exception_authoring_selects_exact_registry_findings_and_completes_only_drafts() {
+    let subject = subject();
+    let policy = policy();
+    let (mut evidence, _) = evidence(&subject, &policy, 100);
+    let age = Finding {
+        identity: "release-age".into(),
+        package: subject.root.package(),
+        kind: FindingKind::ReleaseAge,
+        blocking: true,
+        detail_sha256: hash("age"),
+    };
+    let advisory = Finding {
+        identity: "RUSTSEC-2026-0001".into(),
+        kind: FindingKind::Advisory,
+        detail_sha256: hash("advisory"),
+        ..age.clone()
+    };
+    evidence
+        .content
+        .findings
+        .extend([age.clone(), advisory.clone()]);
+    let source = crate::ioc::Source::from(&age.package).id().unwrap();
+    assert_eq!(
+        select_exception_finding(
+            &subject,
+            &evidence.content,
+            None,
+            Some("harmless@1.0.0"),
+            Some(source.as_str())
+        )
+        .unwrap(),
+        &age
+    );
+    assert_eq!(
+        select_exception_finding(
+            &subject,
+            &evidence.content,
+            Some("RUSTSEC-2026-0001"),
+            None,
+            None
+        )
+        .unwrap(),
+        &advisory
+    );
+    for id in ["RUSTSEC-0000-0000", "pending", "body-only"] {
+        assert!(
+            select_exception_finding(&subject, &evidence.content, Some(id), None, None).is_err()
+        );
+    }
+    assert!(
+        select_exception_finding(&subject, &evidence.content, None, Some("wrong"), None).is_err()
+    );
+    assert!(
+        select_exception_finding(&subject, &evidence.content, None, None, Some("wrong")).is_err()
+    );
+    let mut draft = ToolException::pending(
+        subject.id().unwrap(),
+        policy.policy_sha256.clone(),
+        &advisory,
+        300,
+    )
+    .unwrap();
+    draft.review_record_sha256 = sha256(draft.review_record.as_bytes());
+    assert!(
+        draft.validate().is_err(),
+        "pending prose must fail even with a manually recomputed digest"
+    );
+    draft.review_record = "Reviewed exact advisory risk pending upstream remediation; mitigations constrain exposure.".into();
+    for reviewer in ["", "PENDING", "TODO", "TBD", "scaffold reviewer"] {
+        let mut incomplete = draft.clone();
+        incomplete.reviewer = reviewer.into();
+        assert!(incomplete.complete_draft(100).is_err());
+    }
+    draft.reviewer = "Fixture reviewer".into();
+    draft.complete_draft(100).unwrap();
+    let completed = draft.clone();
+    draft.complete_draft(200).unwrap();
+    assert_eq!(draft, completed, "retry preserves review time and digest");
+    assert!(draft.validate_authoring(99).is_err());
+    assert!(draft.validate_authoring(300).is_err());
+    assert!(
+        draft
+            .applies_to(
+                &advisory,
+                &subject.id().unwrap(),
+                &policy.policy_sha256,
+                200
+            )
+            .unwrap()
+    );
+    for kind in [
+        FindingKind::Yank,
+        FindingKind::Checksum,
+        FindingKind::RequiredCoverage,
+        FindingKind::ReleaseAge,
+    ] {
+        assert!(
+            !draft
+                .applies_to(
+                    &Finding {
+                        kind,
+                        ..advisory.clone()
+                    },
+                    &subject.id().unwrap(),
+                    &policy.policy_sha256,
+                    200
+                )
+                .unwrap()
+        );
+    }
+    assert!(
+        !draft
+            .applies_to(
+                &Finding {
+                    detail_sha256: hash("changed body"),
+                    ..advisory.clone()
+                },
+                &subject.id().unwrap(),
+                &policy.policy_sha256,
+                200
+            )
+            .unwrap()
+    );
+    let mut changed = draft.clone();
+    changed.review_record.push_str(" Changed.");
+    assert!(
+        changed.complete_draft(200).is_err(),
+        "finalised retry does not normalise changed content"
+    );
+    evidence.content.findings.insert(Finding {
+        identity: "another age".into(),
+        ..age.clone()
+    });
+    assert!(select_exception_finding(&subject, &evidence.content, None, None, None).is_err());
+}
