@@ -75,9 +75,26 @@ pub(crate) use workspace::{
 pub(super) const DEFAULT_BASE_REF: &str = "HEAD";
 
 pub fn run(stdout: &mut dyn Write, stderr: &mut dyn Write) -> Result<ExitCode, CommandError> {
+    run_with_output(stdout, stderr, crate::tool_intake::ProgressTarget::Disabled)
+}
+
+/// Run the executable using its physical stdout and stderr.
+pub fn run_stdio() -> Result<ExitCode, CommandError> {
+    run_with_output(
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
+        crate::tool_intake::ProgressTarget::Stderr,
+    )
+}
+
+fn run_with_output(
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    progress: crate::tool_intake::ProgressTarget,
+) -> Result<ExitCode, CommandError> {
     let cli = Cli::parse_from(cargo_subcommand_args(env::args_os()));
 
-    match run_at(cli, stdout, stderr) {
+    match run_at(cli, stdout, stderr, progress) {
         Ok(exit_code) => Ok(exit_code),
         Err(error) => fail(stderr, error),
     }
@@ -87,6 +104,7 @@ fn run_at(
     cli: Cli,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
+    progress: crate::tool_intake::ProgressTarget,
 ) -> Result<ExitCode, CommandError> {
     let current_dir = env::current_dir().map_err(CommandError::Io)?;
     if ioc::is_static(&cli) {
@@ -106,6 +124,7 @@ fn run_at(
             OffsetDateTime::now_utc(),
             stdout,
             true,
+            progress,
         )
         .map_err(|detail| {
             CommandError::Io(std::io::Error::other(format!("tool intake: {detail}")))
@@ -239,7 +258,15 @@ where
             .map_err(|detail| CommandError::Io(std::io::Error::other(detail)));
     }
     if crate::tool_intake::is_static(&cli) {
-        return crate::tool_intake::run(&cli, current_dir, now, stdout, false).map_err(|detail| {
+        return crate::tool_intake::run(
+            &cli,
+            current_dir,
+            now,
+            stdout,
+            false,
+            crate::tool_intake::ProgressTarget::Disabled,
+        )
+        .map_err(|detail| {
             CommandError::Io(std::io::Error::other(format!("tool intake: {detail}")))
         });
     }

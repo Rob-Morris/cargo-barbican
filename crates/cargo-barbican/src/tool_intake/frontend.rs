@@ -1,3 +1,4 @@
+use super::progress::{Handle, Phase, Scope, Target};
 use super::{
     context::{NativeContext, RepoContext},
     process::{Budget, Evaluator, Result},
@@ -9,6 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 pub(crate) struct Context {
+    pub progress: Handle,
+    #[cfg(test)]
+    pub authored_refresh: Option<PathBuf>,
     pub current: PathBuf,
     pub repo: Option<RepoContext>,
     pub stores: Stores,
@@ -219,6 +223,7 @@ pub(crate) fn run(
     now: barbican::OffsetDateTime,
     stdout: &mut dyn std::io::Write,
     register_signals: bool,
+    progress: Target,
 ) -> Result<std::process::ExitCode> {
     use crate::cli::{AuditOutputFormat, ToolCommand};
     let Command::Tool { command } = &cli.command else {
@@ -276,7 +281,7 @@ pub(crate) fn run(
     };
     let (failure, code) = match validate() {
         Err(error) => (Some(error), 2),
-        Ok(()) => match run_operation(cli, current, now, stdout, register_signals) {
+        Ok(()) => match run_operation(cli, current, now, stdout, register_signals, progress) {
             Ok(code) => return Ok(code),
             Err(error) => (Some(error), 1),
         },
@@ -295,6 +300,7 @@ fn run_operation(
     now: barbican::OffsetDateTime,
     stdout: &mut dyn std::io::Write,
     register_signals: bool,
+    progress: Target,
 ) -> Result<std::process::ExitCode> {
     use super::collection::{self, ReviewRequest};
     use crate::cli::{AuditOutputFormat, ToolCommand};
@@ -310,6 +316,11 @@ fn run_operation(
         ToolCommand::InstallationCheck { format, .. } => (true, *format),
     };
     let budget = Budget::new(register_signals)?;
+    let scope = match command {
+        ToolCommand::Review(_) => progress.start(Phase::Review),
+        ToolCommand::Install(_) => progress.start(Phase::Install),
+        _ => Scope::default(),
+    };
     let static_check = matches!(command, ToolCommand::InstallationCheck { .. });
     let repo = if static_check {
         None
@@ -330,6 +341,9 @@ fn run_operation(
         cli.cache_dir.as_deref(),
     )?;
     let mut ctx = Context {
+        progress: scope.handle.clone(),
+        #[cfg(test)]
+        authored_refresh: None,
         current: current.to_owned(),
         repo,
         stores,
@@ -367,6 +381,7 @@ fn run_operation(
             config.delegates.advisories.lockfile_scanner,
             barbican::LockfileAdvisoryScanner::CargoAudit | barbican::LockfileAdvisoryScanner::Both
         );
+        ctx.progress.phase(Phase::Evaluators);
         ctx.evaluator = Some(Evaluator::capture(
             cargo.as_deref(),
             rustc.as_deref(),
@@ -400,9 +415,6 @@ fn run_operation(
                 cargo: evaluator.cargo.path.clone(),
                 rustc: evaluator.rustc.path.clone(),
             };
-            eprintln!(
-                "Collecting independently verified source inputs and the frozen native install graph..."
-            );
             let prepared = collection::prepare(&ctx, &request)?;
             let policy = super::policy::collect(&ctx, &prepared)?;
             if !policy.content.complete {
@@ -425,6 +437,7 @@ fn run_operation(
                 .map(str::to_owned)
                 .collect(),
             };
+            ctx.progress.phase(Phase::ReviewRecords);
             let dossier_directory = retain_details(&ctx, &review, &policy.details)?;
             let source_directory = prepared.save_sources(&ctx)?;
             let stored = StoredReview {
@@ -530,6 +543,7 @@ fn run_operation(
             args,
         )?,
     };
+    drop(scope);
     match format {
         AuditOutputFormat::Json => writeln!(
             stdout,

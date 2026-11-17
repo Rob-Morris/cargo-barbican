@@ -150,6 +150,14 @@ Exit0 means scoped success, exit1 means blocked/unavailable/correspondence
 failure, and exit2 means invalid command input. Complete blocked review returns
 its evidence but fails. Existing commands retain their exit mappings.
 
+The executable sends best-effort progress for `tool review` and `tool install`
+to stderr in text and JSON modes. Each line contains a fixed phase label or
+limit notice, elapsed seconds and optional inspection counts. Phases may
+coalesce. Automation consumes the stdout result and exit code. Diagnostic
+wording and timing are outside the parsing contract. The [Cargo-tool
+guide](../user/cargo-tools.md#progress-diagnostics) describes terminal and
+redirected output.
+
 Collection bounds and one-writer/native-build limits are documented in the tool
 guide. Native installer success never certifies benignness, reproducible builds,
 general confinement or future consumer selection.

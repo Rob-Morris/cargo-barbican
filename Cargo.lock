@@ -124,7 +124,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "barbican"
-version = "0.43.0"
+version = "0.44.0"
 dependencies = [
  "lzma-rust2",
  "miniz_oxide",
@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-barbican"
-version = "0.43.0"
+version = "0.44.0"
 dependencies = [
  "barbican",
  "clap",
@@ -317,16 +317,6 @@ name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
-
-[[package]]
-name = "chrono"
-version = "0.4.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
-dependencies = [
- "num-traits",
- "serde",
-]
 
 [[package]]
 name = "cipher"
@@ -1471,16 +1461,14 @@ dependencies = [
 name = "rpgpie"
 version = "0.12.0"
 dependencies = [
- "chrono",
  "hex",
  "log",
  "pgp",
  "rand",
  "rand_core",
  "rsa",
- "serde",
- "serde_json",
  "thiserror",
+ "time",
  "zeroize",
 ]
 

@@ -1,3 +1,4 @@
+use super::progress::Phase;
 use super::{
     collection::PreparedSource,
     frontend::Context,
@@ -395,6 +396,7 @@ fn project_graph(
 }
 
 pub(crate) fn collect(ctx: &Context, prepared: &PreparedSource) -> Result<PolicyEvidence> {
+    ctx.progress.phase(Phase::Policy);
     prepared.recheck(ctx)?;
     check_native_exception_paths(&prepared.manifest)?;
     let policy = capture(ctx)?;
@@ -635,13 +637,10 @@ pub(crate) fn collect(ctx: &Context, prepared: &PreparedSource) -> Result<Policy
             config_path.to_string_lossy().into_owned(),
             "db".into(),
         ];
-        let fetched = command_output(process::run(
-            &evaluator.deny,
-            &args,
-            &stage.root,
-            &env,
-            &ctx.budget,
-        )?)?;
+        ctx.progress.phase(Phase::Advisory);
+        let fetched = process::run(&evaluator.deny, &args, &stage.root, &env, &ctx.budget)?;
+        ctx.progress.phase(Phase::Policy);
+        let fetched = command_output(fetched)?;
         persist_native_output(ctx, &subject_id, "cargo-deny-fetch", &fetched)?;
         if fetched.exit_code != Some(0) {
             return Err(format!(
@@ -682,7 +681,9 @@ pub(crate) fn collect(ctx: &Context, prepared: &PreparedSource) -> Result<Policy
             .map(|check| check.as_str().to_owned()),
     );
     check_native_exception_paths(&prepared.manifest)?;
+    ctx.progress.phase(Phase::Deny);
     let deny_output = process::run(&evaluator.deny, &args, &stage.root, &env, &ctx.budget)?;
+    ctx.progress.phase(Phase::Policy);
     let deny_output = command_output(deny_output)?;
     persist_native_output(ctx, &subject_id, "cargo-deny", &deny_output)?;
     let mut deny_raw = Vec::new();
@@ -734,13 +735,10 @@ pub(crate) fn collect(ctx: &Context, prepared: &PreparedSource) -> Result<Policy
             "--db".into(),
             stage.root.join("audit-db").to_string_lossy().into_owned(),
         ];
-        let output = command_output(process::run(
-            executable,
-            &args,
-            &stage.root,
-            &env,
-            &ctx.budget,
-        )?)?;
+        ctx.progress.phase(Phase::Audit);
+        let output = process::run(executable, &args, &stage.root, &env, &ctx.budget)?;
+        ctx.progress.phase(Phase::Policy);
+        let output = command_output(output)?;
         persist_native_output(ctx, &subject_id, "cargo-audit", &output)?;
         let raw: Value = serde_json::from_str(&output.stdout).map_err(err)?;
         let database = database_version(ctx, &stage.root.join("audit-db"), &env)?;
@@ -1767,6 +1765,8 @@ mod tests {
         let private_cargo = stage.root.join("native-cargo-home");
         std::fs::create_dir(&private_cargo).unwrap();
         let mut ctx = Context {
+            progress: Default::default(),
+            authored_refresh: None,
             ioc_budget: Default::default(),
             source_client: crate::crates_io_http::UreqCratesIoClient::new(
                 crate::crates_io_http::DEFAULT_CRATES_IO_BASE_URL.into(),
@@ -1974,6 +1974,8 @@ mod tests {
         )
         .unwrap();
         let mut ctx = Context {
+            progress: Default::default(),
+            authored_refresh: None,
             ioc_budget: Default::default(),
             source_client: crate::crates_io_http::UreqCratesIoClient::new(
                 crate::crates_io_http::DEFAULT_CRATES_IO_BASE_URL.into(),

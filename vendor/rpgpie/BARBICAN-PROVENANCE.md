@@ -11,7 +11,7 @@ package cleared through registry checksum parity. Repository review and the
 pre-build actual-tree guard own its source custody. The src tree is retained
 with the bounded changes below; README, REUSE.toml and LICENSES are retained. Published upstream test/fixture,
 lockfile and development tooling files are omitted; upstream tests/CLI targets
-and dev-dependencies are removed from the local manifest. The fixture-only
+and upstream dev-dependencies are removed from the local manifest. The fixture-only
 `model/summary.rs` test module is also omitted: it imports the excluded rstest
 dev-dependency and reads absent upstream fixture files. Cargo clippy
 `--all-targets` still compiles in-source tests despite `lib.test = false`, so
@@ -19,9 +19,12 @@ retaining that module would contradict this package boundary. The original
 module is preserved in the explicit patch. No upstream fixture suite is run;
 the remaining compilable in-source test modules do not establish fixture proof. Unsupported CLI/PQC/wasm
 features and optional clap are removed; retained runtime dependencies are pinned
-to exact reviewed selected versions. Chrono disables unused default clock/timezone/
-wasm features, retaining only std and serde; the source uses date/time conversions
-and obtains current time through pgp, not Chrono local-clock APIs. Inactive upstream pqc cfg names remain
+to exact reviewed selected versions. The 18 November 2026 custody revision
+removes the unused certificate presentation model export and its print/algorithm-name
+helpers. Original model and disabled CLI sources remain in the tree for provenance.
+The fork no longer depends on chrono, serde or serde_json. The retained expiry fixture
+code parses its original RFC 3339 dates with the workspace-reviewed time 0.3.47
+as a dev-dependency with only std and parsing. Inactive upstream pqc cfg names remain
 recognised by check-cfg without exposing that feature. Native public-only
 adapter regression tests own the changed behaviour. No consumer secret-key
 operation is enabled by retaining unused upstream source APIs.
@@ -34,7 +37,8 @@ same-anchor authenticated revocation knowledge before refusing material changes.
 Neither active-binding selection nor the global clock is replaced.
 
 Review and minimal patch: docs/dependency-reviews/2026-11-04-embedded-public-verifier.md
-and docs/dependency-reviews/2026-11-04-rpgpie.patch (repository-relative).
+and docs/dependency-reviews/2026-11-18-rpgpie-presentation-removal.md.
+The cumulative patch is docs/dependency-reviews/2026-11-18-rpgpie.patch (repository-relative).
 Unmodified published 0.12.1 retains the expiry and cross-signature defects and is
 not a remediation. Re-evaluate maintained upstream releases before rebasing this
 source; regenerate the explicit patch/source receipt and rerun native controls.
@@ -43,7 +47,7 @@ The patch uses zero context to keep its checked-in representation free of
 trailing whitespace without altering unified-diff syntax. Verify the original
 `.crate` archive SHA256 above, extract that exact archive into a disposable
 directory, enter its `rpgpie-0.12.0` root, then run
-`git apply --no-index --unidiff-zero /absolute/path/to/2026-11-04-rpgpie.patch`.
+`git apply --no-index --unidiff-zero /absolute/path/to/2026-11-18-rpgpie.patch`.
 Do not apply it to another release or unverified source. The patch covers the
-four changed upstream files; omitted package files and added provenance remain
+six changed upstream files; omitted package files and added provenance remain
 described separately above and bound by the full maintained-tree inventory.

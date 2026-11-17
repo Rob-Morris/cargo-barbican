@@ -1,5 +1,6 @@
 use super::frontend::{Context, StoredReview};
 use super::process::{self, Result, err};
+use super::progress::Phase;
 use super::source::{self, Stage};
 use barbican::cargo_tool::*;
 use barbican::{ExactCrateSpec, RustInspectReport};
@@ -223,12 +224,13 @@ pub(crate) fn policy_fixture(
     })
 }
 pub(crate) fn prepare_accepted(ctx: &Context, accepted: &StoredReview) -> Result<PreparedSource> {
-    prepare_inputs(
-        ctx,
-        &accepted.request,
-        Some(&accepted.subject),
-        SourceAccess::Fresh,
-    )
+    let access = SourceAccess::Fresh;
+    #[cfg(test)]
+    let access = ctx
+        .authored_refresh
+        .as_ref()
+        .map_or(access, |path| SourceAccess::Authored(path.clone()));
+    prepare_inputs(ctx, &accepted.request, Some(&accepted.subject), access)
 }
 enum SourceAccess {
     Fresh,
@@ -276,6 +278,11 @@ fn prepare_inputs(
     let root = stage.root.join("source");
     let mut inspected = BTreeMap::new();
     let mut source_facts = BTreeMap::new();
+    ctx.progress.phase(if stored_sources {
+        Phase::Cached
+    } else {
+        Phase::Source
+    });
     let root_identity = if let Some(spec) = &request.spec {
         if request.git.is_some() {
             return Err("exactly one tool source is required".into());
@@ -476,6 +483,7 @@ fn prepare_inputs(
         );
     }
     let config_bytes=format!("{}\n[source.crates-io]\nreplace-with = \"barbican-verified-registry\"\n[source.barbican-verified-registry]\ndirectory = {}\n",git_sources.config_fragment,serde_json::to_string(&vendor.to_string_lossy()).map_err(err)?).into_bytes();
+    ctx.progress.phase(Phase::Graph);
     let mut metadata_args = vec![
         "metadata".into(),
         "--format-version=1".into(),
@@ -773,7 +781,10 @@ fn prepare_inputs(
     subject.validate().map_err(err)?;
     let mut ioc_inspections = BTreeMap::new();
     let mut scan_budget = ctx.ioc_budget.borrow_mut();
-    for package in subject.graph.packages() {
+    let selected = subject.graph.packages();
+    let total = selected.len();
+    ctx.progress.inspected(0, total);
+    for package in selected {
         let inspection = match &package.source {
             PackageSource::CratesIo { .. } => registry_ioc_inspection(
                 ctx,
@@ -812,6 +823,7 @@ fn prepare_inputs(
             }
         };
         ioc_inspections.insert(package, inspection);
+        ctx.progress.inspected(ioc_inspections.len(), total);
     }
     Ok(PreparedSource {
         root,
@@ -945,6 +957,7 @@ pub(crate) fn refresh_for_install(
     cached_reason: Option<&str>,
 ) -> Result<(StoredReview, PreparedSource)> {
     if let Some(reason) = cached_reason {
+        ctx.progress.phase(Phase::Cached);
         let current = refresh(ctx, stored, Some(reason))?;
         let prepared = prepare_inputs(
             ctx,
@@ -962,6 +975,7 @@ pub(crate) fn refresh_for_install(
         )?;
         return Ok((current, prepared));
     }
+    ctx.progress.phase(Phase::Refresh);
     validate_context(ctx, stored)?;
     refresh_online(ctx, stored)
 }
@@ -1049,6 +1063,7 @@ fn refresh_online(ctx: &Context, stored: &StoredReview) -> Result<(StoredReview,
     if evidence.content != stored.evidence.content || evidence.policy != stored.policy {
         return Err("material policy, coverage or source evidence changed; fresh tool review and assessment required".into());
     }
+    ctx.progress.phase(Phase::ReviewRecords);
     super::frontend::retain_details(ctx, &stored.review, &evidence.details)?;
     let refreshed = StoredReview {
         subject: prepared.subject.clone(),
@@ -1373,6 +1388,8 @@ mod tests {
             },
             now: barbican::OffsetDateTime::now_utc().unix_timestamp(),
             budget: process::Budget::new(false).unwrap(),
+            progress: Default::default(),
+            authored_refresh: None,
             ioc_budget: Default::default(),
             source_client: crate::crates_io_http::UreqCratesIoClient::new(
                 "http://127.0.0.1:9".into(),
@@ -1660,7 +1677,24 @@ mod tests {
         );
         let before = ctx.knowledge().unwrap();
         drop(prepared);
+        let (handle, history) = super::super::progress::Handle::recording();
+        ctx.progress = handle;
         let cached = prepare_inputs(&ctx, &request, Some(&subject), SourceAccess::Stored).unwrap();
+        let snapshots = history.lock().unwrap().clone();
+        let phases: Vec<_> = snapshots.iter().map(|s| s.phase).collect();
+        assert_eq!(
+            phases,
+            [
+                Phase::Cached,
+                Phase::Graph,
+                Phase::Inspection,
+                Phase::Inspection,
+                Phase::Inspection
+            ]
+        );
+        let counts: Vec<_> = snapshots.iter().filter_map(|s| s.counts).collect();
+        let total = subject.graph.packages().len();
+        assert_eq!(counts, (0..=total).map(|n| (n, total)).collect::<Vec<_>>());
         assert_eq!(cached.subject, subject);
         assert_eq!(cached.ioc_inspections, expected);
         assert_knowledge_not_refreshed(&ctx, &before);

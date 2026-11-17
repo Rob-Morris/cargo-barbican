@@ -37,6 +37,19 @@ cached operations retain policy/expiry/adverse checks; unchanged continuing use
 has its own exact context. Durable source knowledge separates API, inspection
 and advisory channels and keeps incomplete/contradictory observations blocking.
 
+### Review and install progress
+
+The executable starts an operation-scoped stderr worker after validation and
+signal registration. The work owners publish fixed phases and numeric counts
+to one latest snapshot with one pending wake-up. The worker formats and writes
+through an owned duplicate of stderr with the shared state unlocked. Stopping
+the scope discards queued work and allows one previously claimed line to finish.
+This keeps blocked progress I/O off the cancellation and publication paths.
+The controlled-process owner retains its existing native Cargo stream capture
+and process-group supervision. The installer checks the artefacts and current
+authority before publishing a binding. Injected API callers use a
+disabled progress handle.
+
 ## Alternatives Considered
 
 - A synthetic library wrapper omits binary-only dependencies and build contexts.

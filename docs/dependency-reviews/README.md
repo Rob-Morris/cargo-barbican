@@ -69,8 +69,10 @@ activate an entry in `reviewed-targets.toml`.
 - [Zlib permissive licence refinement](2026-11-04-zlib-licence-refinement.md).
 - [Actual product integration and source custody](2026-11-04-phase0-product-integration.md),
   [product graph](2026-11-04-phase0-product-graph.json),
-  [maintained source patch](2026-11-04-rpgpie.patch) and
-  [fixed source inventory](rpgpie-0.12.0-tree.sha256).
+  and [4 November maintained source patch](2026-11-04-rpgpie.patch).
+- [18 November maintained verifier revision](2026-11-18-rpgpie-presentation-removal.md),
+  [current cumulative source patch](2026-11-18-rpgpie.patch) and
+  [current source inventory](rpgpie-0.12.0-tree.sha256).
 
 These records qualify bounded foundation work; they do not enable trust,
 admission, installation or activation commands.

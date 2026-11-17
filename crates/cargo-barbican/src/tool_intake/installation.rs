@@ -1,3 +1,4 @@
+use super::progress::Phase;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
@@ -260,6 +261,7 @@ pub(super) fn install(
     let operation = acceptance::freshness(&args.options, OperationKind::Install, started)?;
     let (refreshed, prepared) =
         collection::refresh_for_install(ctx, stored, args.options.cache_reason.as_deref())?;
+    ctx.progress.phase(Phase::Preflight);
     acceptance::eligible(ctx, &refreshed, &operation)?;
     let (_, local, _) = acceptance::load(ctx, &refreshed)?;
     super::repository::check(ctx, &refreshed)?;
@@ -424,6 +426,7 @@ pub(super) fn install(
     let outcome = (|| {
         prepared.recheck(ctx)?;
         root_lock.recheck()?;
+        ctx.progress.phase(Phase::Native);
         let output = process::run(
             &ctx.evaluator()?.cargo,
             &native_args,
@@ -438,6 +441,7 @@ pub(super) fn install(
                 String::from_utf8_lossy(&output.stderr[..output.stderr.len().min(16 * 1024)])
             ));
         }
+        ctx.progress.phase(Phase::Outputs);
         let artifacts = artifact_outputs(
             &output.stdout,
             &prepared.target_dir,
@@ -558,6 +562,7 @@ pub(super) fn install(
     match outcome {
         Ok(result) => Ok(result),
         Err(error) => {
+            ctx.progress.phase(Phase::RetainedEffects);
             let diagnosis = native::diagnose(&root, &intent.affected_bins, &before, uid);
             Err(failure_report(
                 &ctx.stores.data,

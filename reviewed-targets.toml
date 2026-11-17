@@ -97,7 +97,6 @@ name = "phase0-product-integration-2026-11-04"
 review_record = "docs/dependency-reviews/2026-11-04-phase0-product-integration.md"
 
 [rust.families.direct]
-chrono = "=0.4.45"
 hex = "=0.4.3"
 log = "=0.4.29"
 lzma-rust2 = "=0.23.0"
@@ -138,7 +137,6 @@ cast5 = { version = "0.11.1", checksum_sha256 = "26b07d673db1ccf000e90f54b819db9
 cc = { version = "1.2.62", checksum_sha256 = "a1dce859f0832a7d088c4f1119888ab94ef4b5d6795d1ce05afb7fe159d79f98" }
 cfb-mode = { version = "0.8.2", checksum_sha256 = "738b8d467867f80a71351933f70461f5b56f24d5c93e0cf216e59229c968d330" }
 cfg-if = { version = "1.0.4", checksum_sha256 = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801" }
-chrono = { version = "0.4.45", checksum_sha256 = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327" }
 cipher = { version = "0.4.4", checksum_sha256 = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad" }
 clap_builder = { version = "4.6.0", checksum_sha256 = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f" }
 clap_lex = { version = "1.1.0", checksum_sha256 = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9" }

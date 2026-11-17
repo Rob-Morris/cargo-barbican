@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.43.0
+# Synced from cargo-barbican v0.44.0
 # Review the version-matched docs/user/ci.md#maintainer-dispatched-admission.
 # A trusted maintainer must dispatch from the reviewed immutable protected
 # controller tag. Optional actor/event policies add defence in depth.

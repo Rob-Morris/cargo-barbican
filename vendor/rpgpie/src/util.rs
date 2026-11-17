@@ -3,17 +3,14 @@
 
 use pgp::{
     composed::SignedPublicKey,
-    crypto::ecc_curve::ECCCurve,
     packet::{PublicKey, Signature},
-    types::{EcdsaPublicParams, EddsaLegacyPublicParams, KeyDetails, Password, PublicParams},
+    types::{KeyDetails, Password},
 };
 use rsa::signature::digest::DynDigest;
 
 use crate::{
     Error,
-    certificate::Certificate,
     key::ComponentKeyPub,
-    model::info::{print::print_cert_info, transform::cert_to_info},
     signature::{merge_unhashed, signature_bytes_eq},
     tsk::{DataSigner, Tsk},
 };
@@ -21,70 +18,6 @@ use crate::{
 /// Pick the signature with the newer creation time, if creation time differs
 pub(crate) fn newer<'a>(a: &'a Signature, b: &'a Signature) -> &'a Signature {
     if a.created() > b.created() { a } else { b }
-}
-
-/// Produce a human-readable name for the public key algorithm in a PublicParams
-pub(crate) fn algo_name(pp: &PublicParams) -> String {
-    match pp {
-        PublicParams::RSA(key) => {
-            use rsa::traits::PublicKeyParts;
-            format!("RSA({})", key.key.n().to_bytes_be().len() * 8)
-        }
-        PublicParams::DSA(key) => {
-            format!("DSA({})", key.key.y().to_bytes_be().len() * 8)
-        }
-        PublicParams::Elgamal(_) => "Elgamal".to_string(),
-
-        PublicParams::ECDH(params) => {
-            format!("ECDH/{}", params.curve().name())
-        }
-
-        PublicParams::ECDSA(params) => {
-            let curve = match params {
-                EcdsaPublicParams::P256 { .. } => ECCCurve::P256,
-                EcdsaPublicParams::P384 { .. } => ECCCurve::P384,
-                EcdsaPublicParams::P521 { .. } => ECCCurve::P521,
-                EcdsaPublicParams::Secp256k1 { .. } => ECCCurve::Secp256k1,
-                EcdsaPublicParams::Unsupported { curve, .. } => curve.clone(),
-            };
-
-            format!("ECDSA/{}", curve.name())
-        }
-
-        PublicParams::EdDSALegacy(EddsaLegacyPublicParams::Ed25519 { .. }) => {
-            "EdDSA/Curve25519".to_string()
-        }
-
-        PublicParams::Ed25519(_) => "Ed25519".to_string(),
-        PublicParams::X25519(_) => "X25519".to_string(),
-        PublicParams::Ed448(_) => "Ed448".to_string(),
-        PublicParams::X448(_) => "X448".to_string(),
-
-        #[cfg(feature = "pqc")]
-        PublicParams::MlKem768X25519(_) => "ML-KEM-768+X25519".to_string(),
-        #[cfg(feature = "pqc")]
-        PublicParams::MlKem1024X448(_) => "ML-KEM-1024+X448".to_string(),
-        #[cfg(feature = "pqc")]
-        PublicParams::MlDsa65Ed25519(_) => "ML-DSA-65+Ed25519".to_string(),
-        #[cfg(feature = "pqc")]
-        PublicParams::MlDsa87Ed448(_) => "ML-DSA-87+Ed448".to_string(),
-        #[cfg(feature = "pqc")]
-        PublicParams::SlhDsaShake128s(_) => "SLH-DSA-SHAKE-128s".to_string(),
-        #[cfg(feature = "pqc")]
-        PublicParams::SlhDsaShake128f(_) => "SLH-DSA-SHAKE-128f".to_string(),
-        #[cfg(feature = "pqc")]
-        PublicParams::SlhDsaShake256s(_) => "SLH-DSA-SHAKE-256s".to_string(),
-
-        _ => format!("{pp:?}"),
-    }
-}
-
-/// Print human-readable information about a Certificate
-///
-/// FIXME: This will probably not remain in the public API in this form.
-pub fn print_cert(cert: &Certificate, verbose: bool, ordered: bool) {
-    let ci = cert_to_info(cert, ordered);
-    print_cert_info(&ci, verbose, ordered);
 }
 
 /// Check if `sig` is a valid direct/revocation signature over `public`

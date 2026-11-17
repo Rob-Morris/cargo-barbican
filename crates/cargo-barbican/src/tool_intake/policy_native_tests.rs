@@ -27,6 +27,8 @@ fn context(stage: &source::Stage) -> Context {
     let native = stage.root.join("native");
     fs::create_dir(&native).unwrap();
     Context {
+        progress: Default::default(),
+        authored_refresh: None,
         ioc_budget: Default::default(),
         source_client: crate::crates_io_http::UreqCratesIoClient::new(
             crate::crates_io_http::DEFAULT_CRATES_IO_BASE_URL.into(),

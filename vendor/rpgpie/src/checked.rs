@@ -618,8 +618,8 @@ mod tests {
 
     use std::time::SystemTime;
 
-    use chrono::DateTime;
     use pgp::types::Timestamp;
+    use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
     use crate::certificate::Checked;
 
@@ -632,12 +632,15 @@ mod tests {
         Checked::from(c.into_iter().next().expect("asserted"))
     }
 
-    fn expiration_at(c: &Checked, at: &str) -> Timestamp {
-        let rfc3339 = DateTime::parse_from_rfc3339(at).expect("parse at");
+    fn timestamp(at: &str) -> Timestamp {
+        let parsed = OffsetDateTime::parse(at, &Rfc3339).expect("parse date");
+        SystemTime::from(parsed)
+            .try_into()
+            .expect("time fits in u32")
+    }
 
-        let time: SystemTime = rfc3339.into();
-        c.primary_expiration_time(time.try_into().expect("time fits in u32"))
-            .expect("some")
+    fn expiration_at(c: &Checked, at: &str) -> Timestamp {
+        c.primary_expiration_time(timestamp(at)).expect("some")
     }
 
     #[test]
@@ -654,69 +657,28 @@ mod tests {
         // --- validity of the primary ---
 
         // key is not revoked
-        assert!(
-            !checked.revoked_at(
-                SystemTime::from(
-                    DateTime::parse_from_rfc3339("2025-01-01T23:59:00Z").expect("parse date")
-                )
-                .try_into()
-                .expect("time fits in u32"),
-            )
-        );
+        assert!(!checked.revoked_at(timestamp("2025-01-01T23:59:00Z")));
 
         // valid at 2020-01-01T23:59:00Z
         assert!(
             checked
-                .primary_valid_at(
-                    SystemTime::from(
-                        DateTime::parse_from_rfc3339("2020-01-01T23:59:00Z").expect("parse date")
-                    )
-                    .try_into()
-                    .expect("time fits in u32"),
-                )
+                .primary_valid_at(timestamp("2020-01-01T23:59:00Z"))
                 .expect("primary_valid_at")
         );
 
         let exp = expiration_at(&checked, "2020-01-01T23:59:00Z");
-        assert_eq!(
-            exp,
-            SystemTime::from(
-                DateTime::parse_from_rfc3339("2020-08-03T13:32:24Z").expect("parse date")
-            )
-            .try_into()
-            .expect("time fits in u32"),
-        );
+        assert_eq!(exp, timestamp("2020-08-03T13:32:24Z"));
 
         let exp = expiration_at(&checked, "2021-01-01T23:59:00Z");
-        assert_eq!(
-            exp,
-            SystemTime::from(
-                DateTime::parse_from_rfc3339("2022-07-06T17:06:34Z").expect("parse date")
-            )
-            .try_into()
-            .expect("time fits in u32"),
-        );
+        assert_eq!(exp, timestamp("2022-07-06T17:06:34Z"));
 
         let exp = expiration_at(&checked, "2024-01-01T23:59:00Z");
-        assert_eq!(
-            exp,
-            SystemTime::from(
-                DateTime::parse_from_rfc3339("2024-06-07T19:57:03Z").expect("parse date")
-            )
-            .try_into()
-            .expect("time fits in u32"),
-        );
+        assert_eq!(exp, timestamp("2024-06-07T19:57:03Z"));
 
         // not valid at 2024-07-01T23:59:00Z
         assert!(
             !checked
-                .primary_valid_at(
-                    SystemTime::from(
-                        DateTime::parse_from_rfc3339("2024-07-01T23:59:00Z").expect("parse date")
-                    )
-                    .try_into()
-                    .expect("time fits in u32"),
-                )
+                .primary_valid_at(timestamp("2024-07-01T23:59:00Z"))
                 .expect("primary_valid_at")
         );
 
@@ -730,22 +692,12 @@ mod tests {
         //  - the switch to the RSA encryption key on 2017-08-02.
 
         // --- signature component key (the primary key) ---
-        let sig = checked.valid_signing_capable_component_keys_at(
-            SystemTime::from(
-                DateTime::parse_from_rfc3339("2022-07-01T23:59:00Z").expect("parse date"),
-            )
-            .try_into()
-            .expect("time fits in u32"),
-        );
+        let sig =
+            checked.valid_signing_capable_component_keys_at(timestamp("2022-07-01T23:59:00Z"));
         assert_eq!(sig.len(), 1);
 
-        let sig = checked.valid_signing_capable_component_keys_at(
-            SystemTime::from(
-                DateTime::parse_from_rfc3339("2024-07-01T23:59:00Z").expect("parse date"),
-            )
-            .try_into()
-            .expect("time fits in u32"),
-        );
+        let sig =
+            checked.valid_signing_capable_component_keys_at(timestamp("2024-07-01T23:59:00Z"));
         assert_eq!(sig.len(), 0);
     }
 }

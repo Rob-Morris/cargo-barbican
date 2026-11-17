@@ -8,6 +8,14 @@ and [decoder review](2026-11-04-rust-distribution-decoder.md). This record
 approves bounded data-only qualification inputs. It does not approve CLI trust,
 admission, installation, activation or additional native platforms.
 
+### 18 November 2026 custody revision
+
+The maintained verifier has since removed its unused certificate presentation
+model and its chrono dependency. The 4 November graph, patch and receipt
+digest below describe the initial integration. The current review binds the
+revised manifest and compiled sources to the updated inventory.
+[18 November dependency review](2026-11-18-rpgpie-presentation-removal.md)
+
 ## Classification
 
 Elevated-risk: cryptographic parsing, compressed input, build scripts/proc
@@ -56,8 +64,7 @@ browser and platform dependencies, including an otherwise selected Haiku C++
 build. pgp defaults remain disabled. No `[patch]`, source substitution or
 inventory admission rule is relaxed.
 
-The [fixed tree receipt](rpgpie-0.12.0-tree.sha256) inventories every one of 30
-files; its SHA256 is
+The 4 November tree receipt inventoried all 30 files. Its SHA256 was
 `3d23f7470fe5738e04f56f2decf3266c8bc8e0753393171d8167e1f49ee76be5`.
 The offline shell guard checks this inventory before Cargo in canonical
 verification and CI, rejects missing/extra/changed files, symlinks and special

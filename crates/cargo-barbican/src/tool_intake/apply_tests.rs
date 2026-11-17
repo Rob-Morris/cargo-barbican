@@ -493,6 +493,7 @@ mod lifecycle {
         context::NativeContext,
         frontend::{self, Context, StoredReview},
         installation, policy, process,
+        progress::{Handle, Phase, tests::blocked_progress},
         source::Stage,
         store::Stores,
     };
@@ -551,6 +552,8 @@ mod lifecycle {
             fs::create_dir(&home).unwrap();
             Self {
                 ctx: Context {
+                    progress: Default::default(),
+                    authored_refresh: None,
                     ioc_budget: Default::default(),
                     source_client: crate::crates_io_http::UreqCratesIoClient::new(
                         crate::crates_io_http::DEFAULT_CRATES_IO_BASE_URL.into(),
@@ -727,7 +730,11 @@ mod lifecycle {
             // Drop disposable initial preparation before install: the owner must use
             // the persisted accepted inputs and cannot depend on this source stage.
             drop(prepared);
-            fs::remove_dir_all(source).unwrap();
+            if label == "success" {
+                fs::rename(source, self.ctx.current.join("authored-online-refresh")).unwrap();
+            } else {
+                fs::remove_dir_all(source).unwrap();
+            }
             stored
         }
 
@@ -814,7 +821,22 @@ mod lifecycle {
         journey.assert_cached_receipt(&repeated, &review);
         let root = journey.ctx.current.join("installation-success");
         let mut args = journey.install_args(&review, &root);
+        let (handle, history) = Handle::recording();
+        journey.ctx.progress = handle;
+        let phases = || {
+            std::mem::take(&mut *history.lock().unwrap())
+                .into_iter()
+                .map(|s| s.phase)
+                .collect::<Vec<_>>()
+        };
         let installed = installation::install(&journey.ctx, &review, &args).unwrap();
+        let cached_phases = phases();
+        assert!(cached_phases.contains(&Phase::Cached));
+        assert!(!cached_phases.iter().any(|p| matches!(
+            p,
+            Phase::Advisory | Phase::Deny | Phase::Audit | Phase::Source
+        )));
+        assert!(cached_phases.ends_with(&[Phase::Native, Phase::Outputs]));
         let mut id: RecordId = installed["installation_id"]
             .as_str()
             .unwrap()
@@ -842,7 +864,41 @@ mod lifecycle {
             admission::admission_check(&journey.ctx, &id, &admission).unwrap()["continuing_unchanged_context"],
             true
         );
+        phases();
         let unchanged = installation::install(&journey.ctx, &review, &args).unwrap();
+        let current = phases();
+        assert!(current.contains(&Phase::Cached));
+        assert!(!current.iter().any(|p| matches!(
+            p,
+            Phase::Native | Phase::Outputs | Phase::Deny | Phase::Audit
+        )));
+        // Only Git materialisation uses the authored fixture. The real fresh
+        // evidence, scanner, authority and already-current checks still run.
+        journey.ctx.authored_refresh = Some(journey.ctx.current.join("authored-online-refresh"));
+        let mut online = journey.install_args(&review, &root);
+        online.options.cached_admission = false;
+        online.options.cache_reason = None;
+        let fresh = installation::install(&journey.ctx, &review, &online).unwrap();
+        assert_eq!(fresh["installation_id"], unchanged["installation_id"]);
+        assert_eq!(fresh["unchanged"], true);
+        let fresh_phases = phases();
+        for expected in [
+            Phase::Refresh,
+            Phase::Source,
+            Phase::Policy,
+            Phase::Deny,
+            Phase::Audit,
+            Phase::Preflight,
+        ] {
+            assert!(fresh_phases.contains(&expected), "{fresh_phases:?}");
+        }
+        assert!(
+            !fresh_phases
+                .iter()
+                .any(|p| matches!(p, Phase::Cached | Phase::Native | Phase::Outputs))
+        );
+        journey.ctx.authored_refresh = None;
+        journey.ctx.progress = Handle::default();
         assert_eq!(unchanged["installation_id"], id.to_string());
         assert_eq!(unchanged["unchanged"], true);
         journey.assert_cached_receipt(&unchanged, &review);
@@ -1031,9 +1087,16 @@ mod lifecycle {
         journey.receipt("native-partial-failure-result", &serde_json::json!({"primary_error":error,"previous_binding":baseline_id.to_string(),"new_complete_binding":false}));
 
         let signal = journey.ctx.current.join("accepted-build-started");
+        let finished = journey.ctx.current.join("accepted-build-finished");
         let build = format!(
-            "fn main() {{ std::fs::write({:?}, b\"accepted fixture build started\").unwrap(); std::thread::sleep(std::time::Duration::from_secs(30)); }}\n",
-            signal.to_str().unwrap()
+            r#"fn main() {{
+            let signal=std::path::Path::new({signal:?});
+            let pending=signal.with_extension("pending");
+            std::fs::write(&pending,std::process::id().to_string()).unwrap();
+            std::fs::rename(pending,signal).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            std::fs::write({finished:?},b"finished").unwrap();
+        }}"#
         );
         let cancelled = journey.review_and_accept("cancel", "fn main() {}\n", Some(&build));
         assert!(
@@ -1044,6 +1107,8 @@ mod lifecycle {
             &cancelled,
             &journey.ctx.current.join("installation-cancelled"),
         );
+        let (scope, blocked) = blocked_progress();
+        journey.ctx.progress = scope.handle.clone();
         let cancellation = journey.ctx.budget.cancelled.clone();
         let watcher = std::thread::spawn(move || {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
@@ -1054,10 +1119,38 @@ mod lifecycle {
                 signal.exists(),
                 "accepted build never reached its explicit cancellation signal"
             );
+            let pid = fs::read_to_string(signal).unwrap();
+            let group = std::process::Command::new("ps")
+                .args(["-o", "pgid=", "-p", &pid])
+                .output()
+                .unwrap();
+            assert!(group.status.success() && group.stderr.is_empty());
+            let group = String::from_utf8(group.stdout).unwrap().trim().to_owned();
+            assert!(group.parse::<u32>().is_ok());
             cancellation.store(true, Ordering::SeqCst);
+            (pid, group)
         });
         let error = installation::install(&journey.ctx, &cancelled, &args).unwrap_err();
-        watcher.join().unwrap();
+        let (build_pid, cargo_pid) = watcher.join().unwrap();
+        assert!(
+            !finished.exists(),
+            "cancelled build completed its delayed work"
+        );
+        for (pid, direct_child) in [(cargo_pid, true), (build_pid, false)] {
+            let observed = std::process::Command::new("ps")
+                .args(["-o", "stat=", "-p", &pid])
+                .output()
+                .unwrap();
+            assert!(observed.stderr.is_empty(), "{observed:?}");
+            let state = String::from_utf8(observed.stdout).unwrap();
+            assert!(
+                state.trim().is_empty() || (!direct_child && state.trim().starts_with('Z')),
+                "process {pid} survived cancellation: {state}"
+            );
+        }
+        drop(scope);
+        blocked.release_and_expect_exit();
+        journey.ctx.progress = Handle::default();
         journey.ctx.budget.cancelled.store(false, Ordering::SeqCst);
         assert!(
             error.contains("cancelled")

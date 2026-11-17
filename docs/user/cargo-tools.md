@@ -68,6 +68,21 @@ Use `--from INSTALLATION-ID` when updating a tool with a prior Barbican binding.
 A missing or invalid baseline reports `baseline-unavailable`; it does not claim
 that the old bytes have been reviewed or suppress full new-subject review.
 
+## Progress diagnostics
+
+During `tool review` and `tool install`, stderr shows the current phase and
+elapsed seconds in both text and JSON modes. An inspection count such as
+`3/8` means three of eight distinct selected package sources have a recorded
+inspection result. Adverse and incomplete results also count.
+
+Redirected stderr reports phase changes only, up to 32 progress lines. On a
+terminal, a long phase can also report elapsed time and updated counts at
+ten-second intervals, up to 256 progress lines in total. Both limits include
+the limit notice. Short phases can be skipped, and a long native build can
+continue after the last line. Native Cargo output remains captured for
+artefact verification and bounded failure reporting. Use the final result on
+stdout and the exit code to determine the outcome.
+
 ## Review an age or assigned-advisory finding
 
 A blocked dossier can supply the exact bindings for a narrowly reviewed

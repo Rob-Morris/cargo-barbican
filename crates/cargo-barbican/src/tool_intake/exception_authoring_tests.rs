@@ -215,6 +215,8 @@ impl Fixture {
             },
             now: OffsetDateTime::now_utc().unix_timestamp(),
             budget,
+            progress: Default::default(),
+            authored_refresh: None,
             ioc_budget: Default::default(),
             source_client: crate::crates_io_http::UreqCratesIoClient::new(
                 crate::crates_io_http::DEFAULT_CRATES_IO_BASE_URL.into(),

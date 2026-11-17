@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.44.0](changelog/v0.44.0.md) | 2026-11-18 | Show bounded Cargo tool review and install progress |
 | [v0.43.0](changelog/v0.43.0.md) | 2026-11-16 | Author exact Cargo tool policy exceptions |
 | [v0.42.2](changelog/v0.42.2.md) | 2026-11-15 | Restore cached registry source inspection |
 | [v0.42.1](changelog/v0.42.1.md) | 2026-11-15 | Qualify Linux Cargo artifact custody |

@@ -5,6 +5,8 @@ mod collection;
 mod consumer;
 mod context;
 mod frontend;
+mod progress;
+pub(crate) use progress::Target as ProgressTarget;
 mod graph;
 mod installation;
 mod native;

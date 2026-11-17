@@ -21,6 +21,7 @@ mod pin_refresh;
 mod policy_init;
 mod resolve;
 mod review;
+mod tool_progress;
 mod toolchain;
 mod update;
 mod verify;

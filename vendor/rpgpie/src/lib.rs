@@ -36,7 +36,6 @@ pub mod key;
 pub mod lookup;
 pub mod merge;
 pub mod message;
-pub mod model;
 pub mod policy;
 mod primary_userid;
 pub mod signature;
