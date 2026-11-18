@@ -83,6 +83,15 @@ continue after the last line. Native Cargo output remains captured for
 artefact verification and bounded failure reporting. Use the final result on
 stdout and the exit code to determine the outcome.
 
+Elapsed updates show that the reporter is running; they do not prove that the
+underlying build is advancing or detect a hung process. Progress is best-effort:
+the final inspection count may be skipped, and a line the reporter has already
+picked up can appear after the stdout result. There is no ordering guarantee
+between streams.
+The line limits apply only to progress; existing installation disclosures and
+errors remain additional output. Nonempty stderr therefore does not mean
+failure, and diagnostic wording is not a stable parsing interface.
+
 ## Review an age or assigned-advisory finding
 
 A blocked dossier can supply the exact bindings for a narrowly reviewed
