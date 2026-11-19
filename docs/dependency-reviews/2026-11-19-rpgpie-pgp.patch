@@ -1,0 +1,318 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -14,0 +15 @@
++publish = false
+@@ -28,5 +28,0 @@
+-[features]
+-cli = ["clap"]
+-pqc = ["pgp/pqc"]
+-wasm = ["pgp/wasm"]
+-
+@@ -33,0 +30,2 @@
++test = false
++doctest = false
+@@ -37,22 +34,0 @@
+-[[bin]]
+-name = "rpgp"
+-path = "src/bin/rpgp.rs"
+-required-features = ["cli"]
+-
+-[[test]]
+-name = "test_merge"
+-path = "tests/test_merge.rs"
+-
+-[[test]]
+-name = "test_validity"
+-path = "tests/test_validity.rs"
+-
+-[dependencies.chrono]
+-version = "0.4"
+-features = ["serde"]
+-
+-[dependencies.clap]
+-version = "4"
+-features = ["derive"]
+-optional = true
+-
+@@ -60 +36 @@
+-version = "0.4"
++version = "=0.4.3"
+@@ -63 +39 @@
+-version = "0.4"
++version = "=0.4.29"
+@@ -66 +42 @@
+-version = "0.21"
++version = "=0.21.1"
+@@ -70 +46 @@
+-version = "0.8"
++version = "=0.8.8"
+@@ -73 +49 @@
+-version = "0.6"
++version = "=0.6.4"
+@@ -76,8 +52 @@
+-version = "0.9.7"
+-
+-[dependencies.serde]
+-version = "1.0"
+-features = ["derive"]
+-
+-[dependencies.serde_json]
+-version = "1.0"
++version = "=0.9.10"
+@@ -86 +55 @@
+-version = "2"
++version = "=2.0.18"
+@@ -89 +58 @@
+-version = "1"
++version = "=1.8.2"
+@@ -91,5 +60,4 @@
+-[dev-dependencies.env_logger]
+-version = "0.11"
+-
+-[dev-dependencies.rstest]
+-version = "0.27"
++[dev-dependencies.time]
++version = "=0.3.47"
++default-features = false
++features = ["std", "parsing"]
+@@ -102,0 +71,3 @@
++
++[lints.rust]
++unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("pqc"))'] }
+--- a/src/checked.rs
++++ b/src/checked.rs
+@@ -394 +394 @@
+-            && expiration < reference
++            && expiration <= reference
+@@ -621 +620,0 @@
+-    use chrono::DateTime;
+@@ -622,0 +622 @@
++    use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+@@ -634,0 +635,7 @@
++    fn timestamp(at: &str) -> Timestamp {
++        let parsed = OffsetDateTime::parse(at, &Rfc3339).expect("parse date");
++        SystemTime::from(parsed)
++            .try_into()
++            .expect("time fits in u32")
++    }
++
+@@ -636,5 +643 @@
+-        let rfc3339 = DateTime::parse_from_rfc3339(at).expect("parse at");
+-
+-        let time: SystemTime = rfc3339.into();
+-        c.primary_expiration_time(time.try_into().expect("time fits in u32"))
+-            .expect("some")
++        c.primary_expiration_time(timestamp(at)).expect("some")
+@@ -657,9 +660 @@
+-        assert!(
+-            !checked.revoked_at(
+-                SystemTime::from(
+-                    DateTime::parse_from_rfc3339("2025-01-01T23:59:00Z").expect("parse date")
+-                )
+-                .try_into()
+-                .expect("time fits in u32"),
+-            )
+-        );
++        assert!(!checked.revoked_at(timestamp("2025-01-01T23:59:00Z")));
+@@ -670,7 +665 @@
+-                .primary_valid_at(
+-                    SystemTime::from(
+-                        DateTime::parse_from_rfc3339("2020-01-01T23:59:00Z").expect("parse date")
+-                    )
+-                    .try_into()
+-                    .expect("time fits in u32"),
+-                )
++                .primary_valid_at(timestamp("2020-01-01T23:59:00Z"))
+@@ -681,8 +670 @@
+-        assert_eq!(
+-            exp,
+-            SystemTime::from(
+-                DateTime::parse_from_rfc3339("2020-08-03T13:32:24Z").expect("parse date")
+-            )
+-            .try_into()
+-            .expect("time fits in u32"),
+-        );
++        assert_eq!(exp, timestamp("2020-08-03T13:32:24Z"));
+@@ -691,8 +673 @@
+-        assert_eq!(
+-            exp,
+-            SystemTime::from(
+-                DateTime::parse_from_rfc3339("2022-07-06T17:06:34Z").expect("parse date")
+-            )
+-            .try_into()
+-            .expect("time fits in u32"),
+-        );
++        assert_eq!(exp, timestamp("2022-07-06T17:06:34Z"));
+@@ -701,8 +676 @@
+-        assert_eq!(
+-            exp,
+-            SystemTime::from(
+-                DateTime::parse_from_rfc3339("2024-06-07T19:57:03Z").expect("parse date")
+-            )
+-            .try_into()
+-            .expect("time fits in u32"),
+-        );
++        assert_eq!(exp, timestamp("2024-06-07T19:57:03Z"));
+@@ -713,7 +681 @@
+-                .primary_valid_at(
+-                    SystemTime::from(
+-                        DateTime::parse_from_rfc3339("2024-07-01T23:59:00Z").expect("parse date")
+-                    )
+-                    .try_into()
+-                    .expect("time fits in u32"),
+-                )
++                .primary_valid_at(timestamp("2024-07-01T23:59:00Z"))
+@@ -733,7 +695,2 @@
+-        let sig = checked.valid_signing_capable_component_keys_at(
+-            SystemTime::from(
+-                DateTime::parse_from_rfc3339("2022-07-01T23:59:00Z").expect("parse date"),
+-            )
+-            .try_into()
+-            .expect("time fits in u32"),
+-        );
++        let sig =
++            checked.valid_signing_capable_component_keys_at(timestamp("2022-07-01T23:59:00Z"));
+@@ -742,7 +699,2 @@
+-        let sig = checked.valid_signing_capable_component_keys_at(
+-            SystemTime::from(
+-                DateTime::parse_from_rfc3339("2024-07-01T23:59:00Z").expect("parse date"),
+-            )
+-            .try_into()
+-            .expect("time fits in u32"),
+-        );
++        let sig =
++            checked.valid_signing_capable_component_keys_at(timestamp("2024-07-01T23:59:00Z"));
+--- a/src/key.rs
++++ b/src/key.rs
+@@ -656 +656 @@
+-            && (spsk.created_at().as_secs() + key_exp.as_secs() < reference.as_secs())
++            && (u64::from(spsk.created_at().as_secs()) + u64::from(key_exp.as_secs()) <= u64::from(reference.as_secs()))
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -39 +38,0 @@
+-pub mod model;
+--- a/src/model/summary.rs
++++ b/src/model/summary.rs
+@@ -162,46 +161,0 @@
+-
+-#[cfg(test)]
+-#[allow(clippy::expect_used)]
+-mod tests {
+-    use std::fs::File;
+-
+-    use rstest::rstest;
+-
+-    use crate::certificate::{Certificate, Checked};
+-
+-    fn load_checked(file: &str) -> Checked {
+-        let certs = Certificate::load(&mut File::open(file).expect("cert open")).expect("load");
+-        assert_eq!(certs.len(), 1);
+-
+-        Checked::from(certs.into_iter().next().expect("asserted"))
+-    }
+-    #[rstest]
+-    #[case("tests/certs/hal_v2_1992.cert", "tests/certs/hal_v2_1992.txt")]
+-    #[case("tests/certs/prz_v4_1997.cert", "tests/certs/prz_v4_1997.txt")]
+-    #[case("tests/certs/dkg_v4_2007.cert", "tests/certs/dkg_v4_2007.txt")]
+-    #[case("tests/certs/alice_v6.cert", "tests/certs/alice_v6.txt")]
+-    fn status_summary_display(#[case] cert: &str, #[case] text: &str) {
+-        let checked = load_checked(cert);
+-        let summary = crate::model::status_summary(&checked);
+-
+-        let text_out = format!("{}", &summary);
+-        let nominal_text = std::fs::read_to_string(text).expect("read text");
+-
+-        assert_eq!(text_out, nominal_text);
+-    }
+-
+-    #[rstest]
+-    #[case("tests/certs/hal_v2_1992.cert", "tests/certs/hal_v2_1992.json")]
+-    #[case("tests/certs/prz_v4_1997.cert", "tests/certs/prz_v4_1997.json")]
+-    #[case("tests/certs/dkg_v4_2007.cert", "tests/certs/dkg_v4_2007.json")]
+-    #[case("tests/certs/alice_v6.cert", "tests/certs/alice_v6.json")]
+-    fn status_summary_json(#[case] cert: &str, #[case] json: &str) {
+-        let checked = load_checked(cert);
+-        let summary = crate::model::status_summary(&checked);
+-
+-        let json_out = serde_json::to_string_pretty(&summary).expect("json");
+-        let nominal_json = std::fs::read_to_string(json).expect("read json");
+-
+-        assert_eq!(format!("{json_out}\n"), nominal_json);
+-    }
+-}
+--- a/src/util.rs
++++ b/src/util.rs
+@@ -6 +5,0 @@
+-    crypto::ecc_curve::ECCCurve,
+@@ -8 +7 @@
+-    types::{EcdsaPublicParams, EddsaLegacyPublicParams, KeyDetails, Password, PublicParams},
++    types::{KeyDetails, Password},
+@@ -14 +12,0 @@
+-    certificate::Certificate,
+@@ -16 +13,0 @@
+-    model::info::{print::print_cert_info, transform::cert_to_info},
+@@ -24,64 +20,0 @@
+-}
+-
+-/// Produce a human-readable name for the public key algorithm in a PublicParams
+-pub(crate) fn algo_name(pp: &PublicParams) -> String {
+-    match pp {
+-        PublicParams::RSA(key) => {
+-            use rsa::traits::PublicKeyParts;
+-            format!("RSA({})", key.key.n().to_bytes_be().len() * 8)
+-        }
+-        PublicParams::DSA(key) => {
+-            format!("DSA({})", key.key.y().to_bytes_be().len() * 8)
+-        }
+-        PublicParams::Elgamal(_) => "Elgamal".to_string(),
+-
+-        PublicParams::ECDH(params) => {
+-            format!("ECDH/{}", params.curve().name())
+-        }
+-
+-        PublicParams::ECDSA(params) => {
+-            let curve = match params {
+-                EcdsaPublicParams::P256 { .. } => ECCCurve::P256,
+-                EcdsaPublicParams::P384 { .. } => ECCCurve::P384,
+-                EcdsaPublicParams::P521 { .. } => ECCCurve::P521,
+-                EcdsaPublicParams::Secp256k1 { .. } => ECCCurve::Secp256k1,
+-                EcdsaPublicParams::Unsupported { curve, .. } => curve.clone(),
+-            };
+-
+-            format!("ECDSA/{}", curve.name())
+-        }
+-
+-        PublicParams::EdDSALegacy(EddsaLegacyPublicParams::Ed25519 { .. }) => {
+-            "EdDSA/Curve25519".to_string()
+-        }
+-
+-        PublicParams::Ed25519(_) => "Ed25519".to_string(),
+-        PublicParams::X25519(_) => "X25519".to_string(),
+-        PublicParams::Ed448(_) => "Ed448".to_string(),
+-        PublicParams::X448(_) => "X448".to_string(),
+-
+-        #[cfg(feature = "pqc")]
+-        PublicParams::MlKem768X25519(_) => "ML-KEM-768+X25519".to_string(),
+-        #[cfg(feature = "pqc")]
+-        PublicParams::MlKem1024X448(_) => "ML-KEM-1024+X448".to_string(),
+-        #[cfg(feature = "pqc")]
+-        PublicParams::MlDsa65Ed25519(_) => "ML-DSA-65+Ed25519".to_string(),
+-        #[cfg(feature = "pqc")]
+-        PublicParams::MlDsa87Ed448(_) => "ML-DSA-87+Ed448".to_string(),
+-        #[cfg(feature = "pqc")]
+-        PublicParams::SlhDsaShake128s(_) => "SLH-DSA-SHAKE-128s".to_string(),
+-        #[cfg(feature = "pqc")]
+-        PublicParams::SlhDsaShake128f(_) => "SLH-DSA-SHAKE-128f".to_string(),
+-        #[cfg(feature = "pqc")]
+-        PublicParams::SlhDsaShake256s(_) => "SLH-DSA-SHAKE-256s".to_string(),
+-
+-        _ => format!("{pp:?}"),
+-    }
+-}
+-
+-/// Print human-readable information about a Certificate
+-///
+-/// FIXME: This will probably not remain in the public API in this form.
+-pub fn print_cert(cert: &Certificate, verbose: bool, ordered: bool) {
+-    let ci = cert_to_info(cert, ordered);
+-    print_cert_info(&ci, verbose, ordered);

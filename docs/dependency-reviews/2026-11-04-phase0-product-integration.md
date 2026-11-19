@@ -16,6 +16,19 @@ digest below describe the initial integration. The current review binds the
 revised manifest and compiled sources to the updated inventory.
 [18 November dependency review](2026-11-18-rpgpie-presentation-removal.md)
 
+### 19 November 2026 PGP integration
+
+The binary and maintained fork now pin `pgp =0.21.1`. The source review and
+native controls cover the public RSA certificate and binary detached-signature
+route. The full dependency decision retains both existing advisory exceptions,
+due 4 December 2026. [PGP qualification](2026-11-19-pgp-0.21.1.md) ·
+[Complete dependency decision](2026-11-19-crypto-update-decision.md)
+
+The inventory digests below describe earlier revisions. The 19 November
+receipt covers the maintained manifest and provenance for the new PGP pin.
+[Current inventory](rpgpie-0.12.0-tree.sha256) ·
+[Cumulative patch](2026-11-19-rpgpie-pgp.patch)
+
 ## Classification
 
 Elevated-risk: cryptographic parsing, compressed input, build scripts/proc

@@ -1,0 +1,57 @@
+diff --git a/crates/cargo-barbican/src/toolchain_intake/verifier/tests.rs b/crates/cargo-barbican/src/toolchain_intake/verifier/tests.rs
+index 4e1618d..7398ed1 100644
+--- a/crates/cargo-barbican/src/toolchain_intake/verifier/tests.rs
++++ b/crates/cargo-barbican/src/toolchain_intake/verifier/tests.rs
+@@ -461,3 +461,52 @@ fn adverse_packets_survive_rejected_benign_composed_projection() {
+     );
+     assert_eq!(known.observations().len(), 1);
+ }
++
++#[test]
++fn pgp_0211_armour_boundary_qualification() {
++    let cert = fixture("valid.asc");
++    let signature = fixture("strong.asc");
++    let anchor = approved("valid.asc", &fp("primary-fingerprint.txt"));
++    let check = |bytes: &[u8]| {
++        verify(
++            &anchor,
++            &cert,
++            bytes,
++            &fixture("payload.txt"),
++            NOW,
++            &mut AdverseKnowledge::default(),
++        )
++    };
++    let expected = check(&signature).unwrap();
++    let text = std::str::from_utf8(&signature).unwrap();
++    let mut lines: Vec<_> = text.lines().map(str::to_owned).collect();
++    let crc = lines.iter().position(|line| line.starts_with('=')).unwrap();
++    assert_eq!(lines[crc].len(), 5);
++    let replacement = if lines[crc].as_bytes()[1] == b'A' {
++        "B"
++    } else {
++        "A"
++    };
++    lines[crc].replace_range(1..2, replacement);
++    let changed_crc = (lines.join("\n") + "\n").into_bytes();
++    assert_eq!(
++        input::packets(&signature, false).unwrap(),
++        input::packets(&changed_crc, false).unwrap()
++    );
++    assert_eq!(check(&changed_crc).unwrap(), expected);
++
++    let mut whitespace = signature.clone();
++    whitespace.extend_from_slice(b"\n \t\r\n");
++    assert_eq!(check(&whitespace).unwrap(), expected);
++    let mut trailing = signature.clone();
++    trailing.extend_from_slice(b"unapproved-trailing-data");
++    assert!(
++        check(&trailing)
++            .unwrap_err()
++            .contains("trailing armour input")
++    );
++    lines[crc] = "=AAAAAA==".to_owned();
++    assert!(check((lines.join("\n") + "\n").as_bytes()).is_err());
++    let end = text.find("-----END PGP SIGNATURE-----").unwrap();
++    assert!(check(&signature[..end + 5]).is_err());
++}

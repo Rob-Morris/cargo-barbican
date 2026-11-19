@@ -38,7 +38,10 @@ Neither active-binding selection nor the global clock is replaced.
 
 Review and minimal patch: docs/dependency-reviews/2026-11-04-embedded-public-verifier.md
 and docs/dependency-reviews/2026-11-18-rpgpie-presentation-removal.md.
-The cumulative patch is docs/dependency-reviews/2026-11-18-rpgpie.patch (repository-relative).
+The 19 November 2026 qualification revision changes only the exact PGP dependency
+pin to 0.21.1; verification source and selected features are unchanged. Its review
+is docs/dependency-reviews/2026-11-19-pgp-0.21.1.md.
+The cumulative patch is docs/dependency-reviews/2026-11-19-rpgpie-pgp.patch (repository-relative).
 Unmodified published 0.12.1 retains the expiry and cross-signature defects and is
 not a remediation. Re-evaluate maintained upstream releases before rebasing this
 source; regenerate the explicit patch/source receipt and rerun native controls.
@@ -47,7 +50,7 @@ The patch uses zero context to keep its checked-in representation free of
 trailing whitespace without altering unified-diff syntax. Verify the original
 `.crate` archive SHA256 above, extract that exact archive into a disposable
 directory, enter its `rpgpie-0.12.0` root, then run
-`git apply --no-index --unidiff-zero /absolute/path/to/2026-11-18-rpgpie.patch`.
+`git apply --no-index --unidiff-zero /absolute/path/to/2026-11-19-rpgpie-pgp.patch`.
 Do not apply it to another release or unverified source. The patch covers the
 six changed upstream files; omitted package files and added provenance remain
 described separately above and bound by the full maintained-tree inventory.

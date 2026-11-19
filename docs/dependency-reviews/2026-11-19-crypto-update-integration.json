@@ -1,0 +1,225 @@
+{
+  "recorded_at_utc": "2026-11-19T02:39:01.984506+00:00",
+  "integration_version": "0.44.1",
+  "baseline_commit": "ee6e1aa7e89c82bee7e35689d79eb7e40f2c5d92",
+  "decision_record": "docs/dependency-reviews/2026-11-19-crypto-update-decision.md",
+  "selected_update": "pgp0.21.0\u21920.21.1 in both exact owners; retain maintained rpgpie0.12.0",
+  "rejected_major_substitutions_review_complete": true,
+  "source_receipt_sha256": "07d1d5f30aa30b3d6fdfdd5e90d7926c556dfcca33947de65eae8dc67debcad2",
+  "graph_parity": {
+    "baseline": "ee6e1aa7e89c82bee7e35689d79eb7e40f2c5d92",
+    "package_count": 225,
+    "only_dependency_identity_change": "pgp0.21.0\u21920.21.1",
+    "workspace_versions": "0.44.0\u21920.44.1",
+    "all_other_locked_package_facts_identical": true,
+    "all_selected_features_identical": true,
+    "advisory_grants_identical": true
+  },
+  "host": "aarch64-apple-darwin",
+  "trusted_compiler": "1.95.0",
+  "pre_execution_audit_success": true,
+  "unchanged_advisory_exceptions": [
+    {
+      "id": "RUSTSEC-2023-0071",
+      "package": "rsa@0.9.10",
+      "review_by": "2026-12-04"
+    },
+    {
+      "id": "RUSTSEC-2026-0387",
+      "package": "crypto-bigint@0.5.5",
+      "review_by": "2026-12-04"
+    }
+  ],
+  "licenses_bans_sources": "PASS",
+  "canonical_command": "sh scripts/verify.sh",
+  "canonical_exit_code": 0,
+  "canonical_final_markers": [
+    "Verify: PASS",
+    "Gatehouse pre-release: PASS"
+  ],
+  "canonical_test_summaries": [
+    {
+      "passed": 461,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 223,
+      "failed": 0,
+      "ignored": 2,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 12,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 2,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 383,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 14,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 7,
+      "failed": 0,
+      "ignored": 1,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    },
+    {
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered_out": 0
+    }
+  ],
+  "canonical_totals": {
+    "passed": 1141,
+    "failed": 0,
+    "ignored": 19
+  },
+  "actual_verifier_test_groups": [
+    "toolchain_intake::verifier::tests::adverse_observations_precede_proposal_refusal_and_cannot_be_erased",
+    "toolchain_intake::verifier::tests::adverse_packets_survive_rejected_benign_composed_projection",
+    "toolchain_intake::verifier::tests::authentic_rust_manifest_and_current_subkey_verify",
+    "toolchain_intake::verifier::tests::authenticated_revocation_classification_is_bounded_and_invalid_packets_have_no_authority",
+    "toolchain_intake::verifier::tests::exact_primary_and_selected_subkey_expiry_boundaries",
+    "toolchain_intake::verifier::tests::genuinely_authenticated_future_cross_signature_reaches_time_guard",
+    "toolchain_intake::verifier::tests::original_refusal_controls",
+    "toolchain_intake::verifier::tests::pgp_0211_armour_boundary_qualification"
+  ],
+  "qualification_limits": "Existing ignored tests were not executed; no full upstream suite, additional platform, new compiler or authentic installation/profile matrix is claimed.",
+  "changed_build_inputs_sha256": {
+    "Cargo.lock": "fdf53ec139445e417e34059915e4eed8c6bb4db18eb77d60b06ef500c6837a4c",
+    "crates/barbican/Cargo.toml": "47a5e4e30791481fc99e3beb76ea694f74a621b916b2f69f225366165c5cffe5",
+    "crates/cargo-barbican/Cargo.toml": "14ebc225896aed28335f5d2d47b476f5ca7e335d0e21bb7bab07497405668526",
+    "crates/cargo-barbican/src/commands/policy.rs": "1dbd04909e1082732da39c0f2f46140b0dee7df0f97dab18d999728cbc326b82",
+    "crates/cargo-barbican/src/toolchain_intake/verifier/tests.rs": "6c5c7d6eda7a79bcf4e57c1e4ede68d5b04d3632defedb03518a80fc13d68fef",
+    "crates/cargo-barbican/tests/cli/policy_init.rs": "e3bd563126bc193b08543a131506a21f4855da40f5aa52d872b44e2d7196d6ae",
+    "reviewed-targets.toml": "a2c9d8d7945f7073d014ba593fbb1fc3a24d18ac9a340259a31fbb5850a48f9d",
+    "templates/README.md": "9e99eeea12ca1394717e3f0937f0f3ddfb552a569649b4c9726c8a7659455d6b",
+    "templates/barbican.toml": "3b051607c20158d51d211c44b6c68a33a351fbf4944b49891d153ff2009c2a6b",
+    "templates/ci/github-admission.yml": "0cf7e3d27f3437de87f5f4eb4c0819b2a622bbfe2c93f1ebeb147192a4462296",
+    "templates/deny.toml": "64cb5e1e60f0853511f94c934f75a75afa08bb8fb62e4e2dcf8e93b49ce218e7",
+    "templates/dependency-reviews/README.md": "085e93ec620d1561d132c0a9c6de730bdd25c4e08fae10c66be9f39510eebdbe",
+    "templates/dependency-reviews/record-template.md": "f8eb004912d5ac8a0ba7b8fc6ca016a2447bbcccf7ff9dd021c3ebf6c49a0c01",
+    "templates/hooks/pre-commit": "2ca8ffffe4b16c5fba2ac6703ea950583ec123fe578a60c66aaf95b2c9a5fb52",
+    "templates/reviewed-targets.toml": "910cae9f960f0eefa041e3345a100bd082efd5f79d95125fbd145850c3bdde54",
+    "vendor/rpgpie/BARBICAN-PROVENANCE.md": "86b1a51709a9f071cd897f94398ffd8c21a5839cb08affdc3f98b84fa77cbd90",
+    "vendor/rpgpie/Cargo.toml": "84d66a4165b94c3f539b57c93328850b71ac810902725c981a4222789ba11486"
+  },
+  "retained_evidence_directory": "/private/tmp/barbican-crypto-integration.B0rP6G",
+  "evidence_sha256": {
+    "canonical.log": "61d6fe38b797b93a463288cbab968c910a1e0ab649862f914e577d85e2b4b9d5",
+    "pre-execution-audit.json": "e19f2327fe1c2d9b4db6e45db7ccaa6fe04aae965fcb2d15b9eb66d7e71ceff2",
+    "licenses.log": "69f1f32b59505d0f2a0a93dcc95d3489ae9e285fa127b1f7f998e363ab60a46d",
+    "graph-parity.json": "a5a8a24b13ad22b162613c26a3c9a8dd37f81758e334f21347c8baf682a0e023",
+    "artifact-normalization.json": "b0215df47a33b5bb4fc40a8a71487dee3d3559364c6f79f0a9863dde4682df11"
+  }
+}

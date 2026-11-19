@@ -1,0 +1,261 @@
+{
+  "review_date": "2026-11-19",
+  "recorded_at_utc": "2026-11-19T01:23:49.593886+00:00",
+  "verdict": "cleared-for-existing-bounded-public-only-route",
+  "baseline_commit": "ee6e1aa7e89c82bee7e35689d79eb7e40f2c5d92",
+  "baseline_pgp": "0.21.0",
+  "candidate_pgp": "0.21.1",
+  "candidate_registry_checksum_sha256": "c7275cbf21850789239e1be05d9a887e6bba6aa8085a81be09ca021c8379baef",
+  "host": "aarch64-apple-darwin",
+  "compiler": [
+    "rustc 1.95.0 (59807616e 2026-04-14)",
+    "binary: rustc",
+    "commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860",
+    "commit-date: 2026-04-14",
+    "host: aarch64-apple-darwin",
+    "release: 1.95.0",
+    "LLVM version: 22.1.2"
+  ],
+  "candidate_graph": {
+    "packages": 225,
+    "only_changed_package": "pgp0.21.0\u21920.21.1",
+    "selected_features_identical": true,
+    "all_other_locked_package_facts_identical": true
+  },
+  "maintained_source_custody": {
+    "matched_retained_upstream_files": 29,
+    "vendor_changed": [
+      "vendor/rpgpie/Cargo.toml",
+      "vendor/rpgpie/BARBICAN-PROVENANCE.md"
+    ],
+    "source_receipt_sha256": "07d1d5f30aa30b3d6fdfdd5e90d7926c556dfcca33947de65eae8dc67debcad2",
+    "source_code_unchanged": true
+  },
+  "reconstruction": {
+    "baseline_commit": "ee6e1aa7e89c82bee7e35689d79eb7e40f2c5d92",
+    "reconstructed_candidate_files_identical": [
+      "Cargo.lock",
+      "crates/cargo-barbican/Cargo.toml",
+      "crates/cargo-barbican/src/toolchain_intake/verifier/tests.rs",
+      "docs/dependency-reviews/2026-11-04-phase0-product-integration.md",
+      "docs/dependency-reviews/README.md",
+      "docs/dependency-reviews/rpgpie-0.12.0-tree.sha256",
+      "reviewed-targets.toml",
+      "vendor/rpgpie/BARBICAN-PROVENANCE.md",
+      "vendor/rpgpie/Cargo.toml",
+      "docs/dependency-reviews/2026-11-19-rpgpie-pgp.patch"
+    ],
+    "source_guard": "PASS"
+  },
+  "qualification_artifacts_sha256": {
+    "2026-11-19-pgp-0.21.1-candidate.patch": "fb0ff5b03d03f89e964d554a36044a4be3906d1e43dc6b2b9e1b3fb99d3b462a",
+    "2026-11-19-pgp-0.21.1-armour.patch": "4f75776d3c3d574418620af62977775b3d701d9effe5e066da3bd2834fd2c84e"
+  },
+  "qualification": {
+    "pre_execution_audit": "PASS",
+    "licenses_bans_sources": "PASS",
+    "baseline_verifier": {
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    "candidate_verifier": {
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    "all_target_clippy_warnings_denied": "PASS",
+    "canonical_command": "sh scripts/verify.sh",
+    "canonical_exit_code": 0,
+    "canonical_test_summaries": [
+      {
+        "passed": 461,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 223,
+        "failed": 0,
+        "ignored": 2,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 12,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 2,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 11,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 383,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 14,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 7,
+        "failed": 0,
+        "ignored": 1,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      },
+      {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      }
+    ],
+    "canonical_totals": {
+      "passed": 1141,
+      "failed": 0,
+      "ignored": 19
+    },
+    "ignored_scope": "Existing ignored tests were not executed. No full upstream test-suite, new compiler, install/profile matrix or additional platform qualification is claimed."
+  },
+  "unchanged_advisory_exceptions": [
+    {
+      "id": "RUSTSEC-2023-0071",
+      "package": "rsa@0.9.10",
+      "review_by": "2026-12-04"
+    },
+    {
+      "id": "RUSTSEC-2026-0387",
+      "package": "crypto-bigint@0.5.5",
+      "review_by": "2026-12-04"
+    }
+  ],
+  "unused_api_probe": "An inherited opt-in library issue was reproduced independently on both versions and recorded privately; no product call enables that API. The failed probes are not counted as qualification passes.",
+  "logs_retained_under": "/private/tmp/barbican-pgp-review.mWpRes",
+  "log_sha256": {
+    "canonical.log": "9410f52932e5b329c70450190290f6221371e75db5bd6b7d55a2c91a0431948c",
+    "verifier.log": "f65caf0d6455822f45f2e82937890e2cbdcaa9ca401e615eb0faaf6206ffabce",
+    "baseline-verifier.log": "6ddd5627021615997555085f1d554a9abbc793b457579d73b774ff025aa9fbf9",
+    "pre-execution-audit.json": "ea8d09dac3860468d41ebd748e327b0883a8eaea367fc567ec7add3ffa08c957",
+    "licenses.log": "cf76a31d47ec7f9617ffad4b53056082f6f55098fadfa40dddeada60137a7b34",
+    "crc-probe.log": "35867b46c6bae2188af703c8c46ed55f6a6dd93fc6d95861ad1f9271efb05820",
+    "baseline-crc-probe.log": "c9bb83128a07a3881ce8b4b7848262e318876374fed20f766ab66cc4e90e2ad1"
+  },
+  "live_pins_changed": false,
+  "normal_installed_binary_changed": false,
+  "artifact_representation_normalization": {
+    "qualified_original_sha256": "5012115fce5e43740077ff50491f3a8a003dd4ef1bbc1744c81ca278a519f34e",
+    "checked_in_normalized_sha256": "fb0ff5b03d03f89e964d554a36044a4be3906d1e43dc6b2b9e1b3fb99d3b462a",
+    "normalization": "Nine lone-space blank context markers replaced by empty lines; no patch target byte changes.",
+    "byte_identical_reconstructed_files": {
+      "Cargo.lock": "9125cdc66e1d4a772cb3d08f7a56113061a1bf6e6327860a72eb7b7a5a6b789a",
+      "crates/cargo-barbican/Cargo.toml": "bb5f7d107818cae5b64fac9ed414a44bc47df5a18f3d51139c9b7533c21f19f2",
+      "docs/dependency-reviews/2026-11-04-phase0-product-integration.md": "6b2b39c71003741986f7237422abb2b072e05a71e262de1f976e3672a6a4ff16",
+      "docs/dependency-reviews/README.md": "b3962cb783f5bbbb7b45d0fbc82ec3be7efc09e978bac06d463ac706fd91a2a1",
+      "docs/dependency-reviews/rpgpie-0.12.0-tree.sha256": "07d1d5f30aa30b3d6fdfdd5e90d7926c556dfcca33947de65eae8dc67debcad2",
+      "reviewed-targets.toml": "a2c9d8d7945f7073d014ba593fbb1fc3a24d18ac9a340259a31fbb5850a48f9d",
+      "vendor/rpgpie/BARBICAN-PROVENANCE.md": "86b1a51709a9f071cd897f94398ffd8c21a5839cb08affdc3f98b84fa77cbd90",
+      "vendor/rpgpie/Cargo.toml": "84d66a4165b94c3f539b57c93328850b71ac810902725c981a4222789ba11486",
+      "docs/dependency-reviews/2026-11-19-rpgpie-pgp.patch": "39faeaa3f3b71701d7ccf1cd8dba5564ee8e4638da6f2de27053baffff66eb4b"
+    },
+    "source_guard": "PASS"
+  }
+}

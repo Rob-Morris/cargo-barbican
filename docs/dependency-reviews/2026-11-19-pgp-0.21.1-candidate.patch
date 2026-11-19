@@ -1,0 +1,461 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index ab4fe4d..a7f3c9b 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1240,9 +1240,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+ [[package]]
+ name = "pgp"
+-version = "0.21.0"
++version = "0.21.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ae70f4d9325a391db30d115d6191a7bb67cec856aa0bba131290f0c4e09a532a"
++checksum = "c7275cbf21850789239e1be05d9a887e6bba6aa8085a81be09ca021c8379baef"
+ dependencies = [
+  "aead",
+  "aes",
+diff --git a/crates/cargo-barbican/Cargo.toml b/crates/cargo-barbican/Cargo.toml
+index 9323639..eee3c26 100644
+--- a/crates/cargo-barbican/Cargo.toml
++++ b/crates/cargo-barbican/Cargo.toml
+@@ -21,7 +21,7 @@ path = "src/main.rs"
+
+ [dependencies]
+ barbican = { path = "../barbican" }
+-pgp = { version = "=0.21.0", default-features = false }
++pgp = { version = "=0.21.1", default-features = false }
+ rpgpie = { path = "../../vendor/rpgpie", version = "=0.12.0", default-features = false }
+ clap = { version = "=4.6.1", features = ["derive"] }
+ serde = { version = "=1.0.228", features = ["derive"] }
+diff --git a/docs/dependency-reviews/2026-11-04-phase0-product-integration.md b/docs/dependency-reviews/2026-11-04-phase0-product-integration.md
+index 5aa5789..6d23ddf 100644
+--- a/docs/dependency-reviews/2026-11-04-phase0-product-integration.md
++++ b/docs/dependency-reviews/2026-11-04-phase0-product-integration.md
+@@ -16,6 +16,14 @@ digest below describe the initial integration. The current review binds the
+ revised manifest and compiled sources to the updated inventory.
+ [18 November dependency review](2026-11-18-rpgpie-presentation-removal.md)
+
++### 19 November 2026 PGP qualification revision
++
++The separate [PGP 0.21.1 review](2026-11-19-pgp-0.21.1.md) scopes the new exact
++PGP identity and maintained manifest/source-custody revision. Verification source
++and existing advisory grants remain unchanged. The earlier source inventory
++digests below are historical; the current receipt and cumulative patch are
++bound by that review.
++
+ ## Classification
+
+ Elevated-risk: cryptographic parsing, compressed input, build scripts/proc
+diff --git a/docs/dependency-reviews/README.md b/docs/dependency-reviews/README.md
+index bdbbd2b..e09d625 100644
+--- a/docs/dependency-reviews/README.md
++++ b/docs/dependency-reviews/README.md
+@@ -105,6 +105,12 @@ explicit approval, current repository policy and independent installed
+ correspondence remain separate requirements; a dependency review grants no
+ consumer toolchain acceptance.
+
++## PGP public-verifier patch qualification
++
++- [PGP 0.21.1](2026-11-19-pgp-0.21.1.md),
++  [current cumulative maintained patch](2026-11-19-rpgpie-pgp.patch) and
++  [current maintained source inventory](rpgpie-0.12.0-tree.sha256).
++
+ ## Recent security remediation
+
+ - [WebPKI distrust remediation](2026-10-21-webpki-distrust-remediation.md) —
+diff --git a/docs/dependency-reviews/rpgpie-0.12.0-tree.sha256 b/docs/dependency-reviews/rpgpie-0.12.0-tree.sha256
+index 35f7506..c197a78 100644
+--- a/docs/dependency-reviews/rpgpie-0.12.0-tree.sha256
++++ b/docs/dependency-reviews/rpgpie-0.12.0-tree.sha256
+@@ -1,5 +1,5 @@
+-c06bf05e5c1fa65fa68530c8ad8fac240bd9bae8e6eb91e946358ba80b81431f  BARBICAN-PROVENANCE.md
+-39fad97aa90a22f572f85579382570c37b67b386438e1ab2cbcdc8fc7c9ab0fb  Cargo.toml
++86b1a51709a9f071cd897f94398ffd8c21a5839cb08affdc3f98b84fa77cbd90  BARBICAN-PROVENANCE.md
++84d66a4165b94c3f539b57c93328850b71ac810902725c981a4222789ba11486  Cargo.toml
+ 61137e28c73ecde61d4451b3dfece90073a3a53c3d7ac03eb7e18c28957ad0e9  LICENSES/Apache-2.0.txt
+ 6a573fb2f9082662978cf21fb153096df0a1981deaea7dbc10a11046fe005d9f  LICENSES/CC0-1.0.txt
+ 77319344b918772dcdbaad30d2c7e1b80726da1c491abbe791376a379b2dfca9  LICENSES/MIT.txt
+diff --git a/reviewed-targets.toml b/reviewed-targets.toml
+index ecc56ea..1fad21f 100644
+--- a/reviewed-targets.toml
++++ b/reviewed-targets.toml
+@@ -100,7 +100,7 @@ review_record = "docs/dependency-reviews/2026-11-04-phase0-product-integration.m
+ hex = "=0.4.3"
+ log = "=0.4.29"
+ lzma-rust2 = "=0.23.0"
+-pgp = "=0.21.0"
++pgp = "=0.21.1"
+ rand = "=0.8.8"
+ rand_core = "=0.6.4"
+ rsa = "=0.9.10"
+@@ -224,7 +224,7 @@ p521 = { version = "0.13.3", checksum_sha256 = "0fc9e2161f1f215afdfce23677034ae1
+ password-hash = { version = "0.5.0", checksum_sha256 = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166" }
+ pem-rfc7468 = { version = "0.7.0", checksum_sha256 = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412" }
+ percent-encoding = { version = "2.3.2", checksum_sha256 = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220" }
+-pgp = { version = "0.21.0", checksum_sha256 = "ae70f4d9325a391db30d115d6191a7bb67cec856aa0bba131290f0c4e09a532a" }
++pgp = { version = "0.21.1", checksum_sha256 = "c7275cbf21850789239e1be05d9a887e6bba6aa8085a81be09ca021c8379baef" }
+ pkcs1 = { version = "0.7.5", checksum_sha256 = "c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f" }
+ pkcs8 = { version = "0.10.2", checksum_sha256 = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7" }
+ polyval = { version = "0.6.2", checksum_sha256 = "9d1fe60d06143b2430aa532c94cfe9e29783047f06c0d7fd359a9a51b729fa25" }
+diff --git a/vendor/rpgpie/BARBICAN-PROVENANCE.md b/vendor/rpgpie/BARBICAN-PROVENANCE.md
+index 6501b3c..c4d6258 100644
+--- a/vendor/rpgpie/BARBICAN-PROVENANCE.md
++++ b/vendor/rpgpie/BARBICAN-PROVENANCE.md
+@@ -38,7 +38,10 @@ Neither active-binding selection nor the global clock is replaced.
+
+ Review and minimal patch: docs/dependency-reviews/2026-11-04-embedded-public-verifier.md
+ and docs/dependency-reviews/2026-11-18-rpgpie-presentation-removal.md.
+-The cumulative patch is docs/dependency-reviews/2026-11-18-rpgpie.patch (repository-relative).
++The 19 November 2026 qualification revision changes only the exact PGP dependency
++pin to 0.21.1; verification source and selected features are unchanged. Its review
++is docs/dependency-reviews/2026-11-19-pgp-0.21.1.md.
++The cumulative patch is docs/dependency-reviews/2026-11-19-rpgpie-pgp.patch (repository-relative).
+ Unmodified published 0.12.1 retains the expiry and cross-signature defects and is
+ not a remediation. Re-evaluate maintained upstream releases before rebasing this
+ source; regenerate the explicit patch/source receipt and rerun native controls.
+@@ -47,7 +50,7 @@ The patch uses zero context to keep its checked-in representation free of
+ trailing whitespace without altering unified-diff syntax. Verify the original
+ `.crate` archive SHA256 above, extract that exact archive into a disposable
+ directory, enter its `rpgpie-0.12.0` root, then run
+-`git apply --no-index --unidiff-zero /absolute/path/to/2026-11-18-rpgpie.patch`.
++`git apply --no-index --unidiff-zero /absolute/path/to/2026-11-19-rpgpie-pgp.patch`.
+ Do not apply it to another release or unverified source. The patch covers the
+ six changed upstream files; omitted package files and added provenance remain
+ described separately above and bound by the full maintained-tree inventory.
+diff --git a/vendor/rpgpie/Cargo.toml b/vendor/rpgpie/Cargo.toml
+index 159582c..6557699 100644
+--- a/vendor/rpgpie/Cargo.toml
++++ b/vendor/rpgpie/Cargo.toml
+@@ -39,7 +39,7 @@ version = "=0.4.3"
+ version = "=0.4.29"
+
+ [dependencies.pgp]
+-version = "=0.21.0"
++version = "=0.21.1"
+ default-features = false
+
+ [dependencies.rand]
+diff --git a/docs/dependency-reviews/2026-11-19-rpgpie-pgp.patch b/docs/dependency-reviews/2026-11-19-rpgpie-pgp.patch
+new file mode 100644
+index 0000000..b4d887d
+--- /dev/null
++++ b/docs/dependency-reviews/2026-11-19-rpgpie-pgp.patch
+@@ -0,0 +1,318 @@
++--- a/Cargo.toml
+++++ b/Cargo.toml
++@@ -14,0 +15 @@
+++publish = false
++@@ -28,5 +28,0 @@
++-[features]
++-cli = ["clap"]
++-pqc = ["pgp/pqc"]
++-wasm = ["pgp/wasm"]
++-
++@@ -33,0 +30,2 @@
+++test = false
+++doctest = false
++@@ -37,22 +34,0 @@
++-[[bin]]
++-name = "rpgp"
++-path = "src/bin/rpgp.rs"
++-required-features = ["cli"]
++-
++-[[test]]
++-name = "test_merge"
++-path = "tests/test_merge.rs"
++-
++-[[test]]
++-name = "test_validity"
++-path = "tests/test_validity.rs"
++-
++-[dependencies.chrono]
++-version = "0.4"
++-features = ["serde"]
++-
++-[dependencies.clap]
++-version = "4"
++-features = ["derive"]
++-optional = true
++-
++@@ -60 +36 @@
++-version = "0.4"
+++version = "=0.4.3"
++@@ -63 +39 @@
++-version = "0.4"
+++version = "=0.4.29"
++@@ -66 +42 @@
++-version = "0.21"
+++version = "=0.21.1"
++@@ -70 +46 @@
++-version = "0.8"
+++version = "=0.8.8"
++@@ -73 +49 @@
++-version = "0.6"
+++version = "=0.6.4"
++@@ -76,8 +52 @@
++-version = "0.9.7"
++-
++-[dependencies.serde]
++-version = "1.0"
++-features = ["derive"]
++-
++-[dependencies.serde_json]
++-version = "1.0"
+++version = "=0.9.10"
++@@ -86 +55 @@
++-version = "2"
+++version = "=2.0.18"
++@@ -89 +58 @@
++-version = "1"
+++version = "=1.8.2"
++@@ -91,5 +60,4 @@
++-[dev-dependencies.env_logger]
++-version = "0.11"
++-
++-[dev-dependencies.rstest]
++-version = "0.27"
+++[dev-dependencies.time]
+++version = "=0.3.47"
+++default-features = false
+++features = ["std", "parsing"]
++@@ -102,0 +71,3 @@
+++
+++[lints.rust]
+++unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("pqc"))'] }
++--- a/src/checked.rs
+++++ b/src/checked.rs
++@@ -394 +394 @@
++-            && expiration < reference
+++            && expiration <= reference
++@@ -621 +620,0 @@
++-    use chrono::DateTime;
++@@ -622,0 +622 @@
+++    use time::{OffsetDateTime, format_description::well_known::Rfc3339};
++@@ -634,0 +635,7 @@
+++    fn timestamp(at: &str) -> Timestamp {
+++        let parsed = OffsetDateTime::parse(at, &Rfc3339).expect("parse date");
+++        SystemTime::from(parsed)
+++            .try_into()
+++            .expect("time fits in u32")
+++    }
+++
++@@ -636,5 +643 @@
++-        let rfc3339 = DateTime::parse_from_rfc3339(at).expect("parse at");
++-
++-        let time: SystemTime = rfc3339.into();
++-        c.primary_expiration_time(time.try_into().expect("time fits in u32"))
++-            .expect("some")
+++        c.primary_expiration_time(timestamp(at)).expect("some")
++@@ -657,9 +660 @@
++-        assert!(
++-            !checked.revoked_at(
++-                SystemTime::from(
++-                    DateTime::parse_from_rfc3339("2025-01-01T23:59:00Z").expect("parse date")
++-                )
++-                .try_into()
++-                .expect("time fits in u32"),
++-            )
++-        );
+++        assert!(!checked.revoked_at(timestamp("2025-01-01T23:59:00Z")));
++@@ -670,7 +665 @@
++-                .primary_valid_at(
++-                    SystemTime::from(
++-                        DateTime::parse_from_rfc3339("2020-01-01T23:59:00Z").expect("parse date")
++-                    )
++-                    .try_into()
++-                    .expect("time fits in u32"),
++-                )
+++                .primary_valid_at(timestamp("2020-01-01T23:59:00Z"))
++@@ -681,8 +670 @@
++-        assert_eq!(
++-            exp,
++-            SystemTime::from(
++-                DateTime::parse_from_rfc3339("2020-08-03T13:32:24Z").expect("parse date")
++-            )
++-            .try_into()
++-            .expect("time fits in u32"),
++-        );
+++        assert_eq!(exp, timestamp("2020-08-03T13:32:24Z"));
++@@ -691,8 +673 @@
++-        assert_eq!(
++-            exp,
++-            SystemTime::from(
++-                DateTime::parse_from_rfc3339("2022-07-06T17:06:34Z").expect("parse date")
++-            )
++-            .try_into()
++-            .expect("time fits in u32"),
++-        );
+++        assert_eq!(exp, timestamp("2022-07-06T17:06:34Z"));
++@@ -701,8 +676 @@
++-        assert_eq!(
++-            exp,
++-            SystemTime::from(
++-                DateTime::parse_from_rfc3339("2024-06-07T19:57:03Z").expect("parse date")
++-            )
++-            .try_into()
++-            .expect("time fits in u32"),
++-        );
+++        assert_eq!(exp, timestamp("2024-06-07T19:57:03Z"));
++@@ -713,7 +681 @@
++-                .primary_valid_at(
++-                    SystemTime::from(
++-                        DateTime::parse_from_rfc3339("2024-07-01T23:59:00Z").expect("parse date")
++-                    )
++-                    .try_into()
++-                    .expect("time fits in u32"),
++-                )
+++                .primary_valid_at(timestamp("2024-07-01T23:59:00Z"))
++@@ -733,7 +695,2 @@
++-        let sig = checked.valid_signing_capable_component_keys_at(
++-            SystemTime::from(
++-                DateTime::parse_from_rfc3339("2022-07-01T23:59:00Z").expect("parse date"),
++-            )
++-            .try_into()
++-            .expect("time fits in u32"),
++-        );
+++        let sig =
+++            checked.valid_signing_capable_component_keys_at(timestamp("2022-07-01T23:59:00Z"));
++@@ -742,7 +699,2 @@
++-        let sig = checked.valid_signing_capable_component_keys_at(
++-            SystemTime::from(
++-                DateTime::parse_from_rfc3339("2024-07-01T23:59:00Z").expect("parse date"),
++-            )
++-            .try_into()
++-            .expect("time fits in u32"),
++-        );
+++        let sig =
+++            checked.valid_signing_capable_component_keys_at(timestamp("2024-07-01T23:59:00Z"));
++--- a/src/key.rs
+++++ b/src/key.rs
++@@ -656 +656 @@
++-            && (spsk.created_at().as_secs() + key_exp.as_secs() < reference.as_secs())
+++            && (u64::from(spsk.created_at().as_secs()) + u64::from(key_exp.as_secs()) <= u64::from(reference.as_secs()))
++--- a/src/lib.rs
+++++ b/src/lib.rs
++@@ -39 +38,0 @@
++-pub mod model;
++--- a/src/model/summary.rs
+++++ b/src/model/summary.rs
++@@ -162,46 +161,0 @@
++-
++-#[cfg(test)]
++-#[allow(clippy::expect_used)]
++-mod tests {
++-    use std::fs::File;
++-
++-    use rstest::rstest;
++-
++-    use crate::certificate::{Certificate, Checked};
++-
++-    fn load_checked(file: &str) -> Checked {
++-        let certs = Certificate::load(&mut File::open(file).expect("cert open")).expect("load");
++-        assert_eq!(certs.len(), 1);
++-
++-        Checked::from(certs.into_iter().next().expect("asserted"))
++-    }
++-    #[rstest]
++-    #[case("tests/certs/hal_v2_1992.cert", "tests/certs/hal_v2_1992.txt")]
++-    #[case("tests/certs/prz_v4_1997.cert", "tests/certs/prz_v4_1997.txt")]
++-    #[case("tests/certs/dkg_v4_2007.cert", "tests/certs/dkg_v4_2007.txt")]
++-    #[case("tests/certs/alice_v6.cert", "tests/certs/alice_v6.txt")]
++-    fn status_summary_display(#[case] cert: &str, #[case] text: &str) {
++-        let checked = load_checked(cert);
++-        let summary = crate::model::status_summary(&checked);
++-
++-        let text_out = format!("{}", &summary);
++-        let nominal_text = std::fs::read_to_string(text).expect("read text");
++-
++-        assert_eq!(text_out, nominal_text);
++-    }
++-
++-    #[rstest]
++-    #[case("tests/certs/hal_v2_1992.cert", "tests/certs/hal_v2_1992.json")]
++-    #[case("tests/certs/prz_v4_1997.cert", "tests/certs/prz_v4_1997.json")]
++-    #[case("tests/certs/dkg_v4_2007.cert", "tests/certs/dkg_v4_2007.json")]
++-    #[case("tests/certs/alice_v6.cert", "tests/certs/alice_v6.json")]
++-    fn status_summary_json(#[case] cert: &str, #[case] json: &str) {
++-        let checked = load_checked(cert);
++-        let summary = crate::model::status_summary(&checked);
++-
++-        let json_out = serde_json::to_string_pretty(&summary).expect("json");
++-        let nominal_json = std::fs::read_to_string(json).expect("read json");
++-
++-        assert_eq!(format!("{json_out}\n"), nominal_json);
++-    }
++-}
++--- a/src/util.rs
+++++ b/src/util.rs
++@@ -6 +5,0 @@
++-    crypto::ecc_curve::ECCCurve,
++@@ -8 +7 @@
++-    types::{EcdsaPublicParams, EddsaLegacyPublicParams, KeyDetails, Password, PublicParams},
+++    types::{KeyDetails, Password},
++@@ -14 +12,0 @@
++-    certificate::Certificate,
++@@ -16 +13,0 @@
++-    model::info::{print::print_cert_info, transform::cert_to_info},
++@@ -24,64 +20,0 @@
++-}
++-
++-/// Produce a human-readable name for the public key algorithm in a PublicParams
++-pub(crate) fn algo_name(pp: &PublicParams) -> String {
++-    match pp {
++-        PublicParams::RSA(key) => {
++-            use rsa::traits::PublicKeyParts;
++-            format!("RSA({})", key.key.n().to_bytes_be().len() * 8)
++-        }
++-        PublicParams::DSA(key) => {
++-            format!("DSA({})", key.key.y().to_bytes_be().len() * 8)
++-        }
++-        PublicParams::Elgamal(_) => "Elgamal".to_string(),
++-
++-        PublicParams::ECDH(params) => {
++-            format!("ECDH/{}", params.curve().name())
++-        }
++-
++-        PublicParams::ECDSA(params) => {
++-            let curve = match params {
++-                EcdsaPublicParams::P256 { .. } => ECCCurve::P256,
++-                EcdsaPublicParams::P384 { .. } => ECCCurve::P384,
++-                EcdsaPublicParams::P521 { .. } => ECCCurve::P521,
++-                EcdsaPublicParams::Secp256k1 { .. } => ECCCurve::Secp256k1,
++-                EcdsaPublicParams::Unsupported { curve, .. } => curve.clone(),
++-            };
++-
++-            format!("ECDSA/{}", curve.name())
++-        }
++-
++-        PublicParams::EdDSALegacy(EddsaLegacyPublicParams::Ed25519 { .. }) => {
++-            "EdDSA/Curve25519".to_string()
++-        }
++-
++-        PublicParams::Ed25519(_) => "Ed25519".to_string(),
++-        PublicParams::X25519(_) => "X25519".to_string(),
++-        PublicParams::Ed448(_) => "Ed448".to_string(),
++-        PublicParams::X448(_) => "X448".to_string(),
++-
++-        #[cfg(feature = "pqc")]
++-        PublicParams::MlKem768X25519(_) => "ML-KEM-768+X25519".to_string(),
++-        #[cfg(feature = "pqc")]
++-        PublicParams::MlKem1024X448(_) => "ML-KEM-1024+X448".to_string(),
++-        #[cfg(feature = "pqc")]
++-        PublicParams::MlDsa65Ed25519(_) => "ML-DSA-65+Ed25519".to_string(),
++-        #[cfg(feature = "pqc")]
++-        PublicParams::MlDsa87Ed448(_) => "ML-DSA-87+Ed448".to_string(),
++-        #[cfg(feature = "pqc")]
++-        PublicParams::SlhDsaShake128s(_) => "SLH-DSA-SHAKE-128s".to_string(),
++-        #[cfg(feature = "pqc")]
++-        PublicParams::SlhDsaShake128f(_) => "SLH-DSA-SHAKE-128f".to_string(),
++-        #[cfg(feature = "pqc")]
++-        PublicParams::SlhDsaShake256s(_) => "SLH-DSA-SHAKE-256s".to_string(),
++-
++-        _ => format!("{pp:?}"),
++-    }
++-}
++-
++-/// Print human-readable information about a Certificate
++-///
++-/// FIXME: This will probably not remain in the public API in this form.
++-pub fn print_cert(cert: &Certificate, verbose: bool, ordered: bool) {
++-    let ci = cert_to_info(cert, ordered);
++-    print_cert_info(&ci, verbose, ordered);

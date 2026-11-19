@@ -100,7 +100,7 @@ review_record = "docs/dependency-reviews/2026-11-04-phase0-product-integration.m
 hex = "=0.4.3"
 log = "=0.4.29"
 lzma-rust2 = "=0.23.0"
-pgp = "=0.21.0"
+pgp = "=0.21.1"
 rand = "=0.8.8"
 rand_core = "=0.6.4"
 rsa = "=0.9.10"
@@ -224,7 +224,7 @@ p521 = { version = "0.13.3", checksum_sha256 = "0fc9e2161f1f215afdfce23677034ae1
 password-hash = { version = "0.5.0", checksum_sha256 = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166" }
 pem-rfc7468 = { version = "0.7.0", checksum_sha256 = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412" }
 percent-encoding = { version = "2.3.2", checksum_sha256 = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220" }
-pgp = { version = "0.21.0", checksum_sha256 = "ae70f4d9325a391db30d115d6191a7bb67cec856aa0bba131290f0c4e09a532a" }
+pgp = { version = "0.21.1", checksum_sha256 = "c7275cbf21850789239e1be05d9a887e6bba6aa8085a81be09ca021c8379baef" }
 pkcs1 = { version = "0.7.5", checksum_sha256 = "c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f" }
 pkcs8 = { version = "0.10.2", checksum_sha256 = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7" }
 polyval = { version = "0.6.2", checksum_sha256 = "9d1fe60d06143b2430aa532c94cfe9e29783047f06c0d7fd359a9a51b729fa25" }

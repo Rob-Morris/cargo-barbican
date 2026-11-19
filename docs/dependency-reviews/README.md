@@ -70,8 +70,15 @@ activate an entry in `reviewed-targets.toml`.
 - [Actual product integration and source custody](2026-11-04-phase0-product-integration.md),
   [product graph](2026-11-04-phase0-product-graph.json),
   and [4 November maintained source patch](2026-11-04-rpgpie.patch).
-- [18 November maintained verifier revision](2026-11-18-rpgpie-presentation-removal.md),
-  [current cumulative source patch](2026-11-18-rpgpie.patch) and
+- [18 November maintained verifier revision](2026-11-18-rpgpie-presentation-removal.md)
+  and [18 November cumulative source patch](2026-11-18-rpgpie.patch).
+- [PGP 0.21.1 source review and isolated native qualification](2026-11-19-pgp-0.21.1.md),
+  [qualification receipt](2026-11-19-pgp-0.21.1-qualification.json),
+  [candidate reconstruction patch](2026-11-19-pgp-0.21.1-candidate.patch) and
+  [additional armour-boundary test](2026-11-19-pgp-0.21.1-armour.patch).
+- [19 November dependency update decision](2026-11-19-crypto-update-decision.md),
+  [actual v0.44.1 integration receipt](2026-11-19-crypto-update-integration.json),
+  [current cumulative maintained patch](2026-11-19-rpgpie-pgp.patch) and
   [current source inventory](rpgpie-0.12.0-tree.sha256).
 
 These records qualify bounded foundation work; they do not enable trust,
