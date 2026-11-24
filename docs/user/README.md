@@ -16,3 +16,4 @@ hardening.
 - [CI](ci.md) — legacy CI, protected-controller admission bootstrap and pre-commit hooks
 - [Operations](operations.md) — failing audits, lockfile recovery, routine updates and family lifecycle
 - [Hardening](hardening.md) — making the barbican gate hard to bypass
+- [Verified release installation](verified-releases.md) — shared bootstrap primitive, prerequisites and trust limits; public release rollout remains gated.

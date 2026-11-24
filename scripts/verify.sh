@@ -71,6 +71,7 @@ if [ "$MODE" != skip ]; then
   sh scripts/tests/check_vendored_source_test.sh
   sh scripts/tests/check_commit_msg_test.sh
   sh scripts/tests/check_release_tag_test.sh
+  python3 scripts/tests/install_barbican_test.py
   # verify_branch_guard_test.sh drives this very script (including its
   # off-main `--vanilla` success path), so it sets this sentinel on its own
   # nested invocations to stop them re-entering this block and recursing.

@@ -1,0 +1,37 @@
+name: Set up verified Barbican
+description: Install an exact attested Barbican release without compiling it
+inputs:
+  version:
+    description: Exact stable release, N.N.N (required; no floating default)
+    required: true
+outputs:
+  executable:
+    description: Exact verified cargo-barbican executable
+    value: ${{ steps.install.outputs.executable }}
+  bin-dir:
+    description: Directory added to PATH for subsequent steps
+    value: ${{ steps.install.outputs.bin-dir }}
+runs:
+  using: composite
+  steps:
+    - name: Verify and install Barbican
+      id: install
+      shell: bash
+      env:
+        BARBICAN_VERSION: ${{ inputs.version }}
+        BARBICAN_ACTION_PATH: ${{ github.action_path }}
+        BARBICAN_SERVER_URL: ${{ github.server_url }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        if [ "$BARBICAN_SERVER_URL" != https://github.com ] || [ "$RUNNER_ENVIRONMENT" != github-hosted ]; then
+          echo 'Barbican setup supports GitHub.com hosted runners only' >&2
+          exit 2
+        fi
+        umask 077
+        root=$(mktemp -d "$RUNNER_TEMP/barbican-setup.XXXXXXXX")
+        trap 'status=$?; if [ "$status" -ne 0 ]; then rm -rf "$root"; fi' EXIT
+        sh "$BARBICAN_ACTION_PATH/scripts/install-barbican.sh" \
+          --version "$BARBICAN_VERSION" --install-dir "$root/install"
+        printf 'executable=%s/install/bin/cargo-barbican\nbin-dir=%s/install/bin\n' "$root" "$root" >> "$GITHUB_OUTPUT"
+        printf '%s/install/bin\n' "$root" >> "$GITHUB_PATH"

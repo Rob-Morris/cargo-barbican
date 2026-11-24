@@ -1,0 +1,850 @@
+[
+  {
+    "path": "cli-paths.json",
+    "sha256": "e3e8200b7ff7869e9eb3577f6db2558b574d96816ff3feded05b6da303c7deed"
+  },
+  {
+    "path": "archive-receipt.json",
+    "sha256": "5c40a997691f5701fbb6c787f5b69c76f80876194a226c006b52290a7806e3db"
+  },
+  {
+    "path": "attest/README.md",
+    "sha256": "c513a2a22ce3fa07b67216d36db2c1552be51f7391fe81266f6f1a4cee8da5d6"
+  },
+  {
+    "path": "attest/package-lock.json",
+    "sha256": "9ce7a0d9a26390198735ee66a7d935ee7d871e1a7081e360856474d0d296fcf8"
+  },
+  {
+    "path": "attest/package.json",
+    "sha256": "221767f43cc74afbd71dc9531af4e8e7494d94f3530acfbd749e09105c7d2c8d"
+  },
+  {
+    "path": "attest/action.yml",
+    "sha256": "9e4a1b808433f9ec87120b534e11fc35469a039bdbdc62b019441444c9ad0449"
+  },
+  {
+    "path": "download/README.md",
+    "sha256": "3c2ed3a17c8d87820ba42981b9703be715a8ce99984a1926d4e144bc0afffb41"
+  },
+  {
+    "path": "download/package-lock.json",
+    "sha256": "0c3b588cf7742b8c6fd86cd11dfb4a91b73140845dbd7bd9c63ed0b8e2d87f6a"
+  },
+  {
+    "path": "download/package.json",
+    "sha256": "3cb12ab5f8f76d115f8c85469a155d56b79610ddd5faa945697c16098ec83a6e"
+  },
+  {
+    "path": "download/action.yml",
+    "sha256": "e98559b7a31ba31be4709f20d22102dc2737fa630f69a339eb89981151e505fe"
+  },
+  {
+    "path": "upload/README.md",
+    "sha256": "82e3d7226dabea938b107b93e015aa816150d6894fff631064aa2884c26771f7"
+  },
+  {
+    "path": "upload/package-lock.json",
+    "sha256": "1d91c8ae4f454eb20c364e8c6498258c467daf11d48b703d007a7010b3c85415"
+  },
+  {
+    "path": "upload/package.json",
+    "sha256": "6006e753abafb2519b884767c8a67abff6c0c6636e6c83eae1081501fbcda56e"
+  },
+  {
+    "path": "upload/action.yml",
+    "sha256": "c5979822866a72362e609844b6ebe77d4b7e759af68cc1c2c425dcf51481fab4"
+  },
+  {
+    "path": "attest/dist/index.js",
+    "sha256": "3ca89e06ffcb09ff97e9b1633575865cad0b23310ac82176d72990d7554836b5"
+  },
+  {
+    "path": "attest/dist/50.index.js",
+    "sha256": "45195f12661aeef8aa7ffabfd780d02fffd45c2c37102ff2ecf217a56d6d4f92"
+  },
+  {
+    "path": "attest/dist/package.json",
+    "sha256": "3ca9d4afd21425087cf31893b8f9f63c81b0b8408db5e343ca76e5f8aa26ab9a"
+  },
+  {
+    "path": "attest/dist/184.index.js",
+    "sha256": "a55876b6637888e84e212b9c7e3ca7b7f8d8d8a36e1eb1cc01ae93c276ad6bc9"
+  },
+  {
+    "path": "attest/dist/606.index.js",
+    "sha256": "629225cc3e937e22ce6b90c21f1d938d1be0716257446593555696bf1d01523e"
+  },
+  {
+    "path": "attest/src/endpoints.ts",
+    "sha256": "7aa224bf2a11a5d8cb8fb5f9a6dd75824a7ca97a6ea6af05256fd9ea05d41393"
+  },
+  {
+    "path": "attest/src/detect.ts",
+    "sha256": "5a1c8c9130f1870d940606ac25ad4970837628283894e47fcab96cf2c49f4ed0"
+  },
+  {
+    "path": "attest/src/main.ts",
+    "sha256": "f7e0793174f84f5908891c6e60ea399af6276613a3de428e1b73e56537c8f25e"
+  },
+  {
+    "path": "attest/src/provenance.ts",
+    "sha256": "14a74a43c75b3c99aaf55e27f0fefa18ef6ec626f0117a1d7d33bc04840bd58f"
+  },
+  {
+    "path": "attest/src/attest.ts",
+    "sha256": "a7887ac9589f922fe99010c3110891ed1ce46490ddf8f9b0d7565681eca8a197"
+  },
+  {
+    "path": "attest/src/artifacts.ts",
+    "sha256": "c2eab37c7500898dbc23c6b71b12cc990627d2a0d6f1987bbd4d1a5fb62af51b"
+  },
+  {
+    "path": "attest/src/predicate.ts",
+    "sha256": "cedc5ea33030b7dec1bdf32e1094dd38cd404c896c5c1607ba0385a0565feac2"
+  },
+  {
+    "path": "attest/src/sbom.ts",
+    "sha256": "266f37693d86bfee74d0008944c154aeea62b59002eac18e009e48892bd038b3"
+  },
+  {
+    "path": "attest/src/subject.ts",
+    "sha256": "14103f1e219f26a2e920a1b62d94d8159e709aeefc1f6344f9dfab883fc3ebfd"
+  },
+  {
+    "path": "attest/src/index.ts",
+    "sha256": "93693dd008be5cee008d560a40833dcf7b836d8fae261902307c0d73714d5391"
+  },
+  {
+    "path": "attest/src/style.ts",
+    "sha256": "1754d29e5a542a1c94d037ab73e08dcbfde1e03a58bedbc270644c338241c973"
+  },
+  {
+    "path": "cli/api/http_client.go",
+    "sha256": "ef0b2eb0b799119a8133473389a269e460270e54ff0f34f2343674bbcb9e1d99"
+  },
+  {
+    "path": "cli/api/queries_pr.go",
+    "sha256": "ab6e811fbc149fde43abc28792e4acddfd441810fcb6dbbdb531cfdd578eb2f6"
+  },
+  {
+    "path": "cli/api/query_builder.go",
+    "sha256": "ec50131f1a5954b8f3f81ccdd33bb223209e1dd170ecbc7a4a478ae4e1be3ecb"
+  },
+  {
+    "path": "cli/api/queries_repo_test.go",
+    "sha256": "b90551773c2dcf9bcc72bad79a2014fdfab734740002213df417cb95ef16a94e"
+  },
+  {
+    "path": "cli/api/export_pr_test.go",
+    "sha256": "c94c4ea8fb5cb33605a659c12cdc117dc14dba9daa736d4184d9f94574c3bb73"
+  },
+  {
+    "path": "cli/api/queries_comments.go",
+    "sha256": "ce7af93c0bba495a741cf3e6b60ca0251b6f5b8c965b36665d1289b26beb8f73"
+  },
+  {
+    "path": "cli/api/reaction_groups.go",
+    "sha256": "d25665e21dd40020d81809bc5b95932a1aba6e1b944115f6562f2f2fa0c74aab"
+  },
+  {
+    "path": "cli/api/pull_request_test.go",
+    "sha256": "797c28d3affd0ead29ed573e5f296a7f3d695a95b12d41b130bf9f7716bdd01e"
+  },
+  {
+    "path": "cli/api/request_test.go",
+    "sha256": "a15fcd3aefe184f508fb0fce75ba70e807258c37c47e0c5b2bebe7818659678c"
+  },
+  {
+    "path": "cli/api/queries_issue.go",
+    "sha256": "ddea8a3b7f133bdc731aee46af3836e1fc089b19e837b639182fc7da5bb2c4b5"
+  },
+  {
+    "path": "cli/api/queries_projects_v2.go",
+    "sha256": "0cb46bbbd8043fca0849cdd4d9beb9e3a86322096b3c6bedcbbdecef9d366291"
+  },
+  {
+    "path": "cli/api/client.go",
+    "sha256": "3da983db4bdb81b14e69aa6ce806df4ddaf90d1d73cf178afd8c848947d8f649"
+  },
+  {
+    "path": "cli/api/queries_user.go",
+    "sha256": "2fd36987dfb9b8be9b7692c0886082682e3ad3f130f472fea1f5e781e9acb638"
+  },
+  {
+    "path": "cli/api/export_repo.go",
+    "sha256": "77ceff69aa3370f75aaf93d173d3680b5382211bec010d7f74018eee0fb7136a"
+  },
+  {
+    "path": "cli/api/query_builder_test.go",
+    "sha256": "389ce6822d2bd702c9e564d511888b3a04adbae819d536b5c45ff794cb309125"
+  },
+  {
+    "path": "cli/api/queries_branch_issue_reference.go",
+    "sha256": "b58edeef76a1198a777e17584136bac82675a9a986c18bf7c435c14d5ea2df8e"
+  },
+  {
+    "path": "cli/api/queries_issue_test.go",
+    "sha256": "02785f788f2767453048a7b6b92dfb5df42f640e0000e1fbc50a1846a21cdc07"
+  },
+  {
+    "path": "cli/api/queries_pr_test.go",
+    "sha256": "0f1312e1b2e3d1d69de5567d8229bb233b21d3b9974beed174e94e15f7a91891"
+  },
+  {
+    "path": "cli/api/queries_org.go",
+    "sha256": "3405d4b5973bc07feeddabca07d53e8a5c1176257d9a27f1fc01cfd45cc14426"
+  },
+  {
+    "path": "cli/api/queries_repo.go",
+    "sha256": "e9dde125f7dd407984c1ff8efcee8c6db2aacd4047c0f88f41c333f58a709bfb"
+  },
+  {
+    "path": "cli/api/http_client_test.go",
+    "sha256": "b13c813db5a24c06062e8d8bd494552a24499d5a003fd4740f33aa32479e0b40"
+  },
+  {
+    "path": "cli/api/reaction_groups_test.go",
+    "sha256": "32be13acd29fe725bcce9e6bfcfc5b9ef93f3f675ad7408ba8b0cd34aed4c976"
+  },
+  {
+    "path": "cli/api/queries_pr_review.go",
+    "sha256": "f672c780a5e32cd89d242799ac818cbea5ce49d73903e4062fdcfff6d486ad84"
+  },
+  {
+    "path": "cli/api/client_test.go",
+    "sha256": "a93a68b64ec68a4ff2a99b6d428f351b5ba4f9e395f2a06bcc9ad9303199db5b"
+  },
+  {
+    "path": "cli/api/queries_projects_v2_test.go",
+    "sha256": "64356b37fa1385aa28a1ca542dc9cbb86d9dd3b7a0e7e7395909c306ec613a5e"
+  },
+  {
+    "path": "cli/api/export_pr.go",
+    "sha256": "51297ed2628c8811c9c709ec402edcd9039d07e6289f50bc76ca1933a48d8c9f"
+  },
+  {
+    "path": "cli/internal/config/migrate_test.go",
+    "sha256": "f71d0912dc6676273dc7eda36606ff54ced04ff9797eb27e34fd4fcee1145e21"
+  },
+  {
+    "path": "cli/internal/config/config.go",
+    "sha256": "53f91aaa2020c45d5f6a25e8231d79d2193763cb7fbaded7a7eb3d637ca3b799"
+  },
+  {
+    "path": "cli/internal/config/test.go",
+    "sha256": "8a4561c725040ca3f05042b2b63c38856b9c0dbbaa2f70c52c5fb98a509d7953"
+  },
+  {
+    "path": "cli/internal/config/auth_config_test.go",
+    "sha256": "7e4167071aa1f4e96cfad9aaca38da8a07674b9d4e3bb32bbd5d2ca58168e32f"
+  },
+  {
+    "path": "cli/internal/config/config_test.go",
+    "sha256": "50b21444957aa9c7dde606e27e77e3942e1c629e079d049a3979595c57258ce1"
+  },
+  {
+    "path": "cli/internal/config/migration/multi_account_test.go",
+    "sha256": "703030d7cdc19b55ef004ff8d89843dd31c0580567221d1116967fe82233ea9e"
+  },
+  {
+    "path": "cli/internal/config/migration/multi_account.go",
+    "sha256": "b0563297aec401db9b75b81165bbafa8f2e92ea96217362681f0d46137e31bf7"
+  },
+  {
+    "path": "cli/pkg/cmdutil/legacy.go",
+    "sha256": "707e5e90c2a5434fbde547d21bcf88aa6cf8b5decafeb0336e510c94379c2ace"
+  },
+  {
+    "path": "cli/pkg/cmdutil/telemetry_test.go",
+    "sha256": "97efb8d89bc3da9499eec68785e95c223904bcae5c4b8cd4e86e86aa776aa18c"
+  },
+  {
+    "path": "cli/pkg/cmdutil/cmdgroup.go",
+    "sha256": "21934c70209d17ff5b7071b0b1e8d2a198b8b5e63862cbeac675df88e9f07093"
+  },
+  {
+    "path": "cli/pkg/cmdutil/auth_check_test.go",
+    "sha256": "f02499f0593d4ba862ca0f418eb98cba2ed2357a9f96daae1a78702c509a9b96"
+  },
+  {
+    "path": "cli/pkg/cmdutil/json_flags.go",
+    "sha256": "f20742e73bc5d98c98f5f34e1fb6a9dc4fe3efe7fb84da8e4ae9e71ccd755700"
+  },
+  {
+    "path": "cli/pkg/cmdutil/factory.go",
+    "sha256": "c69e91707242dc5fe5ebee19a4b6116dcc81e94d48087aa3a38c469638ad4eb2"
+  },
+  {
+    "path": "cli/pkg/cmdutil/json_flags_test.go",
+    "sha256": "bc29a4121f11281f15440daf5a7e29d0e22f807b9f7ea91144a94aa61a27645f"
+  },
+  {
+    "path": "cli/pkg/cmdutil/telemetry.go",
+    "sha256": "89d38b7bc6f7aa67d71f8f736cf8a9fecb24a51121ee172967bc925880860a29"
+  },
+  {
+    "path": "cli/pkg/cmdutil/repo_override_test.go",
+    "sha256": "50675d07595a8c26a12c2d319f2ea4157162004747018c6488feb51c81441999"
+  },
+  {
+    "path": "cli/pkg/cmdutil/flags.go",
+    "sha256": "103a5c069a262740edd3a317eb6a38fc2eb73e5dbf1af10ce3bf320eb59d0a41"
+  },
+  {
+    "path": "cli/pkg/cmdutil/args_test.go",
+    "sha256": "6caec6567ec5a63f361965b1c123b14d261cb8bcb3a3fddce855f21bde4174f2"
+  },
+  {
+    "path": "cli/pkg/cmdutil/args.go",
+    "sha256": "9f0c8e7c49ffc7f82c6108c2f4926d0b32cf14b0ee27be1d0e2a7beef2cc3707"
+  },
+  {
+    "path": "cli/pkg/cmdutil/file_input.go",
+    "sha256": "94076f6234180f85f2a555a5733e024146ea2c0cac54af19c86c72b015252828"
+  },
+  {
+    "path": "cli/pkg/cmdutil/repo_override.go",
+    "sha256": "0d58ce07ca3fe69cc499d135ac0def4ef6e453ae66ba8873d7f99ee43d0b53b2"
+  },
+  {
+    "path": "cli/pkg/cmdutil/auth_check.go",
+    "sha256": "1057a029da12418fac8b6b6a6142965cf8eb94294381e5e071d9a49ad2d9ced8"
+  },
+  {
+    "path": "cli/pkg/cmdutil/errors.go",
+    "sha256": "2da25bbcf0e8466a2173807f12a83e7b83ab98fbc6d6920160cbb7cfd7de6b01"
+  },
+  {
+    "path": "cli/pkg/cmd/release/release.go",
+    "sha256": "7950594586825d476d29759033f98b7f0abe808e4b8d541c83974f3b958930cc"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/attestation.go",
+    "sha256": "0ba19a18c2d54a43494196e1e4257f1723b6013dd41b8bea7381e08070176a7c"
+  },
+  {
+    "path": "cli/pkg/cmd/root/official_extension_stub_test.go",
+    "sha256": "6b4850f068fbde7a1264b319a017465aac9b8f22d50dea44796ad7787fcc491d"
+  },
+  {
+    "path": "cli/pkg/cmd/root/alias.go",
+    "sha256": "4381cf1b6e2d6abbeaffeeff91dcd536ca0f0b5f51e92984f83913f2addf4f3a"
+  },
+  {
+    "path": "cli/pkg/cmd/root/help_topic_test.go",
+    "sha256": "00f37d623932537d74e37231cce473d1f524311f48e50e2e0f7eb2f38739202f"
+  },
+  {
+    "path": "cli/pkg/cmd/root/extension_test.go",
+    "sha256": "05fe3180789e9aaee7821edefb7e79299bb588a2cc44c237cb276973f7b42958"
+  },
+  {
+    "path": "cli/pkg/cmd/root/alias_test.go",
+    "sha256": "5bbca093323a84f87a7eb61e3e5a54b9714a1353fabc98d9dba9318770ddd4e7"
+  },
+  {
+    "path": "cli/pkg/cmd/root/extension.go",
+    "sha256": "86880876d9e7550f4618a306b4bb89885e0a6fab585de2e680e8875b47d78f37"
+  },
+  {
+    "path": "cli/pkg/cmd/root/extension_registration_test.go",
+    "sha256": "f523159051102ea83d3d66692925afa8524c8c4a08498ddaabede5b1df283983"
+  },
+  {
+    "path": "cli/pkg/cmd/root/help_test.go",
+    "sha256": "6d6c9a7f1f5fb8ba509cdbcefb17f50e113bd2ea5bfdb2fae20481d9a9c72c25"
+  },
+  {
+    "path": "cli/pkg/cmd/root/official_extension_stub.go",
+    "sha256": "f5413ac83c743f27eda3b90079709d2708436c45b0c7123913a81054364dfcaa"
+  },
+  {
+    "path": "cli/pkg/cmd/root/help_topic.go",
+    "sha256": "b0ad5521ab331a5c5a68202a54e5969b326a52d5daca4908b4a359fd494a3b36"
+  },
+  {
+    "path": "cli/pkg/cmd/root/help_reference.go",
+    "sha256": "cc62ae5f58266e17b275087de05c871b807fca838ca5d3e40dcbdd66565f0d2e"
+  },
+  {
+    "path": "cli/pkg/cmd/root/help.go",
+    "sha256": "fb65e557c0bfd2d2c4544e8591064619c92b44ef97cb16325143f7d91a95b0de"
+  },
+  {
+    "path": "cli/pkg/cmd/root/root.go",
+    "sha256": "6e4b718c0addb266db0caf294026f0785dfc3dcb1f323939e4c75630dd481d5a"
+  },
+  {
+    "path": "cli/pkg/cmd/release/delete-asset/delete_asset.go",
+    "sha256": "737533d0e13c9bffacb6b8b59ee57affaba2045aaa383c8d598ddfb464c5ca69"
+  },
+  {
+    "path": "cli/pkg/cmd/release/delete-asset/delete_asset_test.go",
+    "sha256": "14dd881454df30571c9498fdd2505a8eeafb624b5a1d97b08dee50cdb0e95186"
+  },
+  {
+    "path": "cli/pkg/cmd/release/delete/delete.go",
+    "sha256": "40af60bd3e785eff19023fd4367df09f7a173e3e479710107a8f14a21d01ce2b"
+  },
+  {
+    "path": "cli/pkg/cmd/release/delete/delete_test.go",
+    "sha256": "2b8820cbe60b727b8ab84c0f362c16ff5cb001614a284e3f589bc31bc11a6611"
+  },
+  {
+    "path": "cli/pkg/cmd/release/verify/verify_test.go",
+    "sha256": "8c509efc01ca5e77e7e18b395262bf4045840c5fa46bc6cc79acf0a994b83737"
+  },
+  {
+    "path": "cli/pkg/cmd/release/verify/verify.go",
+    "sha256": "db5f261eae8b6cb5471eac1f77a3357b06fa16ab6c9689caf868bd21f3854394"
+  },
+  {
+    "path": "cli/pkg/cmd/release/verify-asset/verify_asset.go",
+    "sha256": "0bdfbeae63b76ad22cac36f82f4177c562d09a67eacb4d9f816f45787d1e8525"
+  },
+  {
+    "path": "cli/pkg/cmd/release/verify-asset/verify_asset_test.go",
+    "sha256": "7f6a1d9b764c308ff6b7df06f370907deacbb9fefd15214e6a9c885af1861cbd"
+  },
+  {
+    "path": "cli/pkg/cmd/release/shared/upload.go",
+    "sha256": "32087e174e8337a6247a0396453f5909f581c51d17971b9a97664981203060b2"
+  },
+  {
+    "path": "cli/pkg/cmd/release/shared/fetch.go",
+    "sha256": "301e98fdab7932f43ce2ca74edaeef17d888885bf99ce1ce495e431bb4b5b666"
+  },
+  {
+    "path": "cli/pkg/cmd/release/shared/upload_test.go",
+    "sha256": "0d82237c695ef931d3f2d70f6b1f9ef7db1a211c52a7b92e47a6aebefa4671f5"
+  },
+  {
+    "path": "cli/pkg/cmd/release/shared/attestation.go",
+    "sha256": "a886a938636df0d2a01d6f4e09032a40814d135525aa2fa6c0859aa33b5f345a"
+  },
+  {
+    "path": "cli/pkg/cmd/release/shared/fetch_test.go",
+    "sha256": "635dfac1d55a06106dd496594e812559489f4c3559f9788890efa80dfb5a07ab"
+  },
+  {
+    "path": "cli/pkg/cmd/release/edit/edit.go",
+    "sha256": "1cb3876774350406f2878edf84ce8ad30ae08c4314d23f44122c2ed38621914b"
+  },
+  {
+    "path": "cli/pkg/cmd/release/edit/edit_test.go",
+    "sha256": "0fded2a14e467c1990052102e459bcdc404feb1f4fdd0f35d0fca7e7c1d1d289"
+  },
+  {
+    "path": "cli/pkg/cmd/release/edit/http.go",
+    "sha256": "04b0e293673de55bc16054fc60d7efa223e0b970781b4f04aa7ed9792e66fd56"
+  },
+  {
+    "path": "cli/pkg/cmd/release/download/download_test.go",
+    "sha256": "92d37394a8605c483516bc9b22895ccff58a9cacd08ad739fba4ceac5550be38"
+  },
+  {
+    "path": "cli/pkg/cmd/release/download/download.go",
+    "sha256": "3048a311c21890d68f865c1780f2d7e56bc9e2aff5faddd5fa168dc3591bcb57"
+  },
+  {
+    "path": "cli/pkg/cmd/release/list/list.go",
+    "sha256": "923e848189fc984b78af4eedb8810f2df7baf6b6d65b16d1041eefbe732a51f0"
+  },
+  {
+    "path": "cli/pkg/cmd/release/list/http.go",
+    "sha256": "f8b252ccac500211369cdbbafb3a3599e86bf440da91c0e395deef5f4ae08299"
+  },
+  {
+    "path": "cli/pkg/cmd/release/list/list_test.go",
+    "sha256": "4b7eada911b4f846511a7b735017b654580687a3e0369fa1f91c5f23a839e36b"
+  },
+  {
+    "path": "cli/pkg/cmd/release/view/view.go",
+    "sha256": "01e7f9d16879f5842d923bc210024b4e3fe9d603c77a6616a2ef205f224231be"
+  },
+  {
+    "path": "cli/pkg/cmd/release/view/view_test.go",
+    "sha256": "54b1b754e97978aee96147401aa4fce6d8fa2e1396b0d74d708d0c6efd53db61"
+  },
+  {
+    "path": "cli/pkg/cmd/release/create/create.go",
+    "sha256": "2543b11ecaf87fc6fcc5b97d2f5ef5232832f04355d6efe93ad457a24ddaef60"
+  },
+  {
+    "path": "cli/pkg/cmd/release/create/http_test.go",
+    "sha256": "4046d5f3c1cfdb7ff38cbef303e9018beb95eac423ae6428ef7af675a0ef9118"
+  },
+  {
+    "path": "cli/pkg/cmd/release/create/create_test.go",
+    "sha256": "de39168034f71e74354b6312f62f24c88005dcd17ce0aa4c40cca8163b1deeb3"
+  },
+  {
+    "path": "cli/pkg/cmd/release/create/http.go",
+    "sha256": "a7edaa664555d4b2c8d1b4ffe6ba04bf64104bac5389493e094e69e03c9f3617"
+  },
+  {
+    "path": "cli/pkg/cmd/release/upload/upload.go",
+    "sha256": "8a276af9cba13142c6481b68f82f245b489137fe11a2281108d0849b0d41e15e"
+  },
+  {
+    "path": "cli/pkg/cmd/release/upload/upload_test.go",
+    "sha256": "a69b92f575a2dd5ecabb75e487c104f01bdfd74017d1423228ba354c3994857b"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/inspect/options.go",
+    "sha256": "294cd4a380c5f70cc575b2a191ebe9545c0aaf44f3db324fdb8c2cafa7cc7a1f"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/inspect/bundle.go",
+    "sha256": "c09ec7f679b2e0770299d64b241b21c92551fed98339dc8624b584fa34cff222"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/inspect/inspect_integration_test.go",
+    "sha256": "80083f9468d586c8f976663746e13a3b9519860bfd4d980e6403a8f543256fed"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/inspect/inspect_test.go",
+    "sha256": "d122d8cf032fcfbb8e477a3b1740eea7b9389f9221101ee75fedd5fc0fdf3ab3"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/inspect/inspect.go",
+    "sha256": "ed3ee4e2e4d03a7c3bb1cf4decae237631f2f258c65c018d7822f0340f41e9b3"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/inspect/bundle_test.go",
+    "sha256": "86d051c67c024c1329f6b04fc41d66f825221cef05673ebca721b6047a488a40"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/test/path.go",
+    "sha256": "218278bb3b6917fe1b0e83b171fca4f779791de76d467b3e9281a3f9693aa3e4"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/attestation_integration_test.go",
+    "sha256": "1a55da35197e3de62f21cf50267aa81e1f56e74a3707525759cdc54b86154f94"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/policy_test.go",
+    "sha256": "83f40213911c4ef3c6947eac0277052009123707fbf4a39c603456578ed7744b"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/options.go",
+    "sha256": "98045dd89e58ee995908fa2516958dd25c813b77f413131fe6c6021a09500b62"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/policy.go",
+    "sha256": "3df53f7ca6447eaf863e9317e2b72ba5213a3d962cf702b260ae7441c182f7a0"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/verify_integration_test.go",
+    "sha256": "3de0842c0345b6e32bd9812e9dd93cb1cc208498bd71601e779b82cde58e3abd"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/attestation.go",
+    "sha256": "1f2ecfaca6222357325cdeeccf26ced800d51d91f88598e88080dcdfdc1e2977"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/options_test.go",
+    "sha256": "775eb3f9957ccc8c5dfc65a8e85aa9d482b1ff1d622284ea0e1fd6a3e6abbf57"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/attestation_test.go",
+    "sha256": "5442f4856f2d507137470badb959491894c8859924dbf9f218c42edfc270c017"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/verify_test.go",
+    "sha256": "41139e14165041fdbc209a7fa670222bc7515f2c83b0cf79c3e25c84cad81487"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verify/verify.go",
+    "sha256": "8394f4b550a3b776dd846656a1f67130a6622f7023fc9cc30477d943b4dd1661"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/auth/host_test.go",
+    "sha256": "f26d7d69504e1b4308b56878bb927950e763a7abdceba00910606aa934444f84"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/auth/host.go",
+    "sha256": "9d817b25d5fd43bf0bc9d956aaa47f28f1ebb86536dee17e779e347f750c7074"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/trustedroot/trustedroot.go",
+    "sha256": "e01bb8f223d391c72988bc32912e6c774be75a6208db6477dc359d398350a8c7"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/trustedroot/trustedroot_test.go",
+    "sha256": "318691ecaedee8a21655b2010d41a2564af2fef4adce11c87dc40902fcbe13c7"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/io/handler.go",
+    "sha256": "e705869e822ea4c25fd1f92d8429f41a59724fd3791c464933016784cd1d7791"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/policy.go",
+    "sha256": "2b24693b5b31928cc173c18edcbf14ebf1fbb6e894a0b9f633441da03b70e1f7"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/sigstore_integration_test.go",
+    "sha256": "2ff2444700b0032529f083a50f66435d448c5cede577773f9fa854626bc0e8cb"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/tuf_test.go",
+    "sha256": "ae595aba6783c1b317771d425da1cb0a6ee815220eefcfb267dcd17ef1bba5a0"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/attestation.go",
+    "sha256": "02419461fd38da60dd36ca6dd6f1e384f5ed3e9a6922d3347fa6c70794a1a94b"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/extensions_test.go",
+    "sha256": "9d4abbc341c8cb4adac4b886b297233fe28e09913964a9ed43fae3a0b96dbabb"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/sigstore_test.go",
+    "sha256": "847caee59289250448016428a1196e2aab0b6c13a589e46bbc6111bc6986bef8"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/extensions.go",
+    "sha256": "d23fa036838f596f26b389850406d45e6cb84396d2ce463bec5699f2887713da"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/attestation_test.go",
+    "sha256": "1e8431afeaf33f2e518c673a27fc3167d3f569e367f4109114f5bda1817f6c13"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/sigstore.go",
+    "sha256": "33e776307f070e0d32722055bf5e42118555305c8eaf50fe092629acca39f212"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/mock_verifier.go",
+    "sha256": "916f2950b2528ac8a1fc6009f9fa6aa3b6d2e3f13fe1eb43cd29b9dca564fc37"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/tuf.go",
+    "sha256": "d2e59a7585a59a5110c1ae507a8e49e823dd6af5f8d97a3cded04376e3ba7106"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/download/metadata.go",
+    "sha256": "19f799ff9bb00201848f8de1a5f8f98c952e4036a60c184c6b7234ada5c6b1a9"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/download/options.go",
+    "sha256": "d93fa93e313bef820d974750113d217541489b165027689d3eb77f36716a33e6"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/download/download_test.go",
+    "sha256": "26a3172062b7485974cc4ea0bd33bc4e3c50009d390fd87a015c9153fb42d27b"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/download/download.go",
+    "sha256": "91c8e99e46f88999a22a40700e649917ffa40cd92717b6df70971dc89457232a"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/download/options_test.go",
+    "sha256": "e3ffd8a9f1c56c994a059ccae14a0680721776984fa79d86ec2642ffb93b4ab5"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/download/metadata_test.go",
+    "sha256": "f8df9912b47c4375a325c50ec89440467fba6873c97a9fd251d5e506c60af55c"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/api/mock_client.go",
+    "sha256": "41363598527771b75d62397b975ee97a6786795bf1fd4cfd85ad740a2780b779"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/api/client.go",
+    "sha256": "5f93c11f5e74d15e85431f87e554eb1cb2a84adcb8703f086c8a57c87967ae2f"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/api/mock_githubApiClient_test.go",
+    "sha256": "f43f5eb5eebfde8dd1ee1dc867062b541cc7104f455269260663fb3bc007d9a8"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/api/trust_domain.go",
+    "sha256": "7d93b9a7818951e9fd91b54da633f1d6188a5a4d097002834131a069cfb81595"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/api/attestation.go",
+    "sha256": "9f67ebeb50ad6b675b0692194a0c3dae6694c7e29a8663c204184db4fc88a7eb"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/api/mock_httpClient_test.go",
+    "sha256": "a7a8f8c57eb72fc7f003007edcf82e21f4bbbfb131cd96ab116495e6b47510dc"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/api/client_test.go",
+    "sha256": "998807b40e62f45462a3655071c3c74bc57b2ef442273fc9fea0037e0e81fd05"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/artifact.go",
+    "sha256": "6c166a3ae0d2c6699ba235e05b0e51498c4ef3f65d4395356bd37e7161d434cf"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/artifact_posix_test.go",
+    "sha256": "2f4626a96321f7b7102dbde16a94007d4717cfc094e7b618cd6bc4d5b4cc24bb"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/file_test.go",
+    "sha256": "99c2aba916a56bc2528d36628905c9b46870e31a17f459c7e92bed949a00c7f5"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/image_test.go",
+    "sha256": "795ca18f9a5d52da94ba6f481b66f59d58eec6bd37bd1db697133bd098636f60"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/file.go",
+    "sha256": "1e86f8456692634701cdc9b4a9b45332b38a56b5091d2fbb351884d5bbcfff40"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/image.go",
+    "sha256": "ccc9a6cc3fd2f2e078f52ad8acbecfb1ded6b9c2092552137ca1dfcb5dce51f6"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/artifact_windows_test.go",
+    "sha256": "2f1a6a8364c1b3b2b2aa61b669840c3033172380f1377e86a641e1f3cd051619"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/test/data/sigstore-js-2.1.0-bundle.json",
+    "sha256": "cfadddd579b9fb45947530cd0e860986ec610a28f7fa6de3ef31cc051f07f761"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/test/data/trusted_root.json",
+    "sha256": "455b3fe53e2678889f093d66ebbfda5f12ebb9d682b146c3535fa04e97689787"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/test/data/reusable-workflow-attestation.sigstore.json",
+    "sha256": "88e35c3496fc9b9bd29629b69271bd32738e170f0d85a12d67da0c72c743f3bd"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/test/data/github_release_bundle.json",
+    "sha256": "c8fb05f1a03f203c58bdc2a70913d5bece78f8fc5a4a09a05294a8798f3cbb8b"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/test/data/sigstoreBundle-invalid-signature.json",
+    "sha256": "4c8dae9fb3c3e0406fed7792da1b378689cc236e5c120fd05ff3de2cb15f4b7c"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/test/data/data.go",
+    "sha256": "5e7a3512a1cf9000f762d559f538095098763303077e195d861223854b7feb88"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/test/data/sigstore-js-2.1.0-bundle-v0.1.json",
+    "sha256": "5b922a4020ad2cd4506112f0be3a802ba1ab04c076bb3d51c3aee730f7ffac86"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/test/data/custom-issuer.sigstore.json",
+    "sha256": "c4ce45401067b13850e76fabc1b23e018a0187f0529d435af829b83f26bc5fca"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/verification/embed/tuf-repo.github.com/root.json",
+    "sha256": "98cba97be9075bc98b2322de3de85fbd1b70ec7392991dfd2f53d215bede1a8d"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/digest/digest.go",
+    "sha256": "01e1be4da211766a1d7a3484ed00e823ca1ebaf5da204e31012701a87ff999a3"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/digest/digest_test.go",
+    "sha256": "b460de93a177d9b4873100b1a1e3fcdc0c27e834172ffce91b1a92bd214edfbc"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/oci/mock_client.go",
+    "sha256": "ad51c48f99ccdc9f0aaccc7cf4cb332e2e88d6f0fca95fea178274a8fb3e6f41"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/oci/client.go",
+    "sha256": "0b217d46a3471aa93a8519d7625d5466105c4e414761636a18a4352d11ef345f"
+  },
+  {
+    "path": "cli/pkg/cmd/attestation/artifact/oci/client_test.go",
+    "sha256": "a2f926bd13b42001d10c3d4aa08aaa7004629d6b6877cc5bd0fe7909982dd711"
+  },
+  {
+    "path": "download/dist/index.js",
+    "sha256": "7834b909df0fd656f5ac1c4c4ab4ee3b5e2673e4f4f763549d8abbca16bc5bbe"
+  },
+  {
+    "path": "download/dist/package.json",
+    "sha256": "3ca9d4afd21425087cf31893b8f9f63c81b0b8408db5e343ca76e5f8aa26ab9a"
+  },
+  {
+    "path": "download/docs/MIGRATION.md",
+    "sha256": "8df3f434c7a5dc97805c0b27d600d693102f8c25ba55034066b9238cabe9e135"
+  },
+  {
+    "path": "download/src/constants.ts",
+    "sha256": "be897649fd58f194827d17d933b2a08c529f53bb1c4a6284b38b10073ba0e4c9"
+  },
+  {
+    "path": "download/src/download-artifact.ts",
+    "sha256": "665dccdfa36cc93c7d75515fd93a9f97b8dee937b9b5517a15ba77d2a48f6934"
+  },
+  {
+    "path": "upload/docs/MIGRATION.md",
+    "sha256": "bc3bc61a00f4da2591fb90fc66d93b31510b9512b61c08ddb93b6c0b78936316"
+  },
+  {
+    "path": "upload/dist/merge/index.js",
+    "sha256": "33c8c740ba568f56e119e53a38e19e8187cb0b043daec78a6525cca26d5be377"
+  },
+  {
+    "path": "upload/dist/merge/package.json",
+    "sha256": "3ca9d4afd21425087cf31893b8f9f63c81b0b8408db5e343ca76e5f8aa26ab9a"
+  },
+  {
+    "path": "upload/dist/upload/index.js",
+    "sha256": "c0e58b240360573e6d6c82ea1bb22deff4f85883e00211a52bd27822c3a22617"
+  },
+  {
+    "path": "upload/dist/upload/package.json",
+    "sha256": "3ca9d4afd21425087cf31893b8f9f63c81b0b8408db5e343ca76e5f8aa26ab9a"
+  },
+  {
+    "path": "upload/src/merge/merge-artifacts.ts",
+    "sha256": "0319a53ff36ee50b20eb0caa2e53e5e67c4509efe5a1be900dcdbda34a5e835c"
+  },
+  {
+    "path": "upload/src/merge/input-helper.ts",
+    "sha256": "b94b07bc80644c03a381598bd521059d63c02471748bd96b97d204f8b1c4d9f5"
+  },
+  {
+    "path": "upload/src/merge/constants.ts",
+    "sha256": "3b90dc24f0facc44cf94ce9b8f291544652bf18ced32384df22aad6bef306f86"
+  },
+  {
+    "path": "upload/src/merge/merge-inputs.ts",
+    "sha256": "6474bdd9b506e0646cf1103dbe1d8af2a70f72db6ade0c3dc80830e5758196fe"
+  },
+  {
+    "path": "upload/src/merge/index.ts",
+    "sha256": "d9b9d8685ca3e6073d3a88bb812f3dc2290ca6b9651f323706277db29db37671"
+  },
+  {
+    "path": "upload/src/shared/search.ts",
+    "sha256": "4cbd489c239640073ee1bd17b9f941aabcf34cb7f41d68edd2264ee0438174e9"
+  },
+  {
+    "path": "upload/src/shared/upload-artifact.ts",
+    "sha256": "bfab1f3c0e5ada3dd46e64addb583730dd84e17a47f06e24f9bda3cd50b9153b"
+  },
+  {
+    "path": "upload/src/upload/upload-inputs.ts",
+    "sha256": "b02e8aa4442f587d444f7300eed814e260119f12155e5a6ea8a3ad16101bcd26"
+  },
+  {
+    "path": "upload/src/upload/input-helper.ts",
+    "sha256": "982def8793858e4976192f3f5ade26f1e843eee069922a974228648dafc1298c"
+  },
+  {
+    "path": "upload/src/upload/constants.ts",
+    "sha256": "df9f4735c7d401fba698eef69e42d29c0f95881a5037d38e7e519e88d408564b"
+  },
+  {
+    "path": "upload/src/upload/upload-artifact.ts",
+    "sha256": "645c95f89c7fa74b171875f9a8855314c6daf8ec08c46f796fd16fc197a22c2e"
+  },
+  {
+    "path": "upload/src/upload/index.ts",
+    "sha256": "1e3f37cd57733b5715f9436a9ab86b09126e7173ea275a68ad468c4ce2d311bf"
+  }
+]

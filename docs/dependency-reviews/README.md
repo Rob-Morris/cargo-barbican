@@ -112,6 +112,12 @@ explicit approval, current repository policy and independent installed
 correspondence remain separate requirements; a dependency review grants no
 consumer toolchain acceptance.
 
+## Attested binary release inputs
+
+- [Exact gh and Actions source qualification](2026-11-25-attested-release-inputs.md)
+  and [inspected file custody](2026-11-25-attested-release-inputs-files.json).
+  Hosted token/runtime acceptance remains separate from this source review.
+
 ## Recent security remediation
 
 - [WebPKI distrust remediation](2026-10-21-webpki-distrust-remediation.md) —

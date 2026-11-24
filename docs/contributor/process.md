@@ -113,6 +113,15 @@ does not prove the drill built the tagged tree.
 
 ## Verification Expectations
 
+The standalone release-installer contract tests require existing trusted
+`python3`, `jq` and the native C compiler. They compile only a small authored
+inert fixture, use jq to exercise the verified-result query subset, and fake
+the gh/network boundary. They require no downloaded candidate and do not prove
+cryptographic verification or hosted token access. Canonical verification runs
+these cases; run them alone with `python3 scripts/tests/install_barbican_test.py`.
+Consumer installation uses gh's built-in query engine and requires none of
+these test-only tools.
+
 On macOS ARM64, both ordinary `cargo test` and the canonical gate require
 `BARBICAN_TEST_RUSTUP` to name the absolute path of the exact reviewed native
 fixture evaluator. Set it to an existing qualified executable, or provision
