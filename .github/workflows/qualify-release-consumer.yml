@@ -1,0 +1,61 @@
+name: Qualify release consumer transport
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  upstream-fixture:
+    if: >-
+      github.repository == 'Rob-Morris/barbican-admission-rehearsal' ||
+      github.repository == 'underware-gg/barbican-admission-rehearsal' ||
+      github.repository == 'Rob-Morris/barbican-release-consumer-proof-private'
+    name: Read-only public upstream fixture (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Verify inert immutable upstream fixture with built-in token
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROOF_PRIVATE: ${{ github.event.repository.private }}
+          PROOF_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          PROOF_ACTOR: ${{ github.actor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          root=$(mktemp -d "$RUNNER_TEMP/barbican-token-proof.XXXXXXXX")
+          trap 'rm -rf "$root"' EXIT
+          tag=v2.100.0
+          source=45437bc7eeeb3359bbfddd1742f79de7652fd3e2
+          asset=gh_2.100.0_macOS_arm64.zip
+          expected=45f9a62da2f6e641a7fad57e2ce39656dfd7ef331372d80a2a2aed65abb01642
+          query='.verificationResult.statement | select(.predicate.repository == "cli/cli" and .predicate.repositoryId == "212613049" and .predicate.ownerId == "59704711" and .predicate.tag == "v2.100.0") | .subject as $s | [$s[] | select(.uri == "pkg:github/cli/cli@v2.100.0")] | select(length == 1 and .[0].digest.sha1 == "45437bc7eeeb3359bbfddd1742f79de7652fd3e2") | [$s[] | select(.name == "gh_2.100.0_macOS_arm64.zip")] | select(length == 1 and .[0].digest.sha256 == "45f9a62da2f6e641a7fad57e2ce39656dfd7ef331372d80a2a2aed65abb01642") | "verified"'
+          gh release verify "$tag" --repo github.com/cli/cli --format json --jq "$query" > "$root/release.json"
+          gh release download "$tag" --repo github.com/cli/cli --pattern "$asset" --dir "$root"
+          gh release verify-asset "$tag" "$root/$asset" --repo github.com/cli/cli --format json --jq "$query" > "$root/membership.json"
+          [ "$(cat "$root/release.json")" = verified ]
+          [ "$(cat "$root/membership.json")" = verified ]
+          if command -v sha256sum >/dev/null; then
+            actual=$(sha256sum "$root/$asset"); actual=${actual%% *}
+          else
+            actual=$(shasum -a 256 "$root/$asset"); actual=${actual%% *}
+          fi
+          [ "$actual" = "$expected" ]
+          verified=$(gh attestation verify "$root/$asset" --hostname github.com --repo cli/cli \
+            --cert-identity https://github.com/cli/cli/.github/workflows/deployment.yml@refs/heads/trunk \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            --source-ref refs/heads/trunk --source-digest "$source" --signer-digest "$source" \
+            --deny-self-hosted-runners --format json --jq \
+            '[.[] | .verificationResult | select(.signature.certificate.sourceRepositoryIdentifier == "212613049" and .signature.certificate.sourceRepositoryOwnerIdentifier == "59704711") | .statement.subject | [.[] | select(.name == "gh_2.100.0_macOS_arm64.zip" and .digest.sha256 == "45f9a62da2f6e641a7fad57e2ce39656dfd7ef331372d80a2a2aed65abb01642")] | select(length == 1)] | select(length > 0) | "verified"')
+          [ "$verified" = verified ]
+          printf 'PASS: built-in token; inert upstream bytes only; no fixture code executed.\n'
+          printf 'Context: event=%s repository=%s actor=%s run=%s/attempts/%s\n' \
+            "$GITHUB_EVENT_NAME" "$GITHUB_REPOSITORY" "$GITHUB_ACTOR" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          printf 'Private=%s fork-head=%s actor-login=%s\n' "$PROOF_PRIVATE" "$PROOF_FORK" "$PROOF_ACTOR"

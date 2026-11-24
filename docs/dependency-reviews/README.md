@@ -114,6 +114,12 @@ consumer toolchain acceptance.
 
 ## Attested binary release inputs
 
+- [Hosted read-only token qualification](2026-11-25-release-consumer-token-qualification.md) —
+  actual public/fork/Dependabot/private context witnesses before the new default.
+
+- [Binary distribution notices](2026-11-25-binary-distribution-notices.md) —
+  complete locked graph, reviewed missing-text supplements and Rust library texts.
+
 - [Exact gh and Actions source qualification](2026-11-25-attested-release-inputs.md)
   and [inspected file custody](2026-11-25-attested-release-inputs-files.json).
   Hosted token/runtime acceptance remains separate from this source review.

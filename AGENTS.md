@@ -3,8 +3,8 @@
 A Cargo subcommand for Rust supply-chain hardening: a policy-first tool that
 gives a Rust repo one gate for what enters its dependency graph. Pure Rust,
 designed as a portable product that consumer repos install and pin. Distributed
-today by local/git install-and-pin; crates.io publication is a deferred
-decision, not foreclosed.
+by exact verified binary releases and explicit local/git source installation.
+Crates.io publication is a deferred decision, not foreclosed.
 
 ALWAYS DO FIRST: Read [`docs/contributor/agents.md`](docs/contributor/agents.md)
 for the agent route-map (constraints, current state, what to build).

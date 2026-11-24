@@ -4,6 +4,7 @@ How to contribute to cargo-barbican. This layer covers contributor
 constraints, repo workflow, and agent-specific contributor instructions.
 
 - [Specification](specification.md) — repo boundaries and contributor-facing constraints
+- [Attested Releases](releases.md) — producer, acceptance, privileged-job and rollout boundaries
 - [Process](process.md) — hook activation, canary workflow, and commit/version-bundle checks
 - [Agents](agents.md) — route-map and hard stops for agents working in this repo
 - [Contributing](../CONTRIBUTING.md) — general contributor guide and doc-maintenance rules

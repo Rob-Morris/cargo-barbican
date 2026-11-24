@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.44.1-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-git%20tag-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.45.0-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-verified%20binary-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -58,8 +58,8 @@ workflow that ties evidence gathering, review, and enforcement together.
 
 ## Insiders Release Scope
 
-The initial release is an early, Rust-only insiders build distributed by an
-immutable git tag. It is intended for maintainers who can review the generated
+The current release is an early, Rust-only insiders build distributed as
+verified attested binaries and an explicit immutable-tag source install. It is intended for maintainers who can review the generated
 policy and CI changes and report workflow friction.
 
 The current boundary is deliberately narrower than universal supply-chain
@@ -85,7 +85,10 @@ certification:
 ## Platform Support
 
 cargo-barbican is developed and tested on macOS and Linux. The current binary
-requires Unix APIs and does not support Windows.
+requires Unix APIs and does not support Windows. Prebuilt checker downloads
+support macOS15+ ARM64 and GNU Linux x86-64 glibc2.35+ with libgcc_s.so.1;
+other architectures and musl/Alpine are not included. These checker runtime
+floors do not expand the feature-specific native evaluator qualifications below.
 
 **Cargo-tool review/install has an exact evaluator boundary:** native Cargo and
 rustc 1.95.0 on macOS ARM64 or Linux x86-64, with the reviewed scanner versions.
@@ -103,17 +106,54 @@ the exact evaluator identity, archive route and refusal boundaries.
 
 ## Quickstart
 
-Use an already trusted Rust toolchain to build and install Barbican. Run from
-a directory that does not select an unaccepted repository compiler, or
-explicitly select your trusted toolchain with `RUSTUP_TOOLCHAIN`. Install the
-insiders release candidate from its immutable git tag:
+Install the exact reviewed checker release without compiling it. Supply an
+already trusted compatible GitHub CLI (`gh`; first tested baseline2.100.0),
+read-only GitHub authentication and ordinary Unix utilities. No Python, jq or
+Rust compiler is needed to install/start the checker. Review the pinned
+installer before running its local copy; do not pipe a fetched script to a shell.
 
-```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.44.1
+```sh
+bootstrap=$(mktemp -d)
+gh api --hostname github.com -H 'Accept: application/vnd.github.raw+json' \
+  'repos/Rob-Morris/cargo-barbican/contents/scripts/install-barbican.sh?ref=d9bf9b422475ff7e8ca789c9e66c6013d1546cbe' \
+  > "$bootstrap/install-barbican.sh"
+# Review the downloaded pinned source before continuing.
+mkdir -p "$HOME/.local/barbican"
+sh "$bootstrap/install-barbican.sh" --version 0.45.0 --install-dir "$HOME/.local/barbican/0.45.0"
+"$HOME/.local/barbican/0.45.0/bin/cargo-barbican" --version
 ```
 
-The tag is the install identity; do not replace it with a moving branch in
-consumer CI.
+The [complete installation guide](docs/user/verified-releases.md) explains
+verification, auth/runtime prerequisites, retained notices and manual PATH
+selection. Installation never overwrites a shared Cargo bin directory or its
+ledgers. Provenance establishes distribution identity/integrity, not benignness
+or policy admission. Review the release before use.
+
+For new ordinary GitHub CI, pin the setup source and the release separately:
+
+```yaml
+permissions:
+  contents: read
+steps:
+  - uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
+    id: barbican
+    with:
+      version: 0.45.0
+```
+
+Use `steps.barbican.outputs.executable` for checker commands. The action also
+adds its bin directory to subsequent steps' PATH. Scanners and trusted Rust
+remain separate prerequisites. Existing workflows/providers migrate deliberately.
+
+Source compilation stays an explicit option, using an already trusted compiler
+from a directory that cannot select an unaccepted repository compiler:
+
+```sh
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.45.0
+```
+
+Neither route bootstraps trust in its own verifier/compiler. Keep exact pins;
+there is no floating latest or silent source fallback.
 
 Start with the [adoption guide](docs/user/adoption.md). Before launching Cargo
 in a consumer workspace that pins a new compiler, review and explicitly accept it

@@ -96,7 +96,22 @@ assert_contains docs/user/integration.md "cargo-audit@0.22.1" "reviewed cargo-au
 assert_contains docs/user/ci.md "--tag v$crate_version" "immutable release install tag"
 assert_contains docs/user/ci.md "cargo-deny@0.19.6 cargo-audit@0.22.1" "reviewed delegate versions"
 assert_contains docs/user/ci.md "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10" "pinned checkout action"
-assert_contains crates/cargo-barbican/src/commands/policy.rs "--tag v$crate_version" "generated immutable release install tag"
+setup_revision=d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
+for file in README.md docs/user/integration.md docs/user/ci.md; do
+  assert_contains "$file" "uses: Rob-Morris/cargo-barbican@$setup_revision" "exact reviewed setup action"
+  assert_contains "$file" "version: $crate_version" "exact checker release input"
+done
+policy_source=$(read_file crates/cargo-barbican/src/commands/policy.rs)
+workflow=$(printf '%s\n' "$policy_source" | awk '
+  /^const GITHUB_CI_WORKFLOW:/ {capture=1}
+  capture {print; if ($0 ~ /^"#;/) exit}
+')
+for expected in "uses: Rob-Morris/cargo-barbican@$setup_revision" "version: $crate_version"; do
+  printf '%s\n' "$workflow" | grep -qF -- "$expected" || fail "active generated workflow is missing $expected"
+done
+if printf '%s\n' "$workflow" | grep -qF 'cargo install --locked --git'; then
+  fail 'active generated workflow still recompiles the checker'
+fi
 assert_contains crates/cargo-barbican/src/commands/policy.rs "cargo-deny@0.19.6" "generated reviewed cargo-deny version"
 assert_contains crates/cargo-barbican/src/commands/policy.rs "cargo-audit@0.22.1" "generated reviewed cargo-audit version"
 assert_not_contains README.md "--branch main" "mutable release install branch"

@@ -51,7 +51,7 @@ const GITHUB_WORKFLOW_PATH: &str = ".github/workflows/barbican.yml";
 /// so the workflow's own `${{ ... }}` expressions pass through verbatim rather
 /// than colliding with Rust's format braces. Third-party actions are pinned by
 /// full commit SHA to match the repo's own dogfooded `ci.yml`.
-const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.44.1
+const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.45.0
 #
 # cargo-barbican CI enforcement gate.
 #
@@ -62,9 +62,10 @@ const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.44.1
 # changes configured by the repository owner. Workflow presence alone does not
 # prevent bypass; keep a scheduled audit for newly published advisories too.
 #
-# Third-party actions are pinned by full commit SHA with a version comment.
-# `--locked` installs from committed lockfiles but does not pin the installed
-# tool versions. These installs select the exact reviewed release candidates.
+# Checker setup verifies the exact signed release before activation; scanners
+# and compiler are separate reviewed prerequisites. Actions use full-SHA pins.
+# Ordinary compiler installation here is not pre-execution admission; use the
+# separate maintainer-dispatched workflow when admission is required.
 name: barbican
 
 on:
@@ -85,22 +86,27 @@ env:
 jobs:
   gate:
     name: cargo-barbican gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - id: checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           # Full history so age-lock and assess can diff against the PR base commit.
           fetch-depth: 0
+          persist-credentials: false
+      - id: barbican
+        name: Set up the exact verified Barbican release
+        uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
+        with:
+          version: 0.45.0
       - id: toolchain
         name: Install the pinned Rust toolchain
         # Reads rust-toolchain.toml; pin your toolchain there for reproducible gates.
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - id: tools
-        name: Install cargo-barbican, cargo-deny, and cargo-audit
+      - id: scanners
+        name: Install the reviewed scanner delegates
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.44.1 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
       - id: fetch
@@ -112,20 +118,24 @@ jobs:
         run: cargo fetch --locked
       - id: pre_release
         name: Pre-release supply-chain gate
-        run: cargo barbican gatehouse pre-release
+        env:
+          BARBICAN: ${{ steps.barbican.outputs.executable }}
+        run: '"$BARBICAN" gatehouse pre-release'
       - id: evidence_toolchain
         name: Check toolchain before PR evidence
         if: >-
           ${{ !cancelled() && github.event_name == 'pull_request' &&
               steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
-              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' }}
-        run: cargo barbican toolchain check
+              steps.barbican.outcome == 'success' && steps.scanners.outcome == 'success' && steps.fetch.outcome == 'success' }}
+        env:
+          BARBICAN: ${{ steps.barbican.outputs.executable }}
+        run: '"$BARBICAN" toolchain check'
       - id: pr_base
         name: Check explicit PR base availability
         if: >-
           ${{ !cancelled() && github.event_name == 'pull_request' &&
               steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
-              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' }}
+              steps.barbican.outcome == 'success' && steps.scanners.outcome == 'success' && steps.fetch.outcome == 'success' }}
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -143,21 +153,23 @@ jobs:
         if: >-
           ${{ !cancelled() && github.event_name == 'pull_request' &&
               steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
-              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' &&
+              steps.barbican.outcome == 'success' && steps.scanners.outcome == 'success' && steps.fetch.outcome == 'success' &&
               steps.evidence_toolchain.outcome == 'success' && steps.pr_base.outcome == 'success' }}
         env:
+          BARBICAN: ${{ steps.barbican.outputs.executable }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: cargo barbican age-lock --base-ref "$BASE_SHA"
+        run: '"$BARBICAN" age-lock --base-ref "$BASE_SHA"'
       - id: assess
         name: Assess against the PR base
         if: >-
           ${{ !cancelled() && github.event_name == 'pull_request' &&
               steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
-              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' &&
+              steps.barbican.outcome == 'success' && steps.scanners.outcome == 'success' && steps.fetch.outcome == 'success' &&
               steps.evidence_toolchain.outcome == 'success' && steps.pr_base.outcome == 'success' }}
         env:
+          BARBICAN: ${{ steps.barbican.outputs.executable }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: cargo barbican assess --base-ref "$BASE_SHA"
+        run: '"$BARBICAN" assess --base-ref "$BASE_SHA"'
       - name: Summarise PR evidence
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         shell: bash
@@ -165,7 +177,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
           TOOLCHAIN_OUTCOME: ${{ steps.toolchain.outcome }}
-          TOOLS_OUTCOME: ${{ steps.tools.outcome }}
+          BARBICAN_OUTCOME: ${{ steps.barbican.outcome }}
+          SCANNERS_OUTCOME: ${{ steps.scanners.outcome }}
           FETCH_OUTCOME: ${{ steps.fetch.outcome }}
           GATE_OUTCOME: ${{ steps.pre_release.outcome }}
           ELIGIBILITY_OUTCOME: ${{ steps.evidence_toolchain.outcome }}
@@ -180,7 +193,7 @@ jobs:
             esac
           }
           setup_missing=
-          for prerequisite in "checkout:$CHECKOUT_OUTCOME" "toolchain:$TOOLCHAIN_OUTCOME" "tools:$TOOLS_OUTCOME" "fetch:$FETCH_OUTCOME"; do
+          for prerequisite in "checkout:$CHECKOUT_OUTCOME" "toolchain:$TOOLCHAIN_OUTCOME" "barbican:$BARBICAN_OUTCOME" "scanners:$SCANNERS_OUTCOME" "fetch:$FETCH_OUTCOME"; do
             if [[ "$prerequisite" != *:success ]]; then
               setup_missing="${setup_missing}${setup_missing:+, }${prerequisite%%:*}"
             fi
@@ -217,7 +230,8 @@ jobs:
             printf '| Checked-out revision | %s |\n' "$current_label"
             printf '| Checkout | %s |\n' "$(native_outcome "$CHECKOUT_OUTCOME")"
             printf '| Toolchain installation | %s |\n' "$(native_outcome "$TOOLCHAIN_OUTCOME")"
-            printf '| Tool installation | %s |\n' "$(native_outcome "$TOOLS_OUTCOME")"
+            printf '| Barbican setup | %s |\n' "$(native_outcome "$BARBICAN_OUTCOME")"
+            printf '| Scanner installation | %s |\n' "$(native_outcome "$SCANNERS_OUTCOME")"
             printf '| Dependency fetch | %s |\n' "$(native_outcome "$FETCH_OUTCOME")"
             printf '| Pre-release gate | %s |\n' "$(native_outcome "$GATE_OUTCOME")"
             printf '| Evidence toolchain conformance | %s |\n' "$(native_outcome "$ELIGIBILITY_OUTCOME")"
@@ -764,10 +778,10 @@ mod tests {
             // so the gate's frozen cross-platform metadata resolves offline
             // even on a cold runner cache.
             "cargo fetch --locked",
-            "cargo barbican gatehouse pre-release",
-            "cargo barbican toolchain check",
-            "cargo barbican age-lock --base-ref",
-            "cargo barbican assess --base-ref",
+            "\"$BARBICAN\" gatehouse pre-release",
+            "\"$BARBICAN\" toolchain check",
+            "\"$BARBICAN\" age-lock --base-ref",
+            "\"$BARBICAN\" assess --base-ref",
         ] {
             assert!(
                 GITHUB_CI_WORKFLOW.contains(gate_command),
@@ -776,13 +790,18 @@ mod tests {
         }
         assert_eq!(
             GITHUB_CI_WORKFLOW
-                .matches("cargo barbican gatehouse pre-release")
+                .matches("\"$BARBICAN\" gatehouse pre-release")
                 .count(),
             1
         );
         assert!(!GITHUB_CI_WORKFLOW.contains("cargo barbican inventory --enforce"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo install --locked"));
-        assert!(GITHUB_CI_WORKFLOW.contains("--tag v0.44.1"));
+        assert!(GITHUB_CI_WORKFLOW.contains("version: 0.45.0"));
+        assert!(
+            GITHUB_CI_WORKFLOW
+                .contains("Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe")
+        );
+        assert!(!GITHUB_CI_WORKFLOW.contains("cargo install --locked --git"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-deny@0.19.6"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo-audit@0.22.1"));
         // Third-party actions must stay pinned by full commit SHA with a
@@ -845,7 +864,7 @@ mod tests {
             let step = workflow_step(id);
             assert!(step.contains("!cancelled()"), "{id}");
             assert!(step.contains("github.event_name == 'pull_request'"), "{id}");
-            for prerequisite in ["checkout", "toolchain", "tools", "fetch"] {
+            for prerequisite in ["checkout", "barbican", "toolchain", "scanners", "fetch"] {
                 assert!(
                     step.contains(&format!("steps.{prerequisite}.outcome == 'success'")),
                     "{id}/{prerequisite}"
@@ -865,7 +884,7 @@ mod tests {
         }
         assert_eq!(
             GITHUB_CI_WORKFLOW
-                .matches("run: cargo barbican toolchain check")
+                .matches("\"$BARBICAN\" toolchain check")
                 .count(),
             1
         );
@@ -908,11 +927,11 @@ mod tests {
             (
                 &[
                     ("CHECKOUT_OUTCOME", "failure"),
-                    ("TOOLS_OUTCOME", "skipped"),
+                    ("SCANNERS_OUTCOME", "skipped"),
                     ("AGE_OUTCOME", "skipped"),
                     ("ASSESS_OUTCOME", "skipped"),
                 ],
-                "setup incomplete: checkout, tools",
+                "setup incomplete: checkout, scanners",
             ),
             (
                 &[
@@ -921,6 +940,10 @@ mod tests {
                     ("AGE_OUTCOME", "skipped"),
                 ],
                 "toolchain conformance failure; PR base failure",
+            ),
+            (
+                &[("BARBICAN_OUTCOME", "failure"), ("AGE_OUTCOME", "skipped")],
+                "setup incomplete: barbican",
             ),
             (
                 &[("BASE_OUTCOME", "failure"), ("ASSESS_OUTCOME", "skipped")],
@@ -952,7 +975,8 @@ mod tests {
             for name in [
                 "CHECKOUT_OUTCOME",
                 "TOOLCHAIN_OUTCOME",
-                "TOOLS_OUTCOME",
+                "BARBICAN_OUTCOME",
+                "SCANNERS_OUTCOME",
                 "FETCH_OUTCOME",
                 "GATE_OUTCOME",
                 "ELIGIBILITY_OUTCOME",

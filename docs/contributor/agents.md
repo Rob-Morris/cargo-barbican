@@ -35,8 +35,8 @@ architecture, functional, and contributor docs. This file is a route-map.
 - Coupling the library crate to subprocess concerns. The library uses a
   trait for HTTP; subprocesses live in the binary.
 - Publishing to crates.io. Publication is a deliberate future distribution
-  decision, not foreclosed; the current release line is local/git
-  install-and-pin. Get explicit sign-off before publishing.
+  decision, not foreclosed; the current release line uses verified binary downloads or explicit local/git
+  source installation. Get explicit sign-off before publishing.
 
 ## Invariants
 

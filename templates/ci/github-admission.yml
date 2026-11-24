@@ -1,4 +1,4 @@
-# Synced from cargo-barbican v0.44.1
+# Synced from cargo-barbican v0.45.0
 # Review the version-matched docs/user/ci.md#maintainer-dispatched-admission.
 # A trusted maintainer must dispatch from the reviewed immutable protected
 # controller tag. Optional actor/event policies add defence in depth.
@@ -58,6 +58,8 @@ jobs:
           lfs: false
       - id: provision
         name: Provision independently trusted applying tools
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           @@SIGNAL_GUARD@@
           [[ "$(git -C "$GITHUB_WORKSPACE/provider" rev-parse HEAD)" == '@@PROVIDER_REVISION@@' ]]

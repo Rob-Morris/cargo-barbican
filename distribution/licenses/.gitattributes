@@ -1,0 +1,2 @@
+# Preserve the upstream Rust notice bytes covered by sha256.json.
+rust-1.95.0-library.html whitespace=-blank-at-eol

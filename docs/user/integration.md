@@ -6,10 +6,25 @@ How a consumer repo adopts cargo-barbican.
 
 ## Prerequisites
 
-Install a rustup-managed Rust environment with `rustup`, `cargo`, `rustc` and
-`rustdoc` on PATH. `cargo install --git ... --locked` compiles Barbican and its
-locked dependencies from source; allow build time and disk space for that
-bootstrap. Choose/preinstall the consumer's exact compiler separately.
+The default checker setup is the [verified exact-release installer](verified-releases.md)
+or its thin pinned GitHub action. Supply a trusted compatible `gh` (first tested
+baseline2.100.0), read-only auth, network access and ordinary Unix utilities.
+No compiler/Python/jq is needed to install/start the checker. Core binary hosts
+are macOS15+ ARM64 and GNU Linux x86-64 glibc2.35+ with libgcc_s.so.1.
+
+```yaml
+- uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
+  id: barbican
+  with:
+    version: 0.45.0
+```
+
+Use job `permissions: contents: read` and the exact `executable` output.
+Compiler/scanner provisioning remains separate. Cargo-scoped commands need
+already trusted rustup-managed `cargo`, `rustc` and `rustdoc` on PATH; select the
+consumer's exact accepted compiler independently. An explicit source installation
+(`cargo install --git ... --locked`) compiles the locked graph, requiring a
+trusted compiler, build time and disk. Setup never falls back to that route.
 
 For admission-enabled CI, provision Barbican with an already trusted compiler
 and use the [maintainer-dispatched bootstrap](ci.md#maintainer-dispatched-admission)
@@ -120,7 +135,7 @@ Follow [Adoption](adoption.md) for the ordered new/existing project journey.
 Install this release using its immutable identity:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.44.1 cargo-barbican
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.45.0 cargo-barbican
 ```
 
 Init preserves regular policy/process/template files and completed records.
@@ -134,7 +149,7 @@ release into a scratch area. This does not assume an upstream checkout:
 
 ```sh
 barbican_source=$(mktemp -d)
-git clone --depth 1 --branch v0.44.1 \
+git clone --depth 1 --branch v0.45.0 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream"
 # Review templates in "$barbican_source/upstream/templates" before copying.
 ```
@@ -155,7 +170,7 @@ and copying desired files.
 
 ## Versioning and re-sync
 
-Every shipped template carries `Synced from cargo-barbican v0.44.1` provenance.
+Every shipped template carries `Synced from cargo-barbican v0.45.0` provenance.
 The process README and record template are consumer-owned and may be tailored.
 On upgrade, install the reviewed immutable release, obtain its templates in a
 scratch checkout as above, and review diffs before merging desired changes.

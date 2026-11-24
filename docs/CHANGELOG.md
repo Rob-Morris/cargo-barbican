@@ -10,6 +10,7 @@ The repo version is currently the shared semver carried by
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.45.0](changelog/v0.45.0.md) | 2026-11-25 | Publish verified core-platform binary releases |
 | [v0.44.1](changelog/v0.44.1.md) | 2026-11-19 | Update the reviewed public verifier to PGP 0.21.1 |
 | [v0.44.0](changelog/v0.44.0.md) | 2026-11-18 | Show bounded Cargo tool review and install progress |
 | [v0.43.0](changelog/v0.43.0.md) | 2026-11-16 | Author exact Cargo tool policy exceptions |

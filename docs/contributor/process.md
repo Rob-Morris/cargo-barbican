@@ -120,7 +120,9 @@ the gh/network boundary. They require no downloaded candidate and do not prove
 cryptographic verification or hosted token access. Canonical verification runs
 these cases; run them alone with `python3 scripts/tests/install_barbican_test.py`.
 Consumer installation uses gh's built-in query engine and requires none of
-these test-only tools.
+these test-only tools. The release protocol/state suite also runs in the canonical
+gate (`python3 -B scripts/tests/release_protocol_test.py`). Its producer helpers
+support Python3.10+ on the core hosted builders. See [release operations](releases.md).
 
 On macOS ARM64, both ordinary `cargo test` and the canonical gate require
 `BARBICAN_TEST_RUSTUP` to name the absolute path of the exact reviewed native

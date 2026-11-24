@@ -2,8 +2,8 @@
 
 A portable, policy-first Rust supply-chain hardening tool: it gives a Rust repo
 one gate for what enters its dependency graph. Pure Rust, a single versioned
-implementation that every Rust repo can install and pin. Distributed today by
-local/git install-and-pin; crates.io publication is a deferred decision, not
+implementation that every Rust repo can install and pin. Distributed by verified exact binary releases and
+explicit local/git source installation; crates.io publication is a deferred decision, not
 foreclosed.
 
 ## Why this exists
@@ -46,14 +46,14 @@ native installation support. See [toolchain operation](../user/toolchains.md).
 ## Goals
 
 1. Be the single, portable source of truth for Rust supply-chain policy — one dependency-intake gate that many repos install, pin, and enforce consistently.
-2. Pure Rust installation and execution, with no Python prerequisite.
+2. Keep the application in Rust, with no Python prerequisite for consumer installation or use.
 3. Inherit existing trust decisions from undertask where possible instead of re-reviewing by default.
 4. Match undertask's surface closely enough that existing muscle memory transfers.
 5. Apply the same supply-chain discipline to cargo-barbican itself that it will enforce on consumers.
 
 ## Current non-goals
 
-- Public crates.io release (deferred, not foreclosed). Local/git install-and-pin via `cargo install --path` or `cargo install --git` is the current distribution; publishing is a later decision requiring explicit sign-off.
+- Public crates.io release (deferred, not foreclosed). Verified binary releases and explicit local/git source installation are the current distribution; crates.io publication requires a separate deliberate decision.
 - Porting undertask's full mixed-ecosystem dependency-assessment workflow.
 - JavaScript ecosystem support.
 - Multi-workspace orchestration.

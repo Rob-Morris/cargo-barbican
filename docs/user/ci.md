@@ -10,8 +10,8 @@ For repositories opting into Rust toolchain admission, use the
 [maintainer-dispatched admission workflow](#maintainer-dispatched-admission).
 It starts with independently trusted prerequisites and approved review inputs,
 then establishes fresh local acceptance before installing or probing the target.
-The legacy workflow and worked example below install Rust before ordinary
-conformance checks. Native admission has a narrower qualified host/evaluator
+The ordinary workflow installs Rust before conformance checks, after verified
+checker setup. Native admission has a narrower qualified host/evaluator
 matrix than the existing general gate.
 
 ## Why pull-request and scheduled runs differ
@@ -33,11 +33,26 @@ PR.
 
 ## Prerequisites
 
-Pin every tool the workflow shells out to, the same way you pin
-cargo-barbican itself:
+New ordinary workflows use the exact verified checker download. Supply trusted
+compatible gh and its built-in read-only token; the action needs no PAT, OIDC,
+write token, Rust compiler or persistent checker-build cache:
 
-```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.44.1
+```yaml
+permissions:
+  contents: read
+steps:
+  - id: barbican
+    uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
+    with:
+      version: 0.45.0
+```
+
+Use the exact `steps.barbican.outputs.executable` for checker commands. Pin and
+provision scanners and the already accepted compiler separately. Source setup
+remains an explicit alternative:
+
+```sh
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.45.0
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -54,9 +69,9 @@ cargo barbican policy init --toolchain 1.95.0 --ci github
 ```
 
 This writes `.github/workflows/barbican.yml` — a single fail-closed gate job
-that runs on pull requests and pushes to `main`, installs the tooling with
-`--locked`,
-pins its third-party actions by commit SHA, fetches the locked dependency
+that runs on pull requests and pushes to `main` on Ubuntu24.04, sets up the
+checker through its pinned verified-download action, installs separate reviewed
+scanner delegates with `--locked`, pins actions by full commit SHA, fetches the locked dependency
 graph for every target platform (the gate resolves frozen cross-platform
 cargo metadata, so the cache must hold crates a build on the runner's own
 platform never downloads), and runs `gatehouse pre-release`
@@ -133,8 +148,10 @@ if the consumer selects it. The script and all its downloads/build inputs
 need independent review before approving the controller. It may compile an
 already-reviewed Barbican using an already-trusted host compiler, or supply
 an independently trusted existing binary. It must not install or probe the
-candidate compiler. Barbican does not introduce a binary distribution service
-or install these prerequisites itself.
+candidate compiler. Once its signed public release completes acceptance, the
+[verified binary installer](verified-releases.md#consumer-owned-admission-provider)
+can supply the checker portion without compiling it. The provider still owns
+all remaining trusted prerequisites; setup does not install them.
 
 The three Rustup launchers must select the newly admitted private toolchain;
 do not supply fixed Cargo/rustc/rustdoc binaries from the bootstrap compiler.
@@ -236,16 +253,29 @@ after a test-gate failure; consumers still need their own deployment review.
 ## Worked example
 
 ```yaml
-name: dependency-policy
+# Synced from cargo-barbican v0.45.0
+#
+# cargo-barbican CI enforcement gate.
+#
+# This workflow is the real gate for what enters the dependency graph. The
+# shipped client-side pre-commit hook (templates/hooks/pre-commit) runs a cheap
+# subset and is advisory and skippable (git commit --no-verify). Enforce CI
+# with required status checks, branch protection and review of policy/workflow
+# changes configured by the repository owner. Workflow presence alone does not
+# prevent bypass; keep a scheduled audit for newly published advisories too.
+#
+# Checker setup verifies the exact signed release before activation; scanners
+# and compiler are separate reviewed prerequisites. Actions use full-SHA pins.
+# Ordinary compiler installation here is not pre-execution admission; use the
+# separate maintainer-dispatched workflow when admission is required.
+name: barbican
 
 on:
   pull_request:
   push:
     branches: [main]
   schedule:
-    # Nightly: catches advisories published after a PR merged, with no repo
-    # change to trigger a pull-request run.
-    - cron: "17 3 * * *"
+    - cron: '0 0 * * *'
 
 permissions:
   contents: read
@@ -254,26 +284,34 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   gate:
     if: github.event_name != 'schedule'
     name: cargo-barbican gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - id: checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           # Full history so age-lock and assess can diff against the PR base commit.
           fetch-depth: 0
+          persist-credentials: false
+      - id: barbican
+        name: Set up the exact verified Barbican release
+        uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
+        with:
+          version: 0.45.0
       - id: toolchain
         name: Install the pinned Rust toolchain
         # Reads rust-toolchain.toml; pin your toolchain there for reproducible gates.
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - id: tools
-        name: Install cargo-barbican, cargo-deny, and cargo-audit
+      - id: scanners
+        name: Install the reviewed scanner delegates
         run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.44.1 cargo-barbican
           cargo install --locked cargo-deny@0.19.6
           cargo install --locked cargo-audit@0.22.1
       - id: fetch
@@ -285,20 +323,24 @@ jobs:
         run: cargo fetch --locked
       - id: pre_release
         name: Pre-release supply-chain gate
-        run: cargo barbican gatehouse pre-release
+        env:
+          BARBICAN: ${{ steps.barbican.outputs.executable }}
+        run: '"$BARBICAN" gatehouse pre-release'
       - id: evidence_toolchain
         name: Check toolchain before PR evidence
         if: >-
           ${{ !cancelled() && github.event_name == 'pull_request' &&
               steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
-              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' }}
-        run: cargo barbican toolchain check
+              steps.barbican.outcome == 'success' && steps.scanners.outcome == 'success' && steps.fetch.outcome == 'success' }}
+        env:
+          BARBICAN: ${{ steps.barbican.outputs.executable }}
+        run: '"$BARBICAN" toolchain check'
       - id: pr_base
         name: Check explicit PR base availability
         if: >-
           ${{ !cancelled() && github.event_name == 'pull_request' &&
               steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
-              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' }}
+              steps.barbican.outcome == 'success' && steps.scanners.outcome == 'success' && steps.fetch.outcome == 'success' }}
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -316,21 +358,23 @@ jobs:
         if: >-
           ${{ !cancelled() && github.event_name == 'pull_request' &&
               steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
-              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' &&
+              steps.barbican.outcome == 'success' && steps.scanners.outcome == 'success' && steps.fetch.outcome == 'success' &&
               steps.evidence_toolchain.outcome == 'success' && steps.pr_base.outcome == 'success' }}
         env:
+          BARBICAN: ${{ steps.barbican.outputs.executable }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: cargo barbican age-lock --base-ref "$BASE_SHA"
+        run: '"$BARBICAN" age-lock --base-ref "$BASE_SHA"'
       - id: assess
         name: Assess against the PR base
         if: >-
           ${{ !cancelled() && github.event_name == 'pull_request' &&
               steps.checkout.outcome == 'success' && steps.toolchain.outcome == 'success' &&
-              steps.tools.outcome == 'success' && steps.fetch.outcome == 'success' &&
+              steps.barbican.outcome == 'success' && steps.scanners.outcome == 'success' && steps.fetch.outcome == 'success' &&
               steps.evidence_toolchain.outcome == 'success' && steps.pr_base.outcome == 'success' }}
         env:
+          BARBICAN: ${{ steps.barbican.outputs.executable }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: cargo barbican assess --base-ref "$BASE_SHA"
+        run: '"$BARBICAN" assess --base-ref "$BASE_SHA"'
       - name: Summarise PR evidence
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         shell: bash
@@ -338,7 +382,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
           TOOLCHAIN_OUTCOME: ${{ steps.toolchain.outcome }}
-          TOOLS_OUTCOME: ${{ steps.tools.outcome }}
+          BARBICAN_OUTCOME: ${{ steps.barbican.outcome }}
+          SCANNERS_OUTCOME: ${{ steps.scanners.outcome }}
           FETCH_OUTCOME: ${{ steps.fetch.outcome }}
           GATE_OUTCOME: ${{ steps.pre_release.outcome }}
           ELIGIBILITY_OUTCOME: ${{ steps.evidence_toolchain.outcome }}
@@ -353,7 +398,7 @@ jobs:
             esac
           }
           setup_missing=
-          for prerequisite in "checkout:$CHECKOUT_OUTCOME" "toolchain:$TOOLCHAIN_OUTCOME" "tools:$TOOLS_OUTCOME" "fetch:$FETCH_OUTCOME"; do
+          for prerequisite in "checkout:$CHECKOUT_OUTCOME" "toolchain:$TOOLCHAIN_OUTCOME" "barbican:$BARBICAN_OUTCOME" "scanners:$SCANNERS_OUTCOME" "fetch:$FETCH_OUTCOME"; do
             if [[ "$prerequisite" != *:success ]]; then
               setup_missing="${setup_missing}${setup_missing:+, }${prerequisite%%:*}"
             fi
@@ -390,7 +435,8 @@ jobs:
             printf '| Checked-out revision | %s |\n' "$current_label"
             printf '| Checkout | %s |\n' "$(native_outcome "$CHECKOUT_OUTCOME")"
             printf '| Toolchain installation | %s |\n' "$(native_outcome "$TOOLCHAIN_OUTCOME")"
-            printf '| Tool installation | %s |\n' "$(native_outcome "$TOOLS_OUTCOME")"
+            printf '| Barbican setup | %s |\n' "$(native_outcome "$BARBICAN_OUTCOME")"
+            printf '| Scanner installation | %s |\n' "$(native_outcome "$SCANNERS_OUTCOME")"
             printf '| Dependency fetch | %s |\n' "$(native_outcome "$FETCH_OUTCOME")"
             printf '| Pre-release gate | %s |\n' "$(native_outcome "$GATE_OUTCOME")"
             printf '| Evidence toolchain conformance | %s |\n' "$(native_outcome "$ELIGIBILITY_OUTCOME")"
@@ -400,23 +446,23 @@ jobs:
             printf '\n%s\n' 'Failures retain their command logs and keep the job red. Unavailable evidence is not a passing policy verdict.'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-
-  audit-nightly:
-    # Advisory landscape can change with no repo change, so this also runs on
-    # a schedule against the current default branch.
+  nightly-audit:
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Install cargo-barbican (pinned)
-        run: |
-          cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.44.1
-
-      - name: Install cargo-deny and cargo-audit (pinned)
-        run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
-
-      - run: cargo barbican audit
+        with:
+          persist-credentials: false
+      - id: barbican
+        uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
+        with:
+          version: 0.45.0
+      - run: rustup toolchain install
+      - run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
+      - run: cargo fetch --locked
+      - env:
+          BARBICAN: ${{ steps.barbican.outputs.executable }}
+        run: '"$BARBICAN" audit'
 ```
 
 Notes on this layout:
@@ -498,7 +544,7 @@ copy only to an absent destination:
 
 ```sh
 barbican_source=$(mktemp -d) &&
-git clone --depth 1 --branch v0.44.1 \
+git clone --depth 1 --branch v0.45.0 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream" &&
 cat "$barbican_source/upstream/templates/hooks/pre-commit"
 ```

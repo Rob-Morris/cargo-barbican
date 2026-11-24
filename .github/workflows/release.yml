@@ -1,0 +1,312 @@
+name: Attested binary release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: barbican-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_RUN: ${{ github.run_id }}/attempts/${{ github.run_attempt }}
+
+jobs:
+  preflight:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      source: ${{ steps.identity.outputs.source }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate protected lightweight tag, main and version bundle
+        id: identity
+        run: sh scripts/check-release-event.sh
+
+  verify:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: sh scripts/check_vendored_source.sh
+      - name: Provision reviewed macOS native fixture evaluator
+        if: runner.os == 'macOS'
+        run: |
+          evaluator=$(sh scripts/provision-native-test-evaluator.sh "$RUNNER_TEMP/barbican-native-evaluator")
+          printf 'BARBICAN_TEST_RUSTUP=%s\n' "$evaluator" >> "$GITHUB_ENV"
+      - run: rustup toolchain install
+      - name: Provision already reviewed scanner versions
+        run: cargo install --locked --root "$RUNNER_TEMP/barbican-scanners" cargo-audit@0.22.1 cargo-deny@0.19.6
+      - run: echo "$RUNNER_TEMP/barbican-scanners/bin" >> "$GITHUB_PATH"
+      - run: cargo fetch --locked
+      - run: sh scripts/verify.sh
+      - run: sh scripts/verify-adoption.sh
+      - run: sh scripts/verify-cargo-tools.sh
+
+  build_linux:
+    needs: [preflight, verify]
+    runs-on: ubuntu-22.04
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+      RELEASE_SOURCE: ${{ needs.preflight.outputs.source }}
+      RELEASE_TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: sh scripts/check_vendored_source.sh
+      - run: rustup toolchain install
+      - run: cargo fetch --locked
+      - name: Locked native release build and full notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin cargo-barbican
+          cargo metadata --locked --offline --format-version 1 > "$RUNNER_TEMP/metadata.json"
+          python3 -I -B scripts/release_protocol.py notices --metadata "$RUNNER_TEMP/metadata.json" --output "$RUNNER_TEMP/LICENSES.txt"
+          python3 -I -B scripts/release_protocol.py capture --directory "$RUNNER_TEMP/payload" \
+            --binary target/release/cargo-barbican --notices "$RUNNER_TEMP/LICENSES.txt" \
+            --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN" --target "$RELEASE_TARGET"
+      - name: Upload exact same-run payload and receipt
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: x86_64-unknown-linux-gnu-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/payload/cargo-barbican-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu
+            ${{ runner.temp }}/payload/cargo-barbican-v${{ env.RELEASE_VERSION }}-LICENSES.txt
+            ${{ runner.temp }}/payload/receipt.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  build_macos:
+    needs: [preflight, verify]
+    runs-on: macos-15
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+      RELEASE_SOURCE: ${{ needs.preflight.outputs.source }}
+      RELEASE_TARGET: aarch64-apple-darwin
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: sh scripts/check_vendored_source.sh
+      - run: rustup toolchain install
+      - run: cargo fetch --locked
+      - name: Locked native release build and full notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin cargo-barbican
+          cargo metadata --locked --offline --format-version 1 > "$RUNNER_TEMP/metadata.json"
+          python3 -I -B scripts/release_protocol.py notices --metadata "$RUNNER_TEMP/metadata.json" --output "$RUNNER_TEMP/LICENSES.txt"
+          python3 -I -B scripts/release_protocol.py capture --directory "$RUNNER_TEMP/payload" \
+            --binary target/release/cargo-barbican --notices "$RUNNER_TEMP/LICENSES.txt" \
+            --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN" --target "$RELEASE_TARGET"
+      - name: Upload exact same-run payload and receipt
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: aarch64-apple-darwin-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/payload/cargo-barbican-v${{ env.RELEASE_VERSION }}-aarch64-apple-darwin
+            ${{ runner.temp }}/payload/cargo-barbican-v${{ env.RELEASE_VERSION }}-LICENSES.txt
+            ${{ runner.temp }}/payload/receipt.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  native_payload:
+    needs: [preflight, build_linux, build_macos]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, build: linux}
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, build: linux}
+          - {os: macos-15, target: aarch64-apple-darwin, build: macos}
+          - {os: macos-26, target: aarch64-apple-darwin, build: macos}
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+      RELEASE_SOURCE: ${{ needs.preflight.outputs.source }}
+      RELEASE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ matrix.build == 'linux' && needs.build_linux.outputs.artifact-id || needs.build_macos.outputs.artifact-id }}
+          path: ${{ runner.temp }}/payloads/${{ matrix.target }}
+          digest-mismatch: error
+      - name: Check exact files, raw bytes, native linkage and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I -B scripts/release_protocol.py smoke --directory "$RUNNER_TEMP/payloads/$RELEASE_TARGET" \
+            --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN" --target "$RELEASE_TARGET"
+      - name: Hermetic installer refusal and publication contract
+        run: python3 scripts/tests/install_barbican_test.py
+      - run: sh scripts/check_vendored_source.sh
+      - run: rustup toolchain install
+      - name: Provision independently reviewed scanner for actual payload adoption
+        run: cargo install --locked --root "$RUNNER_TEMP/barbican-adoption-scanner" cargo-deny@0.19.6
+      - name: Run real adoption journeys with the exact transported release executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/barbican-adoption-scanner/bin:$PATH"
+          export BARBICAN_TEST_RELEASE_BINARY="$RUNNER_TEMP/payloads/$RELEASE_TARGET/cargo-barbican-v$RELEASE_VERSION-$RELEASE_TARGET"
+          sh scripts/verify-adoption.sh
+
+  sign:
+    needs: [preflight, build_linux, build_macos, native_payload]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+      RELEASE_SOURCE: ${{ needs.preflight.outputs.source }}
+    steps:
+      # Allowlist: checkout, transport, static protocol checks, signing, transport.
+      # No Cargo/build scripts, candidate executable, shell profile or package install.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build_linux.outputs.artifact-id }},${{ needs.build_macos.outputs.artifact-id }}
+          path: ${{ runner.temp }}/payloads
+          digest-mismatch: error
+      - name: Require both exact same-attempt native payloads
+        run: >
+          python3 -I -B scripts/release_protocol.py combine --directory "$RUNNER_TEMP/payloads"
+          --output "$RUNNER_TEMP/signed" --version "$RELEASE_VERSION"
+          --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN"
+      - name: Attest final executable and notice bytes
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/signed/cargo-barbican-v${{ env.RELEASE_VERSION }}-aarch64-apple-darwin
+            ${{ runner.temp }}/signed/cargo-barbican-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu
+            ${{ runner.temp }}/signed/cargo-barbican-v${{ env.RELEASE_VERSION }}-LICENSES.txt
+          push-to-registry: false
+          create-storage-record: false
+      - name: Retain generated proof and capture final file set
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE_PATH" "$RUNNER_TEMP/signed/cargo-barbican-v$RELEASE_VERSION-provenance.sigstore.jsonl"
+          python3 -I -B scripts/release_protocol.py seal --directory "$RUNNER_TEMP/signed" \
+            --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: signed-release-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/signed/*
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  publish:
+    needs: [preflight, sign]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+      RELEASE_SOURCE: ${{ needs.preflight.outputs.source }}
+    steps:
+      # Allowlist: checkout, transport, static final checks and release API only.
+      # No signing capability and no candidate/build-script execution.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign.outputs.artifact-id }}
+          path: ${{ runner.temp }}/payloads/signed-release
+          digest-mismatch: error
+      - name: Check exact final signed raw bytes
+        run: >
+          python3 -I -B scripts/release_protocol.py check-sealed --directory "$RUNNER_TEMP/payloads/signed-release"
+          --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN"
+      - name: Reconcile owned draft and publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          python3 -I -B scripts/publish-release.py --directory "$RUNNER_TEMP/payloads/signed-release"
+          --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN"
+
+  public_acceptance:
+    needs: [preflight, publish]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Actual supported standalone installer against signed public release
+        id: standalone
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          root=$(mktemp -d "$RUNNER_TEMP/barbican-public-proof.XXXXXXXX")
+          sh scripts/install-barbican.sh --version "$RELEASE_VERSION" --install-dir "$root/install"
+          printf 'executable=%s/install/bin/cargo-barbican\n' "$root" >> "$GITHUB_OUTPUT"
+      - name: Probe verified standalone output without verifier credentials
+        env:
+          BARBICAN: ${{ steps.standalone.outputs.executable }}
+        run: |
+          scratch=$(mktemp -d "$RUNNER_TEMP/barbican-public-smoke.XXXXXXXX")
+          trap 'rm -rf "$scratch"' EXIT
+          cd "$scratch"
+          env -i PATH=/usr/bin:/bin HOME="$scratch" TMPDIR="$scratch" "$BARBICAN" --version
+          env -i PATH=/usr/bin:/bin HOME="$scratch" TMPDIR="$scratch" "$BARBICAN" toolchain trust show
+      - name: Actual pinned setup action
+        id: setup
+        uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
+        with:
+          version: ${{ needs.preflight.outputs.version }}
+      - name: Use exact action output
+        env:
+          BARBICAN: ${{ steps.setup.outputs.executable }}
+        run: '"$BARBICAN" --version'
+      - run: sh scripts/check_vendored_source.sh
+      - run: rustup toolchain install
+      - name: Provision independently reviewed scanner
+        run: cargo install --locked --root "$RUNNER_TEMP/barbican-public-scanner" cargo-deny@0.19.6
+      - name: Real adoption with the supported verified installed executable
+        env:
+          BARBICAN_TEST_RELEASE_BINARY: ${{ steps.standalone.outputs.executable }}
+        run: |
+          export PATH="$RUNNER_TEMP/barbican-public-scanner/bin:$PATH"
+          sh scripts/verify-adoption.sh

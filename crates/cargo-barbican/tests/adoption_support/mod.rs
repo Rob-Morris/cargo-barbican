@@ -86,7 +86,16 @@ impl Fixture {
     }
 
     pub fn barbican(&self, args: &[&str]) -> Command {
-        let mut command = self.command(env!("CARGO_BIN_EXE_cargo-barbican"));
+        let executable = std::env::var_os("BARBICAN_TEST_RELEASE_BINARY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_cargo-barbican")));
+        assert!(
+            executable.is_absolute(),
+            "release fixture checker must be absolute"
+        );
+        let metadata = fs::symlink_metadata(&executable).unwrap();
+        assert!(metadata.is_file() && !metadata.file_type().is_symlink());
+        let mut command = self.command(executable);
         command.args(args);
         command
     }

@@ -9,9 +9,9 @@ boundary.
 cargo-barbican is a Cargo subcommand for Rust supply-chain hardening: a
 portable, policy-first tool that gives a Rust repo one dependency-intake gate.
 It was extracted from the equivalent Rust workflow in undertask's Python and
-shell scripts and has grown its own product surface beyond them. Local/git
-install-and-pin is the current distribution; crates.io publication is deferred,
-not foreclosed.
+shell scripts and has grown its own product surface beyond them. Verified
+binary releases and explicit source installation are the current distribution;
+crates.io publication is deferred, not foreclosed.
 
 ## Source material
 

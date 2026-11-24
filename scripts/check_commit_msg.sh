@@ -97,45 +97,13 @@ if [ -n "$parsed" ]; then
     exit 1
   fi
 
-  canonical_summary=$(
-    awk '
-      /^\*\*Summary\*\*/ {
-        sub(/^\*\*Summary\*\* /, "")
-        print
-        exit
-      }
-    ' "$changelog_file"
-  )
-
-  if [ -z "$canonical_summary" ]; then
-    printf >&2 '%s\n' "commit-msg: $changelog_file is missing the top-line **Summary**"
-    exit 1
-  fi
+  script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+  canonical_summary=$(sh "$script_dir/check_changelog.sh" "$version") || exit 1
 
   if [ "$summary" != "$canonical_summary" ]; then
     printf >&2 '%s\n' "commit-msg: subject Summary does not match the canonical $changelog_file Summary"
     printf >&2 '  subject:   %s\n' "$summary"
     printf >&2 '  canonical: %s\n' "$canonical_summary"
-    exit 1
-  fi
-
-  changelog_link="[v$version](changelog/v$version.md)"
-
-  if ! awk -F'|' -v link="$changelog_link" -v expected="$summary" '
-    function trim(s) {
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
-      return s
-    }
-    /^\|/ {
-      version_col = trim($2)
-      summary_col = trim($4)
-      if (version_col == link && summary_col == expected) {
-        found = 1
-      }
-    }
-    END { exit(found ? 0 : 1) }
-  ' docs/CHANGELOG.md; then
-    printf >&2 '%s\n' "commit-msg: docs/CHANGELOG.md is missing the matching v$version row for the canonical Summary"
     exit 1
   fi
 

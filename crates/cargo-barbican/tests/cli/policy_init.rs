@@ -346,7 +346,7 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
     assert!(rendered.contains("- docs/dependency-reviews: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews/README.md: created\n"));
     assert!(rendered.contains(
-        "Adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/v0.44.1/docs/user/adoption.md"
+        "Adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/v0.45.0/docs/user/adoption.md"
     ));
     assert!(rendered.contains("Review current dependencies"));
     assert!(stderr.is_empty());
@@ -369,7 +369,7 @@ fn policy_init_without_ci_does_not_emit_workflow() {
     assert!(!temp_dir.join(".github/workflows/barbican.yml").exists());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("policy init --ci github"));
-    assert!(rendered.contains("blob/v0.44.1/docs/user/ci.md#pre-commit-hook"));
+    assert!(rendered.contains("blob/v0.45.0/docs/user/ci.md#pre-commit-hook"));
     assert!(stderr.is_empty());
 }
 
@@ -406,10 +406,10 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
         // metadata fails on any runner whose cache lacks other platforms'
         // crates.
         "cargo fetch --locked",
-        "cargo barbican gatehouse pre-release",
-        "cargo barbican toolchain check",
-        "cargo barbican age-lock --base-ref",
-        "cargo barbican assess --base-ref",
+        "\"$BARBICAN\" gatehouse pre-release",
+        "\"$BARBICAN\" toolchain check",
+        "\"$BARBICAN\" age-lock --base-ref",
+        "\"$BARBICAN\" assess --base-ref",
     ] {
         assert!(
             workflow.contains(gate_command),
@@ -418,13 +418,18 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     }
     assert_eq!(
         workflow
-            .matches("cargo barbican gatehouse pre-release")
+            .matches("\"$BARBICAN\" gatehouse pre-release")
             .count(),
         1
     );
     assert!(!workflow.contains("cargo barbican inventory --enforce"));
     assert!(workflow.contains("cargo install --locked"));
-    assert!(workflow.contains("--tag v0.44.1"));
+    assert!(workflow.contains("version: 0.45.0"));
+    assert!(
+        workflow
+            .contains("uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe")
+    );
+    assert!(!workflow.contains("cargo install --locked --git"));
     assert!(workflow.contains("cargo-deny@0.19.6"));
     assert!(workflow.contains("cargo-audit@0.22.1"));
     assert!(
@@ -513,7 +518,7 @@ fn policy_init_ci_github_fails_closed_on_existing_workflow() {
         "The .github/workflows/barbican.yml workflow was not written because a file already exists there"
     ));
     assert!(rendered.contains(&created));
-    assert!(created.contains("cargo barbican toolchain check"));
+    assert!(created.contains("\"$BARBICAN\" toolchain check"));
     assert!(created.contains("name: Summarise PR evidence"));
     assert!(stderr.is_empty());
 }
