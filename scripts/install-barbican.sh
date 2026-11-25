@@ -85,18 +85,36 @@ set -- $(metadata "$parent")
 case "$2" in *[2367][0-7]|*[0-7][2367]) invalid 'installation parent must not be group/other writable' ;; esac
 [ ! -L "$destination" ] || invalid 'destination is a symlink; choose a fresh owned version root'
 [ ! -e "$destination" ] || [ -d "$destination" ] || invalid 'destination is not a directory'
-check_gh() {
-  group=$1 operation=$2
-  shift 2
-  help=$(gh "$group" "$operation" --help 2>/dev/null) || invalid 'trusted gh lacks required verification commands; first tested baseline is 2.100.0'
-  for flag in "$@"; do
-    printf '%s\n' "$help" | grep -Eq -- "$flag([[:space:]=]|$)" || invalid "trusted gh $group $operation lacks $flag; first tested baseline is 2.100.0"
-  done
+tag="v$version"
+repo=Rob-Morris/cargo-barbican
+uri="https://github.com/$repo"
+san="$uri/.github/workflows/release.yml@refs/tags/$tag"
+
+verify_release() {
+  operation=$1
+  shift
+  gh release "$operation" --repo "github.com/$repo" --format json "$@"
 }
-check_gh release verify --format --jq --repo
-check_gh release verify-asset --format --jq --repo
-check_gh attestation verify --bundle --hostname --repo --cert-identity --cert-oidc-issuer \
-  --source-ref --source-digest --signer-digest --deny-self-hosted-runners --predicate-type --format --jq
+verify_provenance() {
+  signer_source=$1 proof_bundle=$2
+  shift 2
+  gh attestation verify --bundle "$proof_bundle" \
+    --hostname github.com --repo "$repo" --cert-identity "$san" \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --source-ref "refs/tags/$tag" --source-digest "$signer_source" --signer-digest "$signer_source" \
+    --deny-self-hosted-runners --predicate-type https://slsa.dev/provenance/v1 \
+    --format json "$@"
+}
+check_gh() {
+  command_label=$1
+  shift
+  # gh validates option names before handling --help. The help output is for people.
+  "$@" --jq . --help >/dev/null 2>&1 ||
+    invalid "trusted gh $command_label lacks required verification options; first tested baseline is 2.100.0"
+}
+check_gh 'release verify' verify_release verify
+check_gh 'release verify-asset' verify_release verify-asset
+check_gh 'attestation verify' verify_provenance 0000000000000000000000000000000000000000 /dev/null
 gh auth token --hostname github.com >/dev/null 2>&1 || invalid 'configure trusted gh read-only authentication for github.com (GH_TOKEN or gh auth login)'
 
 stage=$(mktemp -d "$parent/.barbican-install.XXXXXXXX") || fail 'cannot create private sibling stage'
@@ -120,9 +138,6 @@ trap 'cancel 130' INT
 trap 'cancel 143' TERM
 trap 'cancel 129' HUP
 mkdir "$stage/download" "$stage/scratch" "$stage/ready" "$stage/ready/bin"
-tag="v$version"
-repo=Rob-Morris/cargo-barbican
-uri="https://github.com/$repo"
 mac="cargo-barbican-$tag-aarch64-apple-darwin"
 linux="cargo-barbican-$tag-x86_64-unknown-linux-gnu"
 notice="cargo-barbican-$tag-LICENSES.txt"
@@ -145,7 +160,7 @@ release_query='
   map(. as $name | [$subjects[] | select(.name == $name)] |
     select(length == 1) | .[0].digest.sha256 | select(test("^[0-9a-f]{64}$"))) |
   select(length == 4) | [$source] + . | join(" ")'
-gh release verify "$tag" --repo "github.com/$repo" --format json --jq "$release_query" > "$stage/release" || fail 'release verification failed; check trusted gh, read-only authentication and network access'
+verify_release verify "$tag" --jq "$release_query" > "$stage/release" || fail 'release verification failed; check trusted gh, read-only authentication and network access'
 [ "$(wc -l < "$stage/release" | tr -d ' ')" = 1 ] || fail 'missing or ambiguous canonical signed release/source/assets'
 read -r source mac_sha linux_sha notice_sha bundle_sha extra < "$stage/release"
 [ -z "$extra" ] && [ -n "$bundle_sha" ] || fail 'unsupported verified release result'
@@ -158,11 +173,10 @@ for name in "$asset" "$notice" "$bundle"; do
   [ -f "$file" ] && [ ! -L "$file" ] && [ -s "$file" ] || fail "missing regular payload: $name"
   case "$name" in "$asset") expected=$asset_sha ;; "$notice") expected=$notice_sha ;; *) expected=$bundle_sha ;; esac
   [ "$(digest "$file")" = "$expected" ] || fail "signed name/digest mismatch: $name"
-  gh release verify-asset "$tag" "$file" --repo "github.com/$repo" --format json --jq "$release_query" > "$stage/membership" || fail "release asset verification failed: $name"
+  verify_release verify-asset "$tag" "$file" --jq "$release_query" > "$stage/membership" || fail "release asset verification failed: $name"
   cmp -s "$stage/release" "$stage/membership" || fail 'asset proof does not match canonical verified release'
 done
 
-san="$uri/.github/workflows/release.yml@refs/tags/$tag"
 provenance_query='
   [ .[] | .verificationResult | .signature.certificate as $c |
     select($c.subjectAlternativeName == "'"$san"'" and
@@ -182,12 +196,8 @@ provenance_query='
       length == 1 and .[0].digest.sha256 == $required[1]) |
     select(. == [true, true, true]) ] | select(length > 0) | "verified"'
 for name in "$asset" "$notice"; do
-  result=$(gh attestation verify "$stage/download/$name" --bundle "$stage/download/$bundle" \
-    --hostname github.com --repo "$repo" --cert-identity "$san" \
-    --cert-oidc-issuer https://token.actions.githubusercontent.com \
-    --source-ref "refs/tags/$tag" --source-digest "$source" --signer-digest "$source" \
-    --deny-self-hosted-runners --predicate-type https://slsa.dev/provenance/v1 \
-    --format json --jq "$provenance_query") || fail "provenance verification failed: $name"
+  result=$(verify_provenance "$source" "$stage/download/$bundle" "$stage/download/$name" \
+    --jq "$provenance_query") || fail "provenance verification failed: $name"
   [ "$result" = verified ] || fail 'no independently complete provenance proof matches all required identities and subjects'
 done
 header=$(od -An -tx1 -N20 "$stage/download/$asset" | tr -d ' \n')

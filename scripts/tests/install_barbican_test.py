@@ -57,7 +57,9 @@ with (root / 'calls').open('a') as f: f.write(json.dumps(args) + '\\n')
 if '--help' in args:
  flags = ['--format', '--jq', '--repo', '--bundle', '--hostname', '--cert-identity', '--cert-oidc-issuer', '--source-ref', '--source-digest', '--signer-digest', '--deny-self-hosted-runners', '--predicate-type']
  if os.environ.get('TEST_FAILURE') == 'missing-flag': flags.remove('--cert-identity')
- print(' '.join(flags)); sys.exit(0)
+ if any(arg.startswith('--') and arg not in flags + ['--help'] for arg in args[2:]): sys.exit(1)
+ print(' '.join(flag + '[=true|false]' if flag == '--deny-self-hosted-runners' else flag for flag in flags))
+ sys.exit(0)
 if args[:2] == ['auth', 'token']:
  sys.exit(1 if os.environ.get('TEST_FAILURE') == 'missing-auth' else 0)
 if os.environ.get('TEST_FAILURE') == 'gh': sys.exit(1)
@@ -311,8 +313,16 @@ sys.exit(subprocess.run([os.environ['TEST_JQ'], '-r', query, str(root/name)]).re
                 uname.unlink()
                 runtime.unlink()
 
+    def test_preflight_uses_flag_parsing_before_network(self):
+        result = self.run_installer(failure='missing-flag')
+        self.assert_refused(result, 2)
+        self.assertIn('attestation verify lacks required verification options', result.stderr)
+        calls = [json.loads(line) for line in (self.state / 'calls').read_text().splitlines()]
+        self.assertTrue(all('--help' in call for call in calls))
+        self.assertIn('--cert-identity', calls[-1])
+        self.assertIn('--deny-self-hosted-runners', calls[-1])
+
     def test_network_and_cancellation_fail_closed(self):
-        self.assert_refused(self.run_installer(failure='missing-flag'), 2)
         self.assert_refused(self.run_installer(failure='missing-auth'), 2)
         self.assert_refused(self.run_installer(failure='gh'))
         self.assert_refused(self.run_installer(failure='signal'), 143)
