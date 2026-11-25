@@ -16,7 +16,7 @@ are macOS15+ ARM64 and GNU Linux x86-64 glibc2.35+ with libgcc_s.so.1.
 - uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
   id: barbican
   with:
-    version: 0.45.0
+    version: 0.45.1
 ```
 
 Use job `permissions: contents: read` and the exact `executable` output.
@@ -135,7 +135,7 @@ Follow [Adoption](adoption.md) for the ordered new/existing project journey.
 Install this release using its immutable identity:
 
 ```bash
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.45.0 cargo-barbican
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.45.1 cargo-barbican
 ```
 
 Init preserves regular policy/process/template files and completed records.
@@ -149,7 +149,7 @@ release into a scratch area. This does not assume an upstream checkout:
 
 ```sh
 barbican_source=$(mktemp -d)
-git clone --depth 1 --branch v0.45.0 \
+git clone --depth 1 --branch v0.45.1 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream"
 # Review templates in "$barbican_source/upstream/templates" before copying.
 ```
@@ -170,7 +170,7 @@ and copying desired files.
 
 ## Versioning and re-sync
 
-Every shipped template carries `Synced from cargo-barbican v0.45.0` provenance.
+Every shipped template carries `Synced from cargo-barbican v0.45.1` provenance.
 The process README and record template are consumer-owned and may be tailored.
 On upgrade, install the reviewed immutable release, obtain its templates in a
 scratch checkout as above, and review diffs before merging desired changes.

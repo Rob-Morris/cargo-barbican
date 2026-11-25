@@ -44,7 +44,7 @@ steps:
   - id: barbican
     uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
     with:
-      version: 0.45.0
+      version: 0.45.1
 ```
 
 Use the exact `steps.barbican.outputs.executable` for checker commands. Pin and
@@ -52,7 +52,7 @@ provision scanners and the already accepted compiler separately. Source setup
 remains an explicit alternative:
 
 ```sh
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.45.0
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.45.1
 cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
 ```
 
@@ -253,7 +253,7 @@ after a test-gate failure; consumers still need their own deployment review.
 ## Worked example
 
 ```yaml
-# Synced from cargo-barbican v0.45.0
+# Synced from cargo-barbican v0.45.1
 #
 # cargo-barbican CI enforcement gate.
 #
@@ -303,7 +303,7 @@ jobs:
         name: Set up the exact verified Barbican release
         uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
         with:
-          version: 0.45.0
+          version: 0.45.1
       - id: toolchain
         name: Install the pinned Rust toolchain
         # Reads rust-toolchain.toml; pin your toolchain there for reproducible gates.
@@ -456,7 +456,7 @@ jobs:
       - id: barbican
         uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
         with:
-          version: 0.45.0
+          version: 0.45.1
       - run: rustup toolchain install
       - run: cargo install --locked cargo-deny@0.19.6 cargo-audit@0.22.1
       - run: cargo fetch --locked
@@ -544,7 +544,7 @@ copy only to an absent destination:
 
 ```sh
 barbican_source=$(mktemp -d) &&
-git clone --depth 1 --branch v0.45.0 \
+git clone --depth 1 --branch v0.45.1 \
   https://github.com/Rob-Morris/cargo-barbican "$barbican_source/upstream" &&
 cat "$barbican_source/upstream/templates/hooks/pre-commit"
 ```

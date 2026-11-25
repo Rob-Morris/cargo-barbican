@@ -120,8 +120,11 @@ def inspect_binary(binary, target):
         require(required and max(required) <= (2, 35), 'unexpected GLIBC requirement above2.35')
         dynamic = run('readelf', '-d', str(binary))
         linked = set(re.findall(r'\(NEEDED\).*?\[(.*?)\]', dynamic))
-        require(linked == {'libgcc_s.so.1', 'libc.so.6'}, f'unreviewed native linkage: {linked}')
-        require('/lib64/ld-linux-x86-64.so.2' in run('readelf', '-l', str(binary)), 'unexpected GNU loader')
+        expected = {'libgcc_s.so.1', 'libc.so.6', 'ld-linux-x86-64.so.2'}
+        require(linked == expected, f'unreviewed native linkage: {sorted(linked)}')
+        program_headers = run('readelf', '-l', str(binary))
+        interpreters = re.findall(r'\[Requesting program interpreter: ([^\]]+)\]', program_headers)
+        require(interpreters == ['/lib64/ld-linux-x86-64.so.2'], 'unexpected GNU loader')
     else:
         require(target == TARGETS[0] and header[:8] == bytes.fromhex('cffaedfe0c000001'), 'expected native ARM64 Mach-O')
         loads = run('otool', '-l', str(binary))

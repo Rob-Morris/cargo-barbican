@@ -51,7 +51,7 @@ const GITHUB_WORKFLOW_PATH: &str = ".github/workflows/barbican.yml";
 /// so the workflow's own `${{ ... }}` expressions pass through verbatim rather
 /// than colliding with Rust's format braces. Third-party actions are pinned by
 /// full commit SHA to match the repo's own dogfooded `ci.yml`.
-const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.45.0
+const GITHUB_CI_WORKFLOW: &str = r#"# Synced from cargo-barbican v0.45.1
 #
 # cargo-barbican CI enforcement gate.
 #
@@ -98,7 +98,7 @@ jobs:
         name: Set up the exact verified Barbican release
         uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
         with:
-          version: 0.45.0
+          version: 0.45.1
       - id: toolchain
         name: Install the pinned Rust toolchain
         # Reads rust-toolchain.toml; pin your toolchain there for reproducible gates.
@@ -796,7 +796,7 @@ mod tests {
         );
         assert!(!GITHUB_CI_WORKFLOW.contains("cargo barbican inventory --enforce"));
         assert!(GITHUB_CI_WORKFLOW.contains("cargo install --locked"));
-        assert!(GITHUB_CI_WORKFLOW.contains("version: 0.45.0"));
+        assert!(GITHUB_CI_WORKFLOW.contains("version: 0.45.1"));
         assert!(
             GITHUB_CI_WORKFLOW
                 .contains("Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe")

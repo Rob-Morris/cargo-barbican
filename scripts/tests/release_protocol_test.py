@@ -28,6 +28,35 @@ RUN = '123/attempts/1'
 VERSION = '9.8.7'
 
 
+class NativeLinkageTests(unittest.TestCase):
+    def test_linux_qualified_loader_and_dependencies(self):
+        header = bytes.fromhex('7f454c4602010100000000000000000003003e00')
+        libs = ('libgcc_s.so.1', 'libc.so.6', 'ld-linux-x86-64.so.2')
+        loader = '/lib64/ld-linux-x86-64.so.2'
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / 'candidate'
+            binary.write_bytes(header)
+            for needed, interpreter, floor, failure in (
+                (libs, loader, '2.35', None),
+                (libs[:-1], loader, '2.35', 'unreviewed native linkage'),
+                (libs + ('libssl.so.3',), loader, '2.35', 'unreviewed native linkage'),
+                (libs, '/tmp' + loader, '2.35', 'unexpected GNU loader'),
+                (libs, loader, '2.36', 'unexpected GLIBC requirement'),
+            ):
+                with self.subTest(needed=needed, interpreter=interpreter, floor=floor):
+                    readelf = {
+                        '--version-info': f'  0x0010:   Name: GLIBC_{floor}  Flags: none  Version: 2',
+                        '-d': '\n'.join(f' (NEEDED) Shared library: [{name}]' for name in needed),
+                        '-l': f'      [Requesting program interpreter: {interpreter}]',
+                    }
+                    with patch.object(protocol, 'run', side_effect=lambda _, arg, __: readelf[arg]):
+                        if failure:
+                            with self.assertRaisesRegex(ValueError, failure):
+                                protocol.inspect_binary(binary, protocol.TARGETS[1])
+                        else:
+                            protocol.inspect_binary(binary, protocol.TARGETS[1])
+
+
 class PayloadTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='barbican-release-protocol-')

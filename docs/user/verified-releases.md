@@ -18,10 +18,10 @@ gh api --hostname github.com -H 'Accept: application/vnd.github.raw+json' \
   > "$bootstrap/install-barbican.sh"
 # Review the downloaded pinned source before continuing.
 mkdir -p "$HOME/.local/barbican"
-sh "$bootstrap/install-barbican.sh" --version 0.45.0 --install-dir "$HOME/.local/barbican/0.45.0"
+sh "$bootstrap/install-barbican.sh" --version 0.45.1 --install-dir "$HOME/.local/barbican/0.45.1"
 ```
 
-Select an explicitly reviewed published version; the example pins0.45.0.
+Select an explicitly reviewed published version; the example pins0.45.1.
 
 Create the parent first; it must be owned by you without group/other write access. This is a
 version installation root, containing `bin/cargo-barbican` and `LICENSES.txt`,
@@ -71,7 +71,7 @@ Inputs pass through environment variables, never executable shell expressions.
 
 Existing consumer workflows and specialised admission providers are never
 rewritten automatically. New ordinary CI uses the reviewed setup commit and
-exact0.45.0 release; [CI integration](ci.md) shows the concrete pins. Admission-enabled
+exact0.45.1 release; [CI integration](ci.md) shows the concrete pins. Admission-enabled
 providers must install before candidate checkout, retain their own reviewed
 identity, and use the exact checker path rather than a candidate PATH entry.
 
