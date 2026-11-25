@@ -302,7 +302,7 @@ class DocVersionTests(unittest.TestCase):
             self.assertEqual(check('--worktree'), 0)
             self.assertNotEqual(check('--staged'), 0)
             subprocess.run(['git', '-C', temporary, 'add', '.'], check=True)
-            path.write_text(original.replace('uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe',
+            path.write_text(original.replace('uses: Rob-Morris/cargo-barbican@fb138d380fd004be6fb1d93da5ceff2b540854cc',
                                              'uses: Rob-Morris/cargo-barbican@main', 1))
             self.assertNotEqual(check('--worktree'), 0)
 

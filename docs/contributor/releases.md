@@ -14,12 +14,17 @@ and [notice custody](../dependency-reviews/2026-11-25-binary-distribution-notice
 1. Review the full diff, canonical gate and security findings. Keep both crate
    versions, lockfile workspace versions, canonical Summary/index, README/docs
    and generated template pins coherent. The setup action pins the already
-   reviewed bootstrap commit `d9bf9b422475ff7e8ca789c9e66c6013d1546cbe`, avoiding
+   reviewed bootstrap commit `fb138d380fd004be6fb1d93da5ceff2b540854cc`, avoiding
    an impossible self-referential commit hash. Never substitute a moving branch.
 2. Before changing the emitted default, observe the inert hosted token fixture
    in ordinary public, fork PR, Dependabot PR and private-consumer contexts.
    Record actual actor/head-fork/visibility/run witnesses. Local personal auth,
    source review or mocks do not stand in for these observations.
+   When the bootstrap or its verifier interface changes, qualify the proposed
+   standalone installer and exact action commit against an existing immutable
+   Barbican release on the supported runner matrix before updating emitted pins.
+   Record the actual GitHub CLI versions. This exercises the installer preflight
+   as well as the verification commands.
 3. Prepare and obtain explicit approval for the concrete release/settings
    deployment. Enable immutable releases and read back the supported setting.
    Version tags need Active maintainer/admin-only creation authority plus

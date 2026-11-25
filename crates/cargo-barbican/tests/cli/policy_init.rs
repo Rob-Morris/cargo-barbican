@@ -346,7 +346,7 @@ fn policy_init_creates_minimal_scaffold_and_next_steps() {
     assert!(rendered.contains("- docs/dependency-reviews: created\n"));
     assert!(rendered.contains("- docs/dependency-reviews/README.md: created\n"));
     assert!(rendered.contains(
-        "Adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/v0.45.1/docs/user/adoption.md"
+        "Adoption guide: https://github.com/Rob-Morris/cargo-barbican/blob/v0.45.2/docs/user/adoption.md"
     ));
     assert!(rendered.contains("Review current dependencies"));
     assert!(stderr.is_empty());
@@ -369,7 +369,7 @@ fn policy_init_without_ci_does_not_emit_workflow() {
     assert!(!temp_dir.join(".github/workflows/barbican.yml").exists());
     let rendered = String::from_utf8(stdout).expect("stdout should be utf8");
     assert!(rendered.contains("policy init --ci github"));
-    assert!(rendered.contains("blob/v0.45.1/docs/user/ci.md#pre-commit-hook"));
+    assert!(rendered.contains("blob/v0.45.2/docs/user/ci.md#pre-commit-hook"));
     assert!(stderr.is_empty());
 }
 
@@ -424,10 +424,10 @@ fn policy_init_ci_github_emits_enforcement_workflow() {
     );
     assert!(!workflow.contains("cargo barbican inventory --enforce"));
     assert!(workflow.contains("cargo install --locked"));
-    assert!(workflow.contains("version: 0.45.1"));
+    assert!(workflow.contains("version: 0.45.2"));
     assert!(
         workflow
-            .contains("uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe")
+            .contains("uses: Rob-Morris/cargo-barbican@fb138d380fd004be6fb1d93da5ceff2b540854cc")
     );
     assert!(!workflow.contains("cargo install --locked --git"));
     assert!(workflow.contains("cargo-deny@0.19.6"));

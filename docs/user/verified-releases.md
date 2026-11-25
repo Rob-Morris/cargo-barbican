@@ -14,14 +14,14 @@ script piped to a shell:
 ```sh
 bootstrap=$(mktemp -d)
 gh api --hostname github.com -H 'Accept: application/vnd.github.raw+json' \
-  'repos/Rob-Morris/cargo-barbican/contents/scripts/install-barbican.sh?ref=d9bf9b422475ff7e8ca789c9e66c6013d1546cbe' \
+  'repos/Rob-Morris/cargo-barbican/contents/scripts/install-barbican.sh?ref=fb138d380fd004be6fb1d93da5ceff2b540854cc' \
   > "$bootstrap/install-barbican.sh"
 # Review the downloaded pinned source before continuing.
 mkdir -p "$HOME/.local/barbican"
-sh "$bootstrap/install-barbican.sh" --version 0.45.1 --install-dir "$HOME/.local/barbican/0.45.1"
+sh "$bootstrap/install-barbican.sh" --version 0.45.2 --install-dir "$HOME/.local/barbican/0.45.2"
 ```
 
-Select an explicitly reviewed published version; the example pins0.45.1.
+Select an explicitly reviewed published version; the example pins0.45.2.
 
 Create the parent first; it must be owned by you without group/other write access. This is a
 version installation root, containing `bin/cargo-barbican` and `LICENSES.txt`,
@@ -71,7 +71,7 @@ Inputs pass through environment variables, never executable shell expressions.
 
 Existing consumer workflows and specialised admission providers are never
 rewritten automatically. New ordinary CI uses the reviewed setup commit and
-exact0.45.1 release; [CI integration](ci.md) shows the concrete pins. Admission-enabled
+exact0.45.2 release; [CI integration](ci.md) shows the concrete pins. Admission-enabled
 providers must install before candidate checkout, retain their own reviewed
 identity, and use the exact checker path rather than a candidate PATH entry.
 
@@ -84,7 +84,7 @@ corrected new version; a failed post-publication job does not revoke signatures.
 
 The provider/controller/approved-input revisions remain exact reviewed choices.
 Existing files are never rewritten automatically. Vendor the reviewed installer
-from `d9bf9b422475ff7e8ca789c9e66c6013d1546cbe` into the provider (and review that
+from `fb138d380fd004be6fb1d93da5ceff2b540854cc` into the provider (and review that
 source); hard-code the chosen exact accepted release in its script. Do not fetch
 and execute an unpinned remote shell script. The initial signed-public-release
 acceptance gate must complete before adopting this recipe.

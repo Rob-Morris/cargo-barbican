@@ -1,6 +1,6 @@
 # cargo-barbican
 
-[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.45.1-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-verified%20binary-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
+[![CI](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml/badge.svg)](https://github.com/Rob-Morris/cargo-barbican/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.45.2-blue)](docs/CHANGELOG.md) [![Docs](https://img.shields.io/badge/docs-repo-brightgreen.svg)](docs/README.md) [![Rust](https://img.shields.io/badge/Rust-1.95.0-fc8d62?logo=rust&logoColor=white)](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/) [![Install](https://img.shields.io/badge/install-verified%20binary-B7410E?logo=rust&logoColor=white)](docs/user/integration.md)
 
 `cargo barbican` is a Cargo subcommand that makes it easier for Rust projects to
 manage dependency risk and defend against supply-chain attacks. It gives a Rust
@@ -115,12 +115,12 @@ installer before running its local copy; do not pipe a fetched script to a shell
 ```sh
 bootstrap=$(mktemp -d)
 gh api --hostname github.com -H 'Accept: application/vnd.github.raw+json' \
-  'repos/Rob-Morris/cargo-barbican/contents/scripts/install-barbican.sh?ref=d9bf9b422475ff7e8ca789c9e66c6013d1546cbe' \
+  'repos/Rob-Morris/cargo-barbican/contents/scripts/install-barbican.sh?ref=fb138d380fd004be6fb1d93da5ceff2b540854cc' \
   > "$bootstrap/install-barbican.sh"
 # Review the downloaded pinned source before continuing.
 mkdir -p "$HOME/.local/barbican"
-sh "$bootstrap/install-barbican.sh" --version 0.45.1 --install-dir "$HOME/.local/barbican/0.45.1"
-"$HOME/.local/barbican/0.45.1/bin/cargo-barbican" --version
+sh "$bootstrap/install-barbican.sh" --version 0.45.2 --install-dir "$HOME/.local/barbican/0.45.2"
+"$HOME/.local/barbican/0.45.2/bin/cargo-barbican" --version
 ```
 
 The [complete installation guide](docs/user/verified-releases.md) explains
@@ -135,10 +135,10 @@ For new ordinary GitHub CI, pin the setup source and the release separately:
 permissions:
   contents: read
 steps:
-  - uses: Rob-Morris/cargo-barbican@d9bf9b422475ff7e8ca789c9e66c6013d1546cbe
+  - uses: Rob-Morris/cargo-barbican@fb138d380fd004be6fb1d93da5ceff2b540854cc
     id: barbican
     with:
-      version: 0.45.1
+      version: 0.45.2
 ```
 
 Use `steps.barbican.outputs.executable` for checker commands. The action also
@@ -149,7 +149,7 @@ Source compilation stays an explicit option, using an already trusted compiler
 from a directory that cannot select an unaccepted repository compiler:
 
 ```sh
-cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.45.1
+cargo install --locked --git https://github.com/Rob-Morris/cargo-barbican --tag v0.45.2
 ```
 
 Neither route bootstraps trust in its own verifier/compiler. Keep exact pins;
