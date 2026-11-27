@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
@@ -11,23 +12,7 @@ fail() {
   exit 1
 }
 
-read_version() {
-  awk -F'"' '
-    $1 ~ /^[[:space:]]*version[[:space:]]*=/ { print $2; exit }
-  ' "$1"
-}
-
-crate_version=$(read_version crates/barbican/Cargo.toml)
-cargo_barbican_version=$(read_version crates/cargo-barbican/Cargo.toml)
-
-if [ -z "$crate_version" ]; then
-  fail "unable to read version from crates/barbican/Cargo.toml"
-fi
-
-if [ "$crate_version" != "$cargo_barbican_version" ]; then
-  fail "crate manifest versions diverge ($crate_version vs $cargo_barbican_version)"
-fi
-
+crate_version=$(sh "$SCRIPT_DIR/release-version.sh")
 tag="v$crate_version"
 tag_commit=$(git rev-parse --verify "refs/tags/$tag^{commit}" 2>/dev/null) \
   || fail "$tag does not exist or does not resolve to a commit"

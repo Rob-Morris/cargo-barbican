@@ -1,0 +1,141 @@
+name: Check native release payloads
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    outputs:
+      linux-artifact:
+        value: ${{ jobs.build_linux.outputs.artifact-id }}
+      macos-artifact:
+        value: ${{ jobs.build_macos.outputs.artifact-id }}
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_RUN: ${{ github.run_id }}/attempts/${{ github.run_attempt }}
+
+jobs:
+  build_linux:
+    runs-on: ubuntu-22.04
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_SOURCE: ${{ github.sha }}
+      RELEASE_TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: sh scripts/check_vendored_source.sh
+      - run: rustup toolchain install
+      - run: cargo fetch --locked
+      - name: Locked native release build and full notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin cargo-barbican
+          cargo metadata --locked --offline --format-version 1 > "$RUNNER_TEMP/metadata.json"
+          python3 -I -B scripts/release_protocol.py notices --metadata "$RUNNER_TEMP/metadata.json" --output "$RUNNER_TEMP/LICENSES.txt"
+          python3 -I -B scripts/release_protocol.py capture --directory "$RUNNER_TEMP/payload" \
+            --binary target/release/cargo-barbican --notices "$RUNNER_TEMP/LICENSES.txt" \
+            --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN" --target "$RELEASE_TARGET"
+      - name: Upload exact same-run payload and receipt
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: x86_64-unknown-linux-gnu-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/payload/cargo-barbican-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu
+            ${{ runner.temp }}/payload/cargo-barbican-v${{ env.RELEASE_VERSION }}-LICENSES.txt
+            ${{ runner.temp }}/payload/receipt.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  build_macos:
+    runs-on: macos-15
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_SOURCE: ${{ github.sha }}
+      RELEASE_TARGET: aarch64-apple-darwin
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - run: sh scripts/check_vendored_source.sh
+      - run: rustup toolchain install
+      - run: cargo fetch --locked
+      - name: Locked native release build and full notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin cargo-barbican
+          cargo metadata --locked --offline --format-version 1 > "$RUNNER_TEMP/metadata.json"
+          python3 -I -B scripts/release_protocol.py notices --metadata "$RUNNER_TEMP/metadata.json" --output "$RUNNER_TEMP/LICENSES.txt"
+          python3 -I -B scripts/release_protocol.py capture --directory "$RUNNER_TEMP/payload" \
+            --binary target/release/cargo-barbican --notices "$RUNNER_TEMP/LICENSES.txt" \
+            --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN" --target "$RELEASE_TARGET"
+      - name: Upload exact same-run payload and receipt
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: aarch64-apple-darwin-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/payload/cargo-barbican-v${{ env.RELEASE_VERSION }}-aarch64-apple-darwin
+            ${{ runner.temp }}/payload/cargo-barbican-v${{ env.RELEASE_VERSION }}-LICENSES.txt
+            ${{ runner.temp }}/payload/receipt.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  native_payload:
+    needs: [build_linux, build_macos]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, build: linux}
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, build: linux}
+          - {os: macos-15, target: aarch64-apple-darwin, build: macos}
+          - {os: macos-26, target: aarch64-apple-darwin, build: macos}
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_SOURCE: ${{ github.sha }}
+      RELEASE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ matrix.build == 'linux' && needs.build_linux.outputs.artifact-id || needs.build_macos.outputs.artifact-id }}
+          path: ${{ runner.temp }}/payloads/${{ matrix.target }}
+          digest-mismatch: error
+      - name: Check exact files, raw bytes, native linkage and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I -B scripts/release_protocol.py smoke --directory "$RUNNER_TEMP/payloads/$RELEASE_TARGET" \
+            --version "$RELEASE_VERSION" --source "$RELEASE_SOURCE" --run-id "$RELEASE_RUN" --target "$RELEASE_TARGET"
+      - name: Hermetic installer refusal and publication contract
+        run: python3 scripts/tests/install_barbican_test.py
+      - run: sh scripts/check_vendored_source.sh
+      - run: rustup toolchain install
+      - name: Provision independently reviewed scanner for actual payload adoption
+        run: cargo install --locked --root "$RUNNER_TEMP/barbican-adoption-scanner" cargo-deny@0.19.6
+      - name: Run real adoption journeys with the exact transported release executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/barbican-adoption-scanner/bin:$PATH"
+          export BARBICAN_TEST_RELEASE_BINARY="$RUNNER_TEMP/payloads/$RELEASE_TARGET/cargo-barbican-v$RELEASE_VERSION-$RELEASE_TARGET"
+          sh scripts/verify-adoption.sh

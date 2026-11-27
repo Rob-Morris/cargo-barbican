@@ -20,22 +20,19 @@ and [notice custody](../dependency-reviews/2026-11-25-binary-distribution-notice
    in ordinary public, fork PR, Dependabot PR and private-consumer contexts.
    Record actual actor/head-fork/visibility/run witnesses. Local personal auth,
    source review or mocks do not stand in for these observations.
-   When the bootstrap or its verifier interface changes, qualify the proposed
-   standalone installer and exact action commit against an existing immutable
-   Barbican release on the supported runner matrix before updating emitted pins.
-   Record the actual GitHub CLI versions. This exercises the installer preflight
-   as well as the verification commands.
 3. Prepare and obtain explicit approval for the concrete release/settings
    deployment. Enable immutable releases and read back the supported setting.
    Version tags need Active maintainer/admin-only creation authority plus
    **separate no-bypass update/deletion rules**. A creation exception must not
    permit moving/deleting a tag. The earlier ruleset inventory was empty;
    a null API immutability field is not evidence that the setting is enabled.
-4. Promote/push the reviewed history through the normal dev/main flow. Create
+4. [Rehearse the exact candidate commit](#pre-tag-rehearsal) and confirm it
+   passed before creating a tag. Promote/push the same reviewed history through
+   the normal dev/main flow without changing the commit SHA. Create
    one lightweight `vN.N.N` tag at the version commit on main, run
    `sh scripts/check_release_tag.sh <commit>`, then deliberately push that tag.
-   Annotated tags, prereleases, non-main commits, unprotected refs or incoherent
-   version notes refuse before building. No second routine dispatch is needed.
+   Annotated tags, prereleases, non-main commits, unprotected refs, incoherent
+   version notes or missing rehearsal evidence refuse before building.
 5. Observe fresh canonical verification on Linux and qualified macOS26, native
    builds on Ubuntu22.04 and ARM64 macOS15, and direct captured-payload native
    checks/adoption on Ubuntu22/24 and macOS15/26. Minimum-host checker startup
@@ -58,6 +55,35 @@ and [notice custody](../dependency-reviews/2026-11-25-binary-distribution-notice
    Confirm exact public source/asset/provenance identities before calling the
    release complete. Existing consumer workflows/providers migrate deliberately.
    Local binary upgrades are separate explicitly authorised work.
+
+## Pre-tag rehearsal
+
+Push the reviewed candidate commit to the canonical repository under
+`release-candidate/`. Use the full SHA you intend to tag, including the
+version bundle and the exact setup action pin. For example:
+
+```sh
+candidate=$(git rev-parse dev)
+git push origin "$candidate:refs/heads/release-candidate/vX.Y.Z"
+# Wait for Pre-tag release rehearsal in GitHub Actions, then check the result.
+sh scripts/check-release-rehearsal.sh "$candidate"
+```
+
+The rehearsal shares the two production builders and the four native payload
+checks, including exact linkage, runtime and scanner-backed adoption. It also
+combines the two receipts to verify notice agreement. In parallel, it selects
+the current immutable stable public release once and checks its real signed
+installation on the same runner images. It records the GitHub CLI version and
+exercises the candidate installer, the exact pinned action and the action in
+the candidate checkout. The three installations must agree on executable bytes.
+
+Use a fresh run close to tagging to catch runner image changes. The check
+requires the latest rehearsal for the exact commit to have completed
+successfully. If you change the commit, push the new SHA and wait for its run.
+If retrying the same run, rerun all jobs. The tag workflow checks the verdict
+again before building. Rehearsal jobs have read-only repository permissions
+and publish no release. Production builds and signs fresh artifacts for the
+protected tag and still checks installation of that newly published release.
 
 ## Retry and incident boundaries
 

@@ -1,0 +1,120 @@
+name: Pre-tag release rehearsal
+
+on:
+  push:
+    branches: ['release-candidate/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: barbican-release-rehearsal-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      baseline: ${{ steps.baseline.outputs.version }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Check release candidate source and version
+        id: identity
+        run: |
+          set -eu
+          test "$GITHUB_EVENT_NAME" = push
+          case "$GITHUB_REF" in refs/heads/release-candidate/*) ;; *) exit 1 ;; esac
+          version=$(sh scripts/check-release-source.sh)
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      - name: Select one immutable public baseline for the matrix
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh api --hostname github.com repos/Rob-Morris/cargo-barbican/releases/latest --jq '
+            select(.immutable == true and .draft == false and .prerelease == false) | .tag_name
+          ')
+          case "$tag" in
+            *[!v0-9.]*) echo 'Invalid Barbican baseline tag' >&2; exit 1 ;;
+          esac
+          if ! printf '%s\n' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo 'The latest Barbican release is not an immutable stable baseline' >&2
+            exit 1
+          fi
+          printf 'Candidate %s, signed installer baseline %s\n' "$GITHUB_SHA" "$tag"
+          printf 'version=%s\n' "${tag#v}" >> "$GITHUB_OUTPUT"
+
+  payloads:
+    needs: candidate
+    uses: ./.github/workflows/release-payloads.yml
+    with:
+      version: ${{ needs.candidate.outputs.version }}
+
+  compare_notices:
+    needs: [candidate, payloads]
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_VERSION: ${{ needs.candidate.outputs.version }}
+      RELEASE_RUN: ${{ github.run_id }}/attempts/${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.payloads.outputs.linux-artifact }},${{ needs.payloads.outputs.macos-artifact }}
+          path: ${{ runner.temp }}/payloads
+          digest-mismatch: error
+      - name: Require both exact same-attempt payloads and identical notices
+        run: >-
+          python3 -I -B scripts/release_protocol.py combine --directory "$RUNNER_TEMP/payloads"
+          --output "$RUNNER_TEMP/checked" --version "$RELEASE_VERSION"
+          --source "$GITHUB_SHA" --run-id "$RELEASE_RUN"
+
+  signed_installs:
+    needs: candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Verify standalone and pinned action installs
+        id: install
+        uses: ./.github/actions/check-release-install
+        with:
+          version: ${{ needs.candidate.outputs.baseline }}
+      - name: Verify the action in the candidate checkout
+        id: candidate_action
+        uses: ./
+        with:
+          version: ${{ needs.candidate.outputs.baseline }}
+      - name: Require the candidate action to return the verified bytes
+        env:
+          EXPECTED: ${{ steps.install.outputs.executable }}
+          ACTUAL: ${{ steps.candidate_action.outputs.executable }}
+        run: cmp "$EXPECTED" "$ACTUAL"
+
+  verdict:
+    if: always()
+    needs: [candidate, payloads, compare_notices, signed_installs]
+    runs-on: ubuntu-22.04
+    permissions: {}
+    env:
+      CANDIDATE: ${{ needs.candidate.result }}
+      PAYLOADS: ${{ needs.payloads.result }}
+      NOTICES: ${{ needs.compare_notices.result }}
+      INSTALLS: ${{ needs.signed_installs.result }}
+    steps:
+      - name: Require every rehearsal check to pass
+        run: |
+          printf 'Candidate: %s, payloads: %s, notices: %s, signed installs: %s\n' \
+            "$CANDIDATE" "$PAYLOADS" "$NOTICES" "$INSTALLS"
+          test "$CANDIDATE/$PAYLOADS/$NOTICES/$INSTALLS" = success/success/success/success

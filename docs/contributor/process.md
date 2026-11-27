@@ -75,16 +75,17 @@ Repo branch policy is simple:
 - `main` is stable and keeps the stricter rules above
 - `dev` is the default working branch for ongoing implementation
 
-For an immutable-tag release, commit the complete version bundle before
-creating the tag. Then prove that the manifest-derived tag resolves to the
-intended release commit:
+For an immutable-tag release, commit the complete version bundle and pass
+the [pre-tag rehearsal](releases.md#pre-tag-rehearsal) on that exact commit
+before creating the tag. Then prove that the manifest-derived tag resolves
+to the intended release commit:
 
 ```bash
 git tag vX.Y.Z <release-commit>
 sh scripts/check_release_tag.sh <release-commit>
 ```
 
-Only after that check passes should the commit and tag be pushed. Finish with
+Only after that check passes should the tag be pushed. Finish with
 a clean install from the published tag; that remote install is the deployment
 proof that the release identity advertised in user documentation is usable.
 
@@ -97,19 +98,8 @@ cargo install --locked \
 `--root` keeps the proof out of `~/.cargo/bin` until you actually want the
 binary installed.
 
-**If a tag name is being reused for a different commit** — a re-cut release
-after amending, which the insiders sequence has done repeatedly — cargo may
-reuse its cached checkout under `~/.cargo/git` and rebuild the *old* commit
-while still reporting success. Pass `--force` and confirm the commit hash cargo
-prints matches the tag:
-
-```text
-Installed package `cargo-barbican vX.Y.Z (…?tag=vX.Y.Z#<short-sha>)`
-```
-
-If that SHA is not the intended release commit, the cache served a stale
-checkout; clear `~/.cargo/git/db/cargo-barbican-*` and retry. Exit status alone
-does not prove the drill built the tagged tree.
+Confirm the commit hash reported by Cargo matches the protected tag.
+Use a new version if a protected tag's source needs correction.
 
 ## Verification Expectations
 

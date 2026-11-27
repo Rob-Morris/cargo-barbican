@@ -1,0 +1,46 @@
+name: Check verified release installation
+description: Exercise both supported installation routes against one signed release
+inputs:
+  version:
+    description: Exact published release version
+    required: true
+outputs:
+  executable:
+    description: Verified standalone executable
+    value: ${{ steps.standalone.outputs.executable }}
+runs:
+  using: composite
+  steps:
+    - name: Record hosted verifier version
+      shell: bash
+      run: gh --version
+    - name: Install with the standalone installer
+      id: standalone
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASE_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        root=$(mktemp -d "$RUNNER_TEMP/barbican-public-proof.XXXXXXXX")
+        sh scripts/install-barbican.sh --version "$RELEASE_VERSION" --install-dir "$root/install"
+        printf 'executable=%s/install/bin/cargo-barbican\n' "$root" >> "$GITHUB_OUTPUT"
+    - name: Install with the pinned setup action
+      id: setup
+      uses: Rob-Morris/cargo-barbican@fb138d380fd004be6fb1d93da5ceff2b540854cc
+      with:
+        version: ${{ inputs.version }}
+    - name: Check executable identity and static startup
+      shell: bash
+      env:
+        STANDALONE: ${{ steps.standalone.outputs.executable }}
+        ACTION: ${{ steps.setup.outputs.executable }}
+        RELEASE_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        scratch=$(mktemp -d "$RUNNER_TEMP/barbican-public-smoke.XXXXXXXX")
+        trap 'rm -rf "$scratch"' EXIT
+        cmp "$STANDALONE" "$ACTION"
+        cd "$scratch"
+        test "$(env -i PATH=/usr/bin:/bin HOME="$scratch" TMPDIR="$scratch" "$STANDALONE" --version)" = "cargo-barbican $RELEASE_VERSION"
+        env -i PATH=/usr/bin:/bin HOME="$scratch" TMPDIR="$scratch" "$STANDALONE" toolchain trust show

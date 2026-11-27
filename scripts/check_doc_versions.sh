@@ -97,6 +97,8 @@ assert_contains docs/user/ci.md "--tag v$crate_version" "immutable release insta
 assert_contains docs/user/ci.md "cargo-deny@0.19.6 cargo-audit@0.22.1" "reviewed delegate versions"
 assert_contains docs/user/ci.md "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10" "pinned checkout action"
 setup_revision=fb138d380fd004be6fb1d93da5ceff2b540854cc
+assert_contains .github/actions/check-release-install/action.yml \
+  "uses: Rob-Morris/cargo-barbican@$setup_revision" "exact reviewed setup action"
 for file in README.md docs/user/integration.md docs/user/ci.md; do
   assert_contains "$file" "uses: Rob-Morris/cargo-barbican@$setup_revision" "exact reviewed setup action"
   assert_contains "$file" "version: $crate_version" "exact checker release input"

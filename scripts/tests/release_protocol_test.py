@@ -224,7 +224,8 @@ class TagEventTests(unittest.TestCase):
     def test_event_tag_main_versions_and_annotated_ref(self):
         with tempfile.TemporaryDirectory(prefix='barbican-release-tag-') as temporary:
             root = Path(temporary)
-            for file in ('scripts/check-release-event.sh', 'scripts/check_release_tag.sh', 'scripts/check_changelog.sh'):
+            for file in ('scripts/check-release-event.sh', 'scripts/check-release-source.sh',
+                         'scripts/release-version.sh', 'scripts/check_changelog.sh'):
                 path = root / file
                 path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(REPO / file, path)
@@ -242,10 +243,13 @@ class TagEventTests(unittest.TestCase):
             git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture')
             source = git('rev-parse', 'HEAD')
             git('update-ref', 'refs/remotes/origin/main', source)
-            git('tag', 'v9.8.7')
             env = dict(os.environ, GITHUB_REPOSITORY='Rob-Morris/cargo-barbican', GITHUB_REPOSITORY_ID='1276595321',
                        GITHUB_REPOSITORY_OWNER_ID='2587163', GITHUB_EVENT_NAME='push', GITHUB_REF_TYPE='tag',
                        GITHUB_REF_NAME='v9.8.7', GITHUB_REF_PROTECTED='true', GITHUB_SHA=source, GITHUB_OUTPUT='')
+            candidate = subprocess.run(['sh', 'scripts/check-release-source.sh'], cwd=root, env=env,
+                                       capture_output=True, text=True, check=True)
+            self.assertEqual(candidate.stdout.strip(), VERSION)
+            git('tag', 'v9.8.7')
             def check(overrides=None):
                 return subprocess.run(['sh', 'scripts/check-release-event.sh'], cwd=root,
                                       env=dict(env, **(overrides or {})), capture_output=True)
@@ -269,11 +273,49 @@ class TagEventTests(unittest.TestCase):
             self.assertNotEqual(check().returncode, 0)
 
 
+class RehearsalEvidenceTests(unittest.TestCase):
+    def test_exact_current_success_is_required(self):
+        success = dict(id=123, head_sha=SOURCE, status='completed', conclusion='success',
+                       event='push', head_branch='release-candidate/v9.8.7',
+                       repository={'id': 1276595321}, head_repository={'id': 1276595321})
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            response = root / 'response.json'
+            gh = root / 'gh'
+            gh.write_text(
+                '#!/bin/sh\n'
+                'test "$#" = 6 && test "$1 $2 $3" = "api --hostname github.com" && '
+                'test "$4" = "repos/Rob-Morris/cargo-barbican/actions/workflows/release-rehearsal.yml/runs?event=push&head_sha='
+                + SOURCE + '&per_page=1" && test "$5" = --jq || exit 1\n'
+                'exec jq -r "$6 // empty" "$REHEARSAL_RESPONSE"\n'
+            )
+            gh.chmod(0o700)
+            env = dict(os.environ, PATH=f'{temporary}:{os.environ["PATH"]}', REHEARSAL_RESPONSE=str(response))
+            for runs, accepted in [
+                ([success], True),
+                ([], False),
+                ([dict(success, head_sha='b' * 40)], False),
+                ([dict(success, event='pull_request')], False),
+                ([dict(success, head_branch='dev')], False),
+                ([dict(success, head_repository={'id': 1})], False),
+                ([dict(success, status='in_progress', conclusion=None)], False),
+                ([dict(success, conclusion='failure'), success], False),
+            ]:
+                with self.subTest(runs=runs):
+                    response.write_text(json.dumps({'workflow_runs': runs}))
+                    result = subprocess.run(['sh', REPO / 'scripts/check-release-rehearsal.sh', SOURCE],
+                                            env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode == 0, accepted, result.stderr)
+                    if accepted:
+                        self.assertIn('/actions/runs/123', result.stdout)
+
+
 class DocVersionTests(unittest.TestCase):
     def test_active_action_and_release_pins_are_checked_in_both_snapshots(self):
         with tempfile.TemporaryDirectory(prefix='barbican-release-doc-versions-') as temporary:
             root = Path(temporary)
-            for name in ['README.md', 'rust-toolchain.toml', 'crates/barbican/Cargo.toml',
+            for name in ['README.md', 'rust-toolchain.toml', '.github/actions/check-release-install/action.yml',
+                         'crates/barbican/Cargo.toml',
                          'crates/cargo-barbican/Cargo.toml', 'docs/user/integration.md',
                          'docs/user/ci.md', 'crates/cargo-barbican/src/commands/policy.rs']:
                 path = root / name
