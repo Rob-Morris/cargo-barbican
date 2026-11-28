@@ -339,8 +339,8 @@ zeroize_derive = ["proc-macro"]
 zmij = ["build-rs"]
 
 [rust.families.allowed_advisories]
-rsa = [{ id = "RUSTSEC-2023-0071", review_by = "2026-12-04" }]
-crypto-bigint = [{ id = "RUSTSEC-2026-0387", review_by = "2026-12-04" }]
+rsa = [{ id = "RUSTSEC-2023-0071", review_by = "2026-12-28" }]
+crypto-bigint = [{ id = "RUSTSEC-2026-0387", review_by = "2026-12-28" }]
 
 [[rust.families]]
 name = "phase0-product-integration-2026-11-04-siblings-1"

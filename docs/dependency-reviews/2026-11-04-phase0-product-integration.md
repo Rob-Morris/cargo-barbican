@@ -29,6 +29,30 @@ receipt covers the maintained manifest and provenance for the new PGP pin.
 [Current inventory](rpgpie-0.12.0-tree.sha256) ·
 [Cumulative patch](2026-11-19-rpgpie-pgp.patch)
 
+### 28 November 2026 advisory re-review
+
+The maintainer renewed the two checksum-bound exceptions through **28 December
+2026 UTC**. The locked graph still selects `rsa 0.9.10` through PGP and the
+maintained rpgpie, and `crypto-bigint 0.5.5` through both `cx448` and
+`elliptic-curve`. The Rust toolchain verifier accepts public certificate
+packets and a detached binary signature. Signature verification uses public
+keys and public operands. The advisories concern private-key or secret-integer
+timing leakage. The renewal covers the existing exact selections and use only.
+
+The RustSec snapshot `c5279d0b0c9e8b70df666eb6d1edbabcfd1176bd` matched the
+upstream HEAD at review. An unfiltered locked `cargo-deny 0.19.6` scan reported
+exactly these two findings. The cached PGP, RSA and bigint archive checksums
+matched `Cargo.lock` and the reviewed targets. Gatehouse `policy-check`, all
+56 advisory tests and all eight verifier tests passed on the reviewed checkout.
+
+At the next checkpoint, check for a released [rPGP RustCrypto
+migration](https://github.com/rpgp/rpgp/pull/573), then verify the full locked
+graph, including rpgpie's direct RSA dependency, before retiring either
+exception. Re-review sooner if the graph or verifier scope changes. Sequoia
+2.5.0 remains a candidate for replacing both libraries. Its pure-Rust backend
+retains the affected RSA and `cx448` dependency families, and its LGPL licence
+falls outside the current allowlist.
+
 ## Classification
 
 Elevated-risk: cryptographic parsing, compressed input, build scripts/proc
