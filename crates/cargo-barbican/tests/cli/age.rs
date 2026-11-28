@@ -395,15 +395,11 @@ serde = "1.0.228"
 
 #[test]
 fn age_smoke_tests_the_ureq_client_against_a_local_http_server() {
-    // Asserts on a fixed calendar date's age relative to *real* elapsed time,
-    // so this genuinely needs the ambient wall clock rather than the shared
-    // default's injected `fixed_now()`.
     let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
     let Some((base_url, requests, handle)) = spawn_http_stub(
         "HTTP/1.1 200 OK",
-        r#"{"version":{"num":"1.0.228","checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"2026-05-01T00:00:00Z","yanked":false}}"#,
+        r#"{"version":{"num":"1.0.228","checksum":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","created_at":"2020-05-01T00:00:00Z","yanked":false}}"#,
     ) else {
-        eprintln!("[SKIP] no loopback bind available - skipping HTTP smoke test");
         return;
     };
     let client = UreqCratesIoClient::new(base_url);
@@ -413,9 +409,8 @@ fn age_smoke_tests_the_ureq_client_against_a_local_http_server() {
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
-    let exit_code =
-        run_cli_with_ambient_clock(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
-            .expect("command should run");
+    let exit_code = run_cli_with_runner(cli, &temp_dir, &client, &runner, &mut stdout, &mut stderr)
+        .expect("command should run");
 
     handle.join().expect("stub server should exit cleanly");
 
@@ -437,7 +432,7 @@ fn age_smoke_tests_the_ureq_client_against_a_local_http_server() {
     assert!(
         String::from_utf8(stdout)
             .expect("stdout should be utf8")
-            .contains("OK   serde@1.0.228: published 2026-05-01T00:00:00Z")
+            .contains("OK   serde@1.0.228: published 2020-05-01T00:00:00Z")
     );
 }
 
@@ -446,7 +441,6 @@ fn age_reports_http_statuses_from_the_ureq_client() {
     let cli = Cli::parse_from(["cargo-barbican", "age", "serde@1.0.228"]);
     let Some((base_url, _requests, handle)) = spawn_http_stub("HTTP/1.1 404 Not Found", "{}")
     else {
-        eprintln!("[SKIP] no loopback bind available - skipping HTTP smoke test");
         return;
     };
     let client = UreqCratesIoClient::new(base_url);

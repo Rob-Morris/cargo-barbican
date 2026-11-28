@@ -8,7 +8,8 @@
 # states are accepted and which are rejected.
 set -eu
 
-REPO_ROOT=$(git rev-parse --show-toplevel)
+REPO_ROOT=$(CDPATH= cd "$(dirname "$0")/../.." && pwd)
+. "$REPO_ROOT/scripts/tests/isolate_git_fixture.sh"
 SCRIPT="$REPO_ROOT/scripts/check_commit_msg.sh"
 
 WORK=$(mktemp -d)

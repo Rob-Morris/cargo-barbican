@@ -1738,10 +1738,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires real scanners; run sh scripts/verify-cargo-tools.sh"]
     fn native_policy_scanners_preserve_review_identity_and_reject_root_license() {
-        if std::env::var("BARBICAN_TOOL_POLICY_NATIVE").as_deref() != Ok("1") {
-            return;
-        }
+        assert_eq!(
+            std::env::var("BARBICAN_TOOL_POLICY_NATIVE").as_deref(),
+            Ok("1")
+        );
         use super::super::{context::NativeContext, source::Stage, store::Stores};
         let stage = Stage::new().unwrap();
         let budget = process::Budget::new(false).unwrap();

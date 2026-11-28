@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
-REPO_ROOT=$(git rev-parse --show-toplevel)
+REPO_ROOT=$(CDPATH= cd "$(dirname "$0")/../.." && pwd)
+. "$REPO_ROOT/scripts/tests/isolate_git_fixture.sh"
 SCRATCH=$(mktemp -d)
 trap 'rm -rf "$SCRATCH"' EXIT HUP INT TERM
 mkdir -p "$SCRATCH/scripts" "$SCRATCH/vendor/rpgpie/src" "$SCRATCH/docs/dependency-reviews"

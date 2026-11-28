@@ -73,12 +73,7 @@ if [ "$MODE" != skip ]; then
   sh scripts/tests/check_release_tag_test.sh
   python3 -B scripts/tests/install_barbican_test.py
   python3 -B scripts/tests/release_protocol_test.py
-  # verify_branch_guard_test.sh drives this very script (including its
-  # off-main `--vanilla` success path), so it sets this sentinel on its own
-  # nested invocations to stop them re-entering this block and recursing.
-  if [ -z "${VERIFY_BRANCH_GUARD_TEST_RUNNING-}" ]; then
-    sh scripts/tests/verify_branch_guard_test.sh
-  fi
+  sh scripts/tests/verify_branch_guard_test.sh
   cargo clippy --workspace --all-targets --locked -- -D warnings
 fi
 

@@ -201,6 +201,45 @@ mod tests {
     use super::*;
     use std::os::unix::fs::DirBuilderExt;
 
+    const LATE_CHILD: &str = r#"
+trap '' TERM
+(
+    trap '' TERM
+    echo ready > worker-ready
+    remaining=500
+    until [ -f release-worker ]; do
+        [ "$remaining" -gt 0 ] || exit 1
+        remaining=$((remaining - 1))
+        sleep 0.02
+    done
+    echo late > late-effect
+) &
+wait "$!"
+"#;
+
+    fn wait_until(timeout: Duration, ready: impl Fn() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
+        while !ready() {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
+
+    fn wait_for_marker(path: &Path, timeout: Duration) -> bool {
+        wait_until(timeout, || path.is_file())
+    }
+
+    fn assert_no_late_effect(root: &Path) {
+        fs::write(root.join("release-worker"), []).unwrap();
+        assert!(
+            !wait_for_marker(&root.join("late-effect"), Duration::from_secs(1)),
+            "abandoned child produced a late effect"
+        );
+    }
+
     #[test]
     fn cancellation_kills_and_reaps_owned_group_before_late_effect() {
         let root = fs::canonicalize(std::env::temp_dir())
@@ -213,25 +252,23 @@ mod tests {
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         let flag = Arc::new(AtomicBool::new(false));
         let other = flag.clone();
+        let ready_marker = root.join("worker-ready");
         let worker = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(150));
+            let ready = wait_for_marker(&ready_marker, Duration::from_secs(5));
             other.store(true, Ordering::SeqCst);
+            ready
         });
         let mut command = Command::new("/bin/sh");
-        command.current_dir(&root).args([
-            "-c",
-            "trap '' TERM; (trap '' TERM; sleep 1; echo late > late-effect) & wait",
-        ]);
+        command.current_dir(&root).args(["-c", LATE_CHILD]);
         let result = run(&mut command, &root, &flag, Duration::from_secs(5));
-        worker.join().unwrap();
+        assert!(
+            worker.join().unwrap(),
+            "descendant did not report readiness"
+        );
         assert!(result.is_err());
         let message = result.err().unwrap();
         assert!(message.contains("cancelled"), "{message}");
-        std::thread::sleep(Duration::from_millis(1100));
-        assert!(
-            !root.join("late-effect").exists(),
-            "abandoned child produced late effect: {message}"
-        );
+        assert_no_late_effect(&root);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -247,15 +284,19 @@ mod tests {
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         let mut broken = Command::new("/bin/sh")
             .current_dir(&root)
-            .args(["-c", "sleep 0.1; echo late > late-effect"])
+            .args(["-c", LATE_CHILD])
             .spawn()
             .unwrap();
-        std::thread::sleep(Duration::from_millis(250));
+        assert!(wait_for_marker(
+            &root.join("worker-ready"),
+            Duration::from_secs(5)
+        ));
+        fs::write(root.join("release-worker"), []).unwrap();
+        assert!(broken.wait().unwrap().success());
         assert!(
             root.join("late-effect").exists(),
             "negative detector must observe abandoned effect"
         );
-        broken.wait().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -268,7 +309,7 @@ mod tests {
         let cancellation = NativeCancellation::install().unwrap();
         assert!(NativeCancellation::install().is_err());
         let mut command = Command::new("/bin/sh");
-        command.current_dir(&root).args(["-c","trap '' TERM; echo ready > worker-ready; (trap '' TERM; sleep 1; echo late > late-effect) & wait"]);
+        command.current_dir(&root).args(["-c", LATE_CHILD]);
         let message = run(
             &mut command,
             &root,
@@ -278,8 +319,14 @@ mod tests {
         .err()
         .expect("real signal must cancel owned operation");
         assert!(message.contains("cancelled"), "{message}");
-        assert!(!root.join("late-effect").exists());
+        cancellation.flag().store(false, Ordering::SeqCst);
         fs::write(root.join("child-stopped"), message).unwrap();
+        assert!(
+            wait_until(Duration::from_secs(10), || {
+                cancellation.flag().load(Ordering::SeqCst)
+            }),
+            "follow-up signal was not observed"
+        );
     }
 
     #[test]
@@ -304,20 +351,16 @@ mod tests {
                 .stderr(Stdio::piped())
                 .spawn()
                 .unwrap();
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while !root.join("worker-ready").exists() && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            if !root.join("worker-ready").exists() {
-                let _ = child.kill();
-                let output = child.wait_with_output().unwrap();
-                panic!(
-                    "signal fixture did not start: {:?} {}",
-                    output.status,
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            for _ in 0..2 {
+            for marker in ["worker-ready", "child-stopped"] {
+                if !wait_for_marker(&root.join(marker), Duration::from_secs(10)) {
+                    let _ = child.kill();
+                    let output = child.wait_with_output().unwrap();
+                    panic!(
+                        "signal fixture did not report {marker}: {:?} {}",
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
                 assert!(
                     Command::new("/bin/kill")
                         .args([signal, &child.id().to_string()])
@@ -333,9 +376,7 @@ mod tests {
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
-            std::thread::sleep(Duration::from_millis(1100));
-            assert!(root.join("child-stopped").is_file());
-            assert!(!root.join("late-effect").exists());
+            assert_no_late_effect(&root);
             fs::remove_dir_all(root).unwrap();
         }
     }

@@ -20,6 +20,7 @@ pub(crate) use std::sync::OnceLock;
 pub(crate) use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) use std::sync::mpsc;
 pub(crate) use std::thread;
+use std::time::{Duration, Instant};
 pub(crate) use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) use barbican::{
@@ -1678,12 +1679,7 @@ pub(crate) fn fixed_now() -> OffsetDateTime {
     OffsetDateTime::from_unix_timestamp(1_590_969_600).expect("fixed timestamp should parse")
 }
 
-/// The shared default for driving the CLI in tests: an injected fixed clock
-/// (`fixed_now()`), not the ambient wall clock. Shadows the re-exported
-/// `cargo_barbican::run_cli_with_runner` (see the `pub(crate) use` above) so
-/// every existing call site gets a deterministic clock without editing each
-/// one; call sites that genuinely need real time opt in explicitly via
-/// [`run_cli_with_ambient_clock`].
+/// Drive the CLI against an injected fixed clock by default.
 pub(crate) fn run_cli_with_runner<C, R>(
     cli: Cli,
     current_dir: &Path,
@@ -1705,24 +1701,6 @@ where
         stdout,
         stderr,
     )
-}
-
-/// Explicit opt-in to the real wall clock, for the handful of tests (the
-/// loopback HTTP smoke tests) that assert on dates relative to whenever the
-/// test actually runs rather than an injected `now`.
-pub(crate) fn run_cli_with_ambient_clock<C, R>(
-    cli: Cli,
-    current_dir: &Path,
-    client: &C,
-    runner: &R,
-    stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
-) -> Result<ExitCode, cargo_barbican::CommandError>
-where
-    C: CratesIoClient + ?Sized,
-    R: CommandRunner + ?Sized,
-{
-    cargo_barbican::run_cli_with_runner(cli, current_dir, client, runner, stdout, stderr)
 }
 
 pub(crate) fn runner_exit(detail: String) -> cargo_barbican::RunnerError {
@@ -1753,7 +1731,7 @@ pub(crate) fn require_loopback_bind<T>(bound: Option<T>) -> Option<T> {
         panic!(
             "no loopback bind available for an HTTP smoke test; this drops the only \
              end-to-end HTTP coverage cargo-barbican has, so it fails loudly by default. \
-             Set {ALLOW_BIND_SKIP_ENV}=1 to allow a silent skip in a sandboxed environment \
+             Set {ALLOW_BIND_SKIP_ENV}=1 to allow an explicit skip in a sandboxed environment \
              that cannot bind a loopback socket."
         );
     }
@@ -1789,26 +1767,9 @@ pub(crate) fn spawn_http_stub_sequence(
         .collect::<Vec<_>>();
 
     let handle = thread::spawn(move || {
-        for (status_line, body) in responses {
-            let (mut stream, _) = listener.accept().expect("stub should accept one client");
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 1024];
-
-            loop {
-                let read = stream.read(&mut buffer).expect("stub request should read");
-                if read == 0 {
-                    break;
-                }
-
-                request.extend_from_slice(&buffer[..read]);
-                if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                    break;
-                }
-            }
-
-            sender
-                .send(String::from_utf8_lossy(&request).into_owned())
-                .expect("stub request should send");
+        for (request_number, (status_line, body)) in responses.into_iter().enumerate() {
+            let (mut stream, request) = accept_http_request(&listener, request_number + 1);
+            sender.send(request).expect("stub request should send");
 
             let header = format!(
                 "{status_line}\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
@@ -1847,28 +1808,10 @@ pub(crate) fn spawn_oversized_tarball_stub(
     let version_body = version_body.to_owned();
 
     let handle = thread::spawn(move || {
-        let read_one_request = |stream: &mut std::net::TcpStream| {
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 1024];
-            loop {
-                let read = stream.read(&mut buffer).expect("stub request should read");
-                if read == 0 {
-                    break;
-                }
-                request.extend_from_slice(&buffer[..read]);
-                if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                    break;
-                }
-            }
-            String::from_utf8_lossy(&request).into_owned()
-        };
-
-        let (mut stream, _) = listener
-            .accept()
-            .expect("stub should accept the version request");
+        let (mut stream, request) = accept_http_request(&listener, 1);
         sender
-            .send(read_one_request(&mut stream))
-            .expect("stub request should send");
+            .send(request)
+            .expect("stub version request should send");
         let header = format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
             version_body.len()
@@ -1880,12 +1823,10 @@ pub(crate) fn spawn_oversized_tarball_stub(
             .write_all(&version_body)
             .expect("stub version body should write");
 
-        let (mut stream, _) = listener
-            .accept()
-            .expect("stub should accept the tarball request");
+        let (mut stream, request) = accept_http_request(&listener, 2);
         sender
-            .send(read_one_request(&mut stream))
-            .expect("stub request should send");
+            .send(request)
+            .expect("stub tarball request should send");
         let header = format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {tarball_len}\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n"
         );
@@ -1901,14 +1842,75 @@ pub(crate) fn spawn_oversized_tarball_stub(
         let mut remaining = tarball_len;
         while remaining > 0 {
             let write_len = remaining.min(chunk.len());
-            if stream.write_all(&chunk[..write_len]).is_err() {
-                break;
+            match stream.write_all(&chunk[..write_len]) {
+                Ok(()) => remaining -= write_len,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+                    ) =>
+                {
+                    break;
+                }
+                Err(error) => panic!("stub tarball body should write: {error}"),
             }
-            remaining -= write_len;
         }
     });
 
     Some((format!("http://{address}"), receiver, handle))
+}
+
+fn accept_http_request(
+    listener: &TcpListener,
+    request_number: usize,
+) -> (std::net::TcpStream, String) {
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    listener
+        .set_nonblocking(true)
+        .expect("stub listener should be nonblocking");
+    let deadline = Instant::now() + TIMEOUT;
+    let mut stream = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                assert!(
+                    Instant::now() < deadline,
+                    "stub did not receive request {request_number}"
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("stub could not accept request {request_number}: {error}"),
+        }
+    };
+    stream
+        .set_nonblocking(false)
+        .expect("stub stream should be blocking");
+    stream
+        .set_read_timeout(Some(TIMEOUT))
+        .expect("stub stream should have a read timeout");
+    stream
+        .set_write_timeout(Some(TIMEOUT))
+        .expect("stub stream should have a write timeout");
+    let mut request = Vec::new();
+    let mut buffer = [0; 1024];
+    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+        let count = stream.read(&mut buffer).unwrap_or_else(|error| {
+            panic!("stub could not read request {request_number}: {error}")
+        });
+        assert!(
+            count > 0,
+            "stub request {request_number} closed before its headers"
+        );
+        request.extend_from_slice(&buffer[..count]);
+        assert!(
+            request.len() <= 16 * 1024,
+            "stub request {request_number} headers exceeded 16 KiB"
+        );
+    }
+    (
+        stream,
+        String::from_utf8(request).expect("stub should receive UTF-8 headers"),
+    )
 }
 
 pub(crate) fn run_inventory(temp_dir: &Path) -> (ExitCode, String, String) {

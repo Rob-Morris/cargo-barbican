@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-REPO_ROOT=$(git rev-parse --show-toplevel)
+REPO_ROOT=$(CDPATH= cd "$(dirname "$0")/../.." && pwd)
+. "$REPO_ROOT/scripts/tests/isolate_git_fixture.sh"
 SCRIPT="$REPO_ROOT/scripts/check_release_tag.sh"
 TEST_REPO=$(mktemp -d)
 OUT=$(mktemp)

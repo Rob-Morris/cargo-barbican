@@ -192,11 +192,22 @@ fn scanner_dispatch_bypasses_native_cargo_aliases() {
             child.env("CARGO_PKG_NAME", "outer-package");
             child.env("OUT_DIR", "/nested-output");
             child.env("BARBICAN_SCANNER_MODE", mode);
-            success(
+            let output = success(
                 child
-                    .args(["--exact", "scanner_runner_child", "--ignored"])
+                    .args([
+                        "--exact",
+                        "scanner_runner_child",
+                        "--ignored",
+                        "--nocapture",
+                    ])
                     .output()
                     .unwrap(),
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .any(|line| line == "scanner fixture completed"),
+                "{source}/{mode}: {output:?}"
             );
         }
         fixture.assert_unchanged();
@@ -206,6 +217,11 @@ fn scanner_dispatch_bypasses_native_cargo_aliases() {
 #[test]
 #[ignore = "isolated subprocess helper, called by scanner_dispatch_bypasses_native_cargo_aliases"]
 fn scanner_runner_child() {
+    exercise_scanner_runner();
+    eprintln!("scanner fixture completed");
+}
+
+fn exercise_scanner_runner() {
     let root = PathBuf::from(std::env::var_os("BARBICAN_SCANNER_FIXTURE").unwrap());
     let workspace = root.join("workspace");
     let scratch = root.join("scratch");

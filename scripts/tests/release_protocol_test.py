@@ -27,6 +27,10 @@ SOURCE = 'a' * 40
 RUN = '123/attempts/1'
 VERSION = '9.8.7'
 
+def fixture_git_env():
+    env = {name: value for name, value in os.environ.items() if not name.startswith('GIT_')}
+    return dict(env, GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1', GIT_TEMPLATE_DIR='')
+
 
 class NativeLinkageTests(unittest.TestCase):
     def test_linux_qualified_loader_and_dependencies(self):
@@ -236,14 +240,15 @@ class TagEventTests(unittest.TestCase):
             (root / 'docs/changelog').mkdir(parents=True)
             (root / 'docs/changelog/v9.8.7.md').write_text('**Summary** Fixture\n')
             (root / 'docs/CHANGELOG.md').write_text('| [v9.8.7](changelog/v9.8.7.md) | date | Fixture |\n')
+            git_env = fixture_git_env()
             def git(*args):
-                return subprocess.check_output(['git', '-C', temporary, *args], text=True).strip()
+                return subprocess.check_output(['git', *args], cwd=root, env=git_env, text=True).strip()
             git('init', '-b', 'main')
             git('add', '.')
             git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture')
             source = git('rev-parse', 'HEAD')
             git('update-ref', 'refs/remotes/origin/main', source)
-            env = dict(os.environ, GITHUB_REPOSITORY='Rob-Morris/cargo-barbican', GITHUB_REPOSITORY_ID='1276595321',
+            env = dict(git_env, GITHUB_REPOSITORY='Rob-Morris/cargo-barbican', GITHUB_REPOSITORY_ID='1276595321',
                        GITHUB_REPOSITORY_OWNER_ID='2587163', GITHUB_EVENT_NAME='push', GITHUB_REF_TYPE='tag',
                        GITHUB_REF_NAME='v9.8.7', GITHUB_REF_PROTECTED='true', GITHUB_SHA=source, GITHUB_OUTPUT='')
             candidate = subprocess.run(['sh', 'scripts/check-release-source.sh'], cwd=root, env=env,
@@ -322,11 +327,14 @@ class DocVersionTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(REPO / name, path)
             shutil.copytree(REPO / 'templates', root / 'templates')
-            subprocess.run(['git', 'init', '-q', temporary], check=True)
-            subprocess.run(['git', '-C', temporary, 'add', '.'], check=True)
+            git_env = fixture_git_env()
+            def git(*args):
+                subprocess.run(['git', *args], cwd=root, env=git_env, check=True)
+            git('init', '-q')
+            git('add', '.')
             def check(mode):
                 return subprocess.run(['sh', str(REPO / 'scripts/check_doc_versions.sh'), mode],
-                                      cwd=root, capture_output=True).returncode
+                                      cwd=root, env=git_env, capture_output=True).returncode
             self.assertEqual(check('--worktree'), 0)
             self.assertEqual(check('--staged'), 0)
             path = root / 'crates/cargo-barbican/src/commands/policy.rs'
@@ -338,12 +346,12 @@ class DocVersionTests(unittest.TestCase):
             self.assertNotEqual(original, changed)
             path.write_text(changed)
             self.assertNotEqual(check('--worktree'), 0)
-            subprocess.run(['git', '-C', temporary, 'add', '.'], check=True)
+            git('add', '.')
             self.assertNotEqual(check('--staged'), 0)
             path.write_text(original)
             self.assertEqual(check('--worktree'), 0)
             self.assertNotEqual(check('--staged'), 0)
-            subprocess.run(['git', '-C', temporary, 'add', '.'], check=True)
+            git('add', '.')
             path.write_text(original.replace('uses: Rob-Morris/cargo-barbican@fb138d380fd004be6fb1d93da5ceff2b540854cc',
                                              'uses: Rob-Morris/cargo-barbican@main', 1))
             self.assertNotEqual(check('--worktree'), 0)

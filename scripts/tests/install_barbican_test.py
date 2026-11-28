@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import signal
 import subprocess
@@ -238,14 +239,17 @@ sys.exit(subprocess.run([os.environ['TEST_JQ'], '-r', query, str(root/name)]).re
         self.assert_refused(self.run_installer([]), 2)
 
     def test_wrong_header_never_executes(self):
+        payload = f'#!/bin/sh\n: > {shlex.quote(str(self.marker))}\n'.encode()
         for name in NAMES[:2]:
-            (self.payloads / name).write_bytes(b'#!/bin/sh\necho untrusted\n')
-            value = hashlib.sha256((self.payloads / name).read_bytes()).hexdigest()
+            (self.payloads / name).write_bytes(payload)
+            value = hashlib.sha256(payload).hexdigest()
             for subject in self.release['verificationResult']['statement']['subject']:
                 if subject.get('name') == name:
                     subject['digest']['sha256'] = value
         self.write_proofs()
-        self.assert_refused(self.run_installer())
+        result = self.run_installer()
+        self.assert_refused(result)
+        self.assertIn('wrong native executable header', result.stderr)
 
     def test_existing_permissions_and_unknown_entries_refuse(self):
         result = self.run_installer()

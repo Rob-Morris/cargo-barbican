@@ -98,16 +98,22 @@ fn inspect_reports_tarball_exceeding_max_size_from_the_ureq_client() {
         String::from_utf8(stdout).expect("stdout should be utf8"),
         "note: release-age minimum overridden to 0 days via --min-age-days (configured 7)\n"
     );
-    requests
+    let version_request = requests
         .recv()
         .expect("stub server should capture the version request");
-    requests
+    assert!(version_request.contains("GET /api/v1/crates/sample/0.1.0 HTTP/1.1"));
+    let tarball_request = requests
         .recv()
         .expect("stub server should capture the tarball request");
+    assert!(tarball_request.contains("GET /api/v1/crates/sample/0.1.0/download HTTP/1.1"));
+    let diagnostic = String::from_utf8(stderr).expect("stderr should be utf8");
     assert!(
-        String::from_utf8(stderr)
-            .expect("stderr should be utf8")
-            .starts_with("FAIL sample@0.1.0: ")
+        diagnostic.starts_with("FAIL sample@0.1.0: "),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("crates.io response exceeds bounded source size"),
+        "{diagnostic}"
     );
 }
 

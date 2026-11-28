@@ -15,7 +15,7 @@ trap 'exit 143' TERM
 run_native_test() {
   if BARBICAN_TOOL_POLICY_NATIVE=1 BARBICAN_TOOL_APPLY_NATIVE=1 \
     cargo test --release --locked -p cargo-barbican --lib "$1" \
-    -- --exact --nocapture > "$tool_policy_log" 2>&1; then
+    -- --exact --ignored --nocapture > "$tool_policy_log" 2>&1; then
     cat "$tool_policy_log"
   else
     cat "$tool_policy_log" >&2

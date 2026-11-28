@@ -770,10 +770,12 @@ mod lifecycle {
     }
 
     #[test]
+    #[ignore = "requires real scanners; run sh scripts/verify-cargo-tools.sh"]
     fn native_application_owners_accept_install_check_admit_and_retain_failure_effects() {
-        if std::env::var("BARBICAN_TOOL_APPLY_NATIVE").as_deref() != Ok("1") {
-            return;
-        }
+        assert_eq!(
+            std::env::var("BARBICAN_TOOL_APPLY_NATIVE").as_deref(),
+            Ok("1")
+        );
         let mut journey = Journey::new();
         let guard_root = journey.ctx.current.join("evaluator-collision-control");
         fs::create_dir_all(guard_root.join("bin")).unwrap();

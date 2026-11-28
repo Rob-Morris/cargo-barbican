@@ -238,7 +238,7 @@ fn new_temporary_execution_roots_are_checked_before_graph_mutation() {
             .output()
             .unwrap();
         assert!(
-            output.status.success(),
+            output.status.success() && source.join("fixture-completed").is_file(),
             "{}\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
@@ -307,6 +307,7 @@ fn new_temporary_execution_roots_are_checked_before_graph_mutation() {
             0o640
         );
     }
+    fs::write(source.join("fixture-completed"), []).unwrap();
 }
 
 #[test]

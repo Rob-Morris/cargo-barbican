@@ -7,6 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[path = "support/git_environment.rs"]
+mod git_environment;
+
 const CHECKSUM: &str = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682";
 const OLD_CHECKSUM: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -65,13 +68,12 @@ impl Fixture {
     }
     fn command(&self, program: &str) -> Command {
         let mut command = Command::new(program);
+        git_environment::isolate(&mut command);
         command
             .current_dir(&self.root)
             .env("CARGO_NET_OFFLINE", "true")
             .env("CARGO_TARGET_DIR", self.root.join("target"))
-            .env("BARBICAN_REFRESH_SENTINEL", self.root.join("executed"))
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1");
+            .env("BARBICAN_REFRESH_SENTINEL", self.root.join("executed"));
         command
     }
     fn cli(&self, args: &[&str]) -> Output {

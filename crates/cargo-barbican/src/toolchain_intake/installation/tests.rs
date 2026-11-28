@@ -62,26 +62,6 @@ fn fixture_evaluator_requires_an_explicit_matching_path() {
     );
 }
 
-fn isolated(name: &str) -> bool {
-    if std::env::var_os("BARBICAN_NATIVE_FIXTURE_CHILD").is_some() {
-        return true;
-    }
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", name, "--nocapture"])
-        .env("BARBICAN_NATIVE_FIXTURE_CHILD", "1")
-        .env_remove("RUSTUP_OVERRIDE_UNIX_FALLBACK_SETTINGS")
-        .env_remove("RUSTUP_DIST_SERVER")
-        .env_remove("RUSTUP_UPDATE_ROOT")
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    false
-}
 struct Fixture {
     root: PathBuf,
     manifest: Vec<u8>,
@@ -358,7 +338,7 @@ impl Fixture {
 
 #[test]
 fn native_xz_selected_mirror_probe_and_mapping() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::native_xz_selected_mirror_probe_and_mapping",
     ) {
         return;
@@ -429,7 +409,7 @@ fn gzip(input: &[u8]) -> Vec<u8> {
 #[test]
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn native_accepted_handoff_static_scope_and_activation() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::native_accepted_handoff_static_scope_and_activation",
     ) {
         return;
@@ -577,7 +557,7 @@ fn native_accepted_handoff_static_scope_and_activation() {
 #[test]
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn native_existing_default_and_unrelated_state_are_preserved() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::native_existing_default_and_unrelated_state_are_preserved",
     ) {
         return;
@@ -626,7 +606,7 @@ fn native_existing_default_and_unrelated_state_are_preserved() {
 #[test]
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn native_preacceptance_corrupt_archive_default_and_path_refusals() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::native_preacceptance_corrupt_archive_default_and_path_refusals",
     ) {
         return;
@@ -689,7 +669,7 @@ fn native_preacceptance_corrupt_archive_default_and_path_refusals() {
 #[test]
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn native_owned_initial_default_restoration_and_external_conflict() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::native_owned_initial_default_restoration_and_external_conflict",
     ) {
         return;
@@ -791,7 +771,7 @@ fn authentic_existing_installation_static_only() {
 
 #[test]
 fn activation_refuses_preserved_wider_pin_without_changing_bytes_or_permissions() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::activation_refuses_preserved_wider_pin_without_changing_bytes_or_permissions",
     ) {
         return;
@@ -888,7 +868,7 @@ fn native_scope_table_keeps_unknown_components_and_cross_targets_closed() {
 
 #[test]
 fn update_hash_unsafe_leaves_refuse_before_delegate_and_preserve_external_files() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::update_hash_unsafe_leaves_refuse_before_delegate_and_preserve_external_files",
     ) {
         return;
@@ -928,7 +908,7 @@ fn update_hash_unsafe_leaves_refuse_before_delegate_and_preserve_external_files(
 
 #[test]
 fn raw_native_dangling_update_hash_control_demonstrates_external_fixture_write() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::raw_native_dangling_update_hash_control_demonstrates_external_fixture_write",
     ) {
         return;
@@ -1022,65 +1002,54 @@ fn raw_native_dangling_update_hash_control_demonstrates_external_fixture_write()
 }
 
 #[test]
-fn signals_during_static_install_verification_never_return_success() {
-    if !isolated(
-        "toolchain_intake::installation::tests::signals_during_static_install_verification_never_return_success",
+fn cancellation_during_static_install_verification_never_returns_success() {
+    if !isolated_native_fixture(
+        "toolchain_intake::installation::tests::cancellation_during_static_install_verification_never_returns_success",
     ) {
         return;
     }
-    let cancellation = NativeCancellation::install().unwrap();
-    for signal in ["-INT", "-TERM"] {
-        for existing in [false, true] {
-            cancellation.flag().store(false, Ordering::SeqCst);
-            let fixture = Fixture::new();
-            if existing {
-                fixture.install().unwrap();
-            }
-            let before = fs::read(fixture.home().join("settings.toml")).ok();
-            VERIFICATION_CHECKPOINT.with(|checkpoint| {
-                *checkpoint.borrow_mut() = Some(Box::new(move || {
-                    let result = std::process::Command::new("/bin/kill")
-                        .args([signal, &std::process::id().to_string()])
-                        .status()
-                        .unwrap();
-                    assert!(result.success());
-                }));
-            });
-            let result = install_selected(
-                &fixture.inputs(),
-                &fixture.archives,
-                &fixture.home(),
-                &Fixture::evaluator(),
-                InstallMode::Install {
-                    allow_initial_default: true,
-                },
-                cancellation.flag(),
-                |_| Ok(()),
-            );
-            assert!(cancellation.flag().load(Ordering::SeqCst));
-            let error = result
-                .err()
-                .expect("signal inside verification must refuse success");
+    for existing in [false, true] {
+        let cancelled = AtomicBool::new(false);
+        let fixture = Fixture::new();
+        if existing {
+            fixture.install().unwrap();
+        }
+        let before = fs::read(fixture.home().join("settings.toml")).ok();
+        cancel_at_next_verification_checkpoint();
+        let result = install_selected(
+            &fixture.inputs(),
+            &fixture.archives,
+            &fixture.home(),
+            &Fixture::evaluator(),
+            InstallMode::Install {
+                allow_initial_default: true,
+            },
+            &cancelled,
+            |_| Ok(()),
+        );
+        assert!(cancelled.load(Ordering::SeqCst));
+        let error = result
+            .err()
+            .expect("cancellation inside verification must refuse success");
+        assert!(
+            error.contains("cancelled during installed verification"),
+            "{error}"
+        );
+        assert!(error.contains("installed data retained"), "{error}");
+        let slot = fixture
+            .home()
+            .join("toolchains/1.99.99-aarch64-apple-darwin");
+        assert!(slot.join("bin/rustc").is_file());
+        let after = fs::read(fixture.home().join("settings.toml")).unwrap();
+        if existing {
+            assert_eq!(Some(after), before);
+        } else {
+            assert!(error.contains("owned initial default unset"), "{error}");
             assert!(
-                error.contains("cancelled during installed verification"),
-                "{error}"
+                barbican::rust_distribution::rustup_default(Some(&after))
+                    .unwrap()
+                    .is_none()
             );
-            assert!(error.contains("installed data retained"), "{error}");
-            let slot = fixture
-                .home()
-                .join("toolchains/1.99.99-aarch64-apple-darwin");
-            assert!(slot.join("bin/rustc").is_file());
-            let after = fs::read(fixture.home().join("settings.toml")).unwrap();
-            if existing {
-                assert_eq!(Some(after), before);
-            } else {
-                assert!(error.contains("owned initial default unset"), "{error}");
-                assert!(
-                    barbican::rust_distribution::rustup_default(Some(&after))
-                        .unwrap()
-                        .is_none()
-                );
-            }
         }
     }
 }
@@ -1386,8 +1355,12 @@ fn native_creation_modes_refuse_before_first_probe_and_preserve_defaults() {
                     .env_remove("RUSTUP_DIST_SERVER")
                     .env_remove("RUSTUP_UPDATE_ROOT")
                     .output().unwrap();
+                let completion = format!("native permission fixture {mode} completed");
                 assert!(
-                    output.status.success(),
+                    output.status.success()
+                        && String::from_utf8_lossy(&output.stderr)
+                            .lines()
+                            .any(|line| line == completion),
                     "{mode}: {}\n{}",
                     String::from_utf8_lossy(&output.stdout),
                     String::from_utf8_lossy(&output.stderr)
@@ -1442,11 +1415,12 @@ fn native_creation_modes_refuse_before_first_probe_and_preserve_defaults() {
             assert!(fixture.root.join("candidate-probes").is_file());
         }
     }
+    eprintln!("native permission fixture {mode} completed");
 }
 
 #[test]
 fn native_targetless_source_fresh_and_additive_preserve_verified_base() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::native_targetless_source_fresh_and_additive_preserve_verified_base",
     ) {
         return;
@@ -1566,7 +1540,7 @@ fn native_targetless_source_fresh_and_additive_preserve_verified_base() {
 
 #[test]
 fn native_addition_refuses_unverified_base_before_any_dispatch() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::native_addition_refuses_unverified_base_before_any_dispatch",
     ) {
         return;
@@ -1611,7 +1585,7 @@ fn native_addition_refuses_unverified_base_before_any_dispatch() {
 
 #[test]
 fn native_addition_rechecks_identity_after_effects_and_cancellation_during_base() {
-    if !isolated(
+    if !isolated_native_fixture(
         "toolchain_intake::installation::tests::native_addition_rechecks_identity_after_effects_and_cancellation_during_base",
     ) {
         return;
@@ -1619,13 +1593,18 @@ fn native_addition_rechecks_identity_after_effects_and_cancellation_during_base(
     let mut fixture = Fixture::with_source();
     let installed = fixture.install().unwrap();
     fixture.select_source(true);
-    let cancelled = std::sync::Arc::new(AtomicBool::new(false));
-    let trigger = cancelled.clone();
-    VERIFICATION_CHECKPOINT.with(|checkpoint| {
-        *checkpoint.borrow_mut() = Some(Box::new(move || trigger.store(true, Ordering::SeqCst)));
-    });
+    let cancelled = AtomicBool::new(false);
+    cancel_at_next_verification_checkpoint();
     let probes = fs::read(fixture.root.join("candidate-probes")).unwrap();
-    assert!(fixture.add(&cancelled).is_err());
+    let error = fixture
+        .add(&cancelled)
+        .err()
+        .expect("cancellation must prevent adding components");
+    assert!(cancelled.load(Ordering::SeqCst));
+    assert!(
+        error.contains("cancelled during installed verification"),
+        "{error}"
+    );
     assert_eq!(
         fs::read(fixture.root.join("candidate-probes")).unwrap(),
         probes

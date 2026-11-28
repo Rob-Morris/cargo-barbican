@@ -1,105 +1,67 @@
 #!/bin/sh
-# Behaviour tests for the escape-hatch branch guard in scripts/verify.sh.
-#
-# The guard is what stands between a contributor on `main` and the
-# `--vanilla`/`--skip` escape hatches, so a regression here is a fail-open
-# bug: it would let main's stricter checks be bypassed. VERIFY_BRANCH_OVERRIDE
-# exists precisely so this suite can drive the real script deterministically,
-# without depending on which branch happens to be checked out.
-#
-# This script is itself driven by scripts/verify.sh (see the guard there
-# around VERIFY_BRANCH_GUARD_TEST_RUNNING), so every nested invocation of
-# verify.sh below exports that sentinel to stop the nested run from trying to
-# re-enter this suite and recursing.
+# Exercise the real branch guard and observe which verification commands it dispatches.
 set -eu
 
-REPO_ROOT=$(git rev-parse --show-toplevel)
-SCRIPT="$REPO_ROOT/scripts/verify.sh"
+REPO_ROOT=$(CDPATH= cd "$(dirname "$0")/../.." && pwd)
+. "$REPO_ROOT/scripts/tests/isolate_git_fixture.sh"
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+mkdir "$WORK/bin"
 
-STUB_BIN=$(mktemp -d)
-OUT=$(mktemp)
-ERR=$(mktemp)
-trap 'rm -rf "$STUB_BIN" "$OUT" "$ERR"' EXIT
-
-# Stands in for `cargo` on the off-main `--vanilla` case below, so that case
-# exercises the real branch-guard-then-proceed control flow without paying
-# for a real `cargo audit`/`cargo deny check`/`cargo build`/`cargo test`.
-cat >"$STUB_BIN/cargo" <<'STUB'
+for tool in sh python3 cargo; do
+  cat >"$WORK/bin/$tool" <<'STUB'
 #!/bin/sh
-exit 0
+printf '%s %s\n' "$(basename "$0")" "$*" >> "$BARBICAN_VERIFY_CALLS"
 STUB
-chmod +x "$STUB_BIN/cargo"
+  chmod +x "$WORK/bin/$tool"
+done
 
-PASS=0
-FAIL=0
-
-run_with_override() { # $1=branch  (remaining args passed to verify.sh)
+run_with_override() {
   branch=$1
   shift
+  : > "$WORK/calls"
   (
     cd "$REPO_ROOT"
-    VERIFY_BRANCH_OVERRIDE=$branch
-    VERIFY_BRANCH_GUARD_TEST_RUNNING=1
-    export VERIFY_BRANCH_OVERRIDE VERIFY_BRANCH_GUARD_TEST_RUNNING
-    sh "$SCRIPT" "$@"
-  )
+    PATH="$WORK/bin:$PATH" BARBICAN_VERIFY_CALLS="$WORK/calls" VERIFY_BRANCH_OVERRIDE="$branch" \
+      /bin/sh "$REPO_ROOT/scripts/verify.sh" "$@"
+  ) >"$WORK/out" 2>"$WORK/err"
 }
 
-expect_rejected_before_running_anything() { # $1=description  $2=branch  (remaining args)
-  description=$1
-  branch=$2
-  shift 2
-  if run_with_override "$branch" "$@" >"$OUT" 2>"$ERR"; then
-    FAIL=$((FAIL + 1))
-    printf 'FAIL - %s (expected nonzero exit)\n' "$description"
-    return
+rejects_before_dispatch() {
+  if run_with_override "$@"; then
+    printf >&2 'FAIL: expected refusal for %s on branch %s\n' "$2" "$1"
+    exit 1
   fi
-  if [ -s "$OUT" ]; then
-    FAIL=$((FAIL + 1))
-    printf 'FAIL - %s (expected no stdout before the guard fires)\n' "$description"
-    return
-  fi
-  if ! grep -q "allowed only on a known non-main branch" "$ERR"; then
-    FAIL=$((FAIL + 1))
-    printf 'FAIL - %s (expected the branch-guard message on stderr)\n' "$description"
-    return
-  fi
-  PASS=$((PASS + 1))
-  printf 'ok   - %s\n' "$description"
+  grep -q 'allowed only on a known non-main branch' "$WORK/err"
+  test ! -s "$WORK/out"
+  test ! -s "$WORK/calls"
+  printf 'ok - %s refuses before dispatch on branch %s\n' "$2" "$1"
 }
 
-expect_proceeds() { # $1=description  $2=branch  (remaining args)
-  description=$1
-  branch=$2
-  shift 2
-  if run_with_override "$branch" "$@" >"$OUT" 2>"$ERR"; then
-    if grep -q "allowed only on a known non-main branch" "$ERR"; then
-      FAIL=$((FAIL + 1))
-      printf 'FAIL - %s (branch guard fired but should not have)\n' "$description"
-    else
-      PASS=$((PASS + 1))
-      printf 'ok   - %s\n' "$description"
-    fi
-  else
-    FAIL=$((FAIL + 1))
-    printf 'FAIL - %s (expected exit 0)\n' "$description"
-  fi
-}
+rejects_before_dispatch main --skip reason
+rejects_before_dispatch main --vanilla
+rejects_before_dispatch '' --skip reason
+rejects_before_dispatch '' --vanilla
 
-# --- On main, both escape hatches are rejected before anything else runs ----
+run_with_override feature --skip reason
+grep -q 'skipped on feature: reason' "$WORK/out"
+test ! -s "$WORK/calls"
+printf '%s\n' 'ok - off-main skip dispatches no verification commands'
 
-expect_rejected_before_running_anything \
-  "--skip on main is rejected before running anything" main --skip "reason"
-expect_rejected_before_running_anything \
-  "--vanilla on main is rejected before running anything" main --vanilla
-
-# --- Off main, both escape hatches proceed -----------------------------------
-
-expect_proceeds "--skip off main proceeds" a-feature-branch --skip "reason"
-
-PATH="$STUB_BIN:$PATH"
-export PATH
-expect_proceeds "--vanilla off main proceeds (expensive phase stubbed)" a-feature-branch --vanilla
-
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+run_with_override feature --vanilla
+cat >"$WORK/expected" <<'EXPECTED'
+sh scripts/check_vendored_source.sh
+sh scripts/tests/check_vendored_source_test.sh
+sh scripts/tests/check_commit_msg_test.sh
+sh scripts/tests/check_release_tag_test.sh
+python3 -B scripts/tests/install_barbican_test.py
+python3 -B scripts/tests/release_protocol_test.py
+sh scripts/tests/verify_branch_guard_test.sh
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo audit
+cargo deny check advisories bans sources
+cargo build --locked
+cargo test --locked
+EXPECTED
+diff -u "$WORK/expected" "$WORK/calls"
+printf '%s\n' 'ok - off-main vanilla dispatches verification once in order'

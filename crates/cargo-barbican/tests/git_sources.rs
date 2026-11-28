@@ -3,6 +3,9 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[path = "support/git_environment.rs"]
+mod git_environment;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 const URL: &str = "https://example.invalid/barbican-fixture.git";
 
@@ -22,14 +25,16 @@ impl Drop for Fixture {
 impl Fixture {
     fn command(&self, program: &str) -> Command {
         let mut command = Command::new(program);
+        git_environment::isolate(&mut command);
         command
             .current_dir(&self.consumer)
             .env("CARGO_HOME", self.root.join("cargo-home"))
             .env("CARGO_TARGET_DIR", self.root.join("target"))
+            // Cargo must fetch the authored local Git fixture through the URL rewrite.
+            .env("CARGO_NET_OFFLINE", "false")
             .env("CARGO_NET_GIT_FETCH_WITH_CLI", "true")
             .env("CARGO_NET_RETRY", "0")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_ALLOW_PROTOCOL", "file")
             .env("GIT_CONFIG_COUNT", "2")
             .env(
                 "GIT_CONFIG_KEY_0",
@@ -104,30 +109,24 @@ impl Fixture {
                 "harmless fixture",
             ],
         ] {
-            let output = Command::new("git")
-                .current_dir(&upstream)
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_CONFIG_NOSYSTEM", "1")
-                .args(args)
-                .output()
-                .unwrap();
+            let mut git = Command::new("git");
+            git_environment::isolate(&mut git);
+            let output = git.current_dir(&upstream).args(args).output().unwrap();
             assert!(
                 output.status.success(),
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let rev = String::from_utf8(
-            Command::new("git")
-                .current_dir(&upstream)
-                .args(["rev-parse", "HEAD"])
-                .output()
-                .unwrap()
-                .stdout,
-        )
-        .unwrap()
-        .trim()
-        .to_owned();
+        let mut git = Command::new("git");
+        git_environment::isolate(&mut git);
+        let head = git
+            .current_dir(&upstream)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(head.status.success(), "{head:?}");
+        let rev = String::from_utf8(head.stdout).unwrap().trim().to_owned();
         fs::create_dir_all(consumer.join("src")).unwrap();
         fs::write(consumer.join("src/lib.rs"), "pub fn consumer() {}\n").unwrap();
         fs::write(consumer.join("Cargo.toml"), format!("[package]\nname=\"consumer\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[dependencies]\nalias={{package=\"wrapper\",git=\"{URL}\",rev=\"{rev}\"}}\n")).unwrap();
@@ -294,10 +293,13 @@ fn source_credentials_never_appear_in_policy_errors() {
     let fixture = Fixture::new();
     let policy = "[[rust.families]]\nname=\"bad\"\nreview_record=\"docs/review.md\"\n[rust.families.resolved]\nwrapper={source=\"git\",version=\"0.1.0\",url=\"https://user:SECRET@example.org/repo\",rev=\"broken\", oops\n";
     fs::write(fixture.consumer.join("reviewed-targets.toml"), policy).unwrap();
-    let output = fixture.cli(&["pin", "check"]);
-    assert!(!output.status.success());
-    assert!(!String::from_utf8_lossy(&output.stderr).contains("SECRET"));
-    let output = fixture.cli(&["inspect", "https://user:SECRET@example.org/repo"]);
-    assert!(!output.status.success());
-    assert!(!String::from_utf8_lossy(&output.stderr).contains("SECRET"));
+    for args in [
+        ["pin", "check"],
+        ["inspect", "https://user:SECRET@example.org/repo"],
+    ] {
+        let output = fixture.cli(&args);
+        assert!(!output.status.success());
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("SECRET"));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("SECRET"));
+    }
 }

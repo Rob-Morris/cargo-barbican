@@ -34,10 +34,43 @@ impl std::io::Read for VerificationReader<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
 thread_local! {
-    pub(super) static VERIFICATION_CHECKPOINT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
-        std::cell::RefCell::new(None);
+    static CANCEL_AT_VERIFICATION_CHECKPOINT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
+pub(super) fn cancel_at_next_verification_checkpoint() {
+    CANCEL_AT_VERIFICATION_CHECKPOINT.set(true);
+}
+
+#[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
+pub(super) fn isolated_native_fixture(name: &str) -> bool {
+    const CHILD: &str = "BARBICAN_NATIVE_FIXTURE_CHILD";
+    const STARTED: &str = "native fixture started: ";
+    if std::env::var_os(CHILD).is_some() {
+        eprintln!("{STARTED}{name}");
+        return true;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--nocapture"])
+        .env(CHILD, "1")
+        .env_remove("RUSTUP_OVERRIDE_UNIX_FALLBACK_SETTINGS")
+        .env_remove("RUSTUP_DIST_SERVER")
+        .env_remove("RUSTUP_UPDATE_ROOT")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // An unmatched libtest filter exits successfully after running zero tests.
+    assert!(
+        output.status.success()
+            && stderr
+                .lines()
+                .any(|line| line.strip_prefix(STARTED) == Some(name)),
+        "native fixture {name} did not complete successfully\n{}\n{stderr}",
+        String::from_utf8_lossy(&output.stdout),
+    );
+    false
 }
 
 pub(super) const QUALIFIED_RUSTUP_SHA256: &str =
@@ -316,10 +349,10 @@ impl<'a> ExpectedInstallation<'a> {
                             {
                                 return Err("installed file changed while opening".into());
                             }
-                            #[cfg(test)]
-                            VERIFICATION_CHECKPOINT.with(|checkpoint| {
-                                if let Some(checkpoint) = checkpoint.borrow_mut().take() {
-                                    checkpoint();
+                            #[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
+                            CANCEL_AT_VERIFICATION_CHECKPOINT.with(|requested| {
+                                if requested.replace(false) {
+                                    cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
                                 }
                             });
                             let (actual, count) =

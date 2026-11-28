@@ -463,10 +463,12 @@ fn native_output(ctx: &Context, prepared: &PreparedSource, scanner: &str) -> Com
 }
 
 #[test]
+#[ignore = "requires real scanners; run sh scripts/verify-cargo-tools.sh"]
 fn native_policy_matrix_preserves_sources_closure_advisories_and_refuses_bad_coverage() {
-    if std::env::var("BARBICAN_TOOL_POLICY_NATIVE").as_deref() != Ok("1") {
-        return;
-    }
+    assert_eq!(
+        std::env::var("BARBICAN_TOOL_POLICY_NATIVE").as_deref(),
+        Ok("1")
+    );
     eprintln!("{QUALIFICATION}");
     let stage = source::Stage::new().unwrap();
     let mut ctx = context(&stage);
